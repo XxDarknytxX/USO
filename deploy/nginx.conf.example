@@ -1,0 +1,74 @@
+# =====================================================================
+# Nginx vhost for the USO Portal.
+#
+# Place at: /etc/nginx/sites-available/uso-portal
+# Symlink:  sudo ln -s /etc/nginx/sites-available/uso-portal /etc/nginx/sites-enabled/
+# Test:     sudo nginx -t
+# Reload:   sudo systemctl reload nginx
+#
+# Then run certbot to add SSL:
+#   sudo certbot --nginx -d portal.example.com
+# Certbot will rewrite this file to add the 443 server block and redirect.
+#
+# IMPORTANT: replace `portal.example.com` and `/var/www/uso-portal` below.
+# =====================================================================
+
+# Upstream — Node backend listening on 127.0.0.1:5000 (PM2-managed)
+upstream uso_backend {
+    server 127.0.0.1:5000;
+    keepalive 32;
+}
+
+server {
+    listen 80;
+    listen [::]:80;
+    server_name portal.example.com;
+
+    # Root = built frontend (frontend/build) — adjust path to where you cloned the repo
+    root /var/www/uso-portal/frontend/build;
+    index index.html;
+
+    # Real client IP for the backend (paired with TRUST_PROXY=1 in backend/.env)
+    set_real_ip_from 127.0.0.1;
+    real_ip_header X-Forwarded-For;
+
+    # Reasonable upload + timeout limits for M-PAiSA callbacks
+    client_max_body_size 2m;
+
+    # Static assets — long cache, hashed by Vite
+    location /assets/ {
+        access_log off;
+        expires 30d;
+        add_header Cache-Control "public, immutable";
+        try_files $uri =404;
+    }
+
+    # API + payment callbacks → Node backend
+    # Both `/api/*` and `/payment/*` routes are mounted in backend/routes/index.js
+    location ~ ^/(api|payment)/ {
+        proxy_pass         http://uso_backend;
+        proxy_http_version 1.1;
+        proxy_set_header   Host              $host;
+        proxy_set_header   X-Real-IP         $remote_addr;
+        proxy_set_header   X-Forwarded-For   $proxy_add_x_forwarded_for;
+        proxy_set_header   X-Forwarded-Proto $scheme;
+        proxy_set_header   Connection        "";
+        proxy_read_timeout 60s;
+        proxy_send_timeout 60s;
+    }
+
+    # SPA fallback — React Router handles all other routes client-side
+    location / {
+        try_files $uri $uri/ /index.html;
+    }
+
+    # Don't log favicon/robots
+    location = /favicon.ico { access_log off; log_not_found off; }
+    location = /robots.txt  { access_log off; log_not_found off; }
+
+    # Gzip text responses
+    gzip on;
+    gzip_vary on;
+    gzip_min_length 1024;
+    gzip_types text/plain text/css application/json application/javascript text/javascript application/xml+rss image/svg+xml;
+}
