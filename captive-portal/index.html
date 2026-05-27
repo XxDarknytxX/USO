@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Redirecting...</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
+    <meta http-equiv="Pragma" content="no-cache" />
+    <meta http-equiv="Expires" content="0" />
+    <script>
+      (function () {
+        // Vodafone portal base URL (dev tunnel)
+        const newBaseUrl = 'https://PORTAL_HOSTNAME_HERE/';
+
+        // Read sessionId and clientMac from current query string
+        // Ruijie passes: ?sessionId=...&clientMac=XX:XX:XX:XX:XX:XX&...
+        const urlParams = new URLSearchParams(window.location.search);
+        const sessionId = urlParams.get('sessionId');
+        const clientMac = urlParams.get('clientMac') || urlParams.get('usermac') || urlParams.get('mac');
+
+        // Build destination URL, forwarding both sessionId and clientMac
+        let newUrl = newBaseUrl;
+        const destParams = new URLSearchParams();
+        if (sessionId) destParams.set('sessionId', sessionId);
+        if (clientMac) destParams.set('clientMac', clientMac);
+        if (destParams.toString()) {
+          newUrl += (newBaseUrl.includes('?') ? '&' : '?') + destParams.toString();
+        }
+
+        // Redirect immediately
+        window.location.replace(newUrl);
+
+        // Save for fallback link
+        window.__fallbackRedirectUrl = newUrl;
+      })();
+    </script>
+    <style>
+      body {
+        font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, "Noto Sans", sans-serif;
+        margin: 0;
+        display: grid;
+        place-items: center;
+        min-height: 100vh;
+      }
+      .wrap { text-align: center; padding: 24px; }
+      a { text-decoration: none; color: #e60000; }
+      .muted { color: #666; font-size: 14px; margin-top: 8px; }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <h1>Page is redirecting...</h1>
+      <p>If the page does not redirect automatically, please click here: 
+        <a id="fallbackLink" href="#">Click Here</a>
+      </p>
+      <p class="muted">If the page doesn’t redirect automatically, use the link above.</p>
+    </div>
+    <script>
+      // Set the fallback link after redirect logic
+      document.getElementById('fallbackLink').href =
+        window.__fallbackRedirectUrl || 'https://PORTAL_HOSTNAME_HERE/';
+    </script>
+    <noscript>
+      <div class="wrap">
+        <p>This page requires JavaScript to redirect. Please click the link below:</p>
+        <p><a href="https://PORTAL_HOSTNAME_HERE/">Go to Vodafone Portal</a></p>
+      </div>
+    </noscript>
+  </body>
+</html>

@@ -1,45 +1,71 @@
 #!/usr/bin/env bash
 # =====================================================================
-# Build + (re)start the USO Portal app on the server.
+# Build + (re)start both apps under PM2.
 #
-# Assumptions:
-#   - You've already cloned the repo to the server.
-#   - You've copied backend/.env.example -> backend/.env and filled it in.
+# Prerequisites:
 #   - setup-server.sh + init-mysql.sh have been run.
-#   - You run this from the project root as the deploy user (NOT root).
+#   - uso-portal/backend/.env       exists (from .env.example)
+#   - voucher-validation/backend/.env exists (from .env.example)
+#   - Repo cloned and you're running this from the project root as the
+#     deploy user (NOT root).
 #
 # Usage:
 #   bash deploy/deploy-app.sh
+#   bash deploy/deploy-app.sh uso         # only USO Portal
+#   bash deploy/deploy-app.sh vv          # only Voucher Validation
 # =====================================================================
 set -euo pipefail
 
 log() { echo -e "\n\033[1;34m==>\033[0m $*"; }
+die() { echo -e "\033[1;31mERROR:\033[0m $*" >&2; exit 1; }
 
 PROJECT_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$PROJECT_ROOT"
+mkdir -p logs
 
-if [[ ! -f backend/.env ]]; then
-  echo "ERROR: backend/.env not found. Copy backend/.env.example to backend/.env and fill it in first." >&2
-  exit 1
-fi
+TARGET="${1:-all}"
 
-log "Installing backend dependencies (production only)"
-( cd backend && npm ci --omit=dev )
+build_uso() {
+  [[ -f uso-portal/backend/.env ]] || die "uso-portal/backend/.env missing — copy from .env.example"
 
-log "Installing frontend dependencies"
-( cd frontend && npm ci )
+  log "USO Portal: installing backend deps"
+  ( cd uso-portal/backend && npm ci --omit=dev )
 
-log "Building frontend (outputs to frontend/build)"
-( cd frontend && npm run build )
+  log "USO Portal: installing frontend deps"
+  ( cd uso-portal/frontend && npm ci )
 
-log "Starting/reloading backend via PM2"
-if pm2 describe uso-portal >/dev/null 2>&1; then
+  log "USO Portal: building frontend → uso-portal/frontend/build"
+  ( cd uso-portal/frontend && npm run build )
+}
+
+build_vv() {
+  [[ -f voucher-validation/backend/.env ]] || die "voucher-validation/backend/.env missing — copy from .env.example"
+
+  log "VV: installing backend deps"
+  ( cd voucher-validation/backend && npm ci --omit=dev )
+
+  log "VV: installing frontend deps"
+  ( cd voucher-validation/frontend && npm ci )
+
+  log "VV: building frontend → voucher-validation/frontend/build"
+  ( cd voucher-validation/frontend && npm run build )
+}
+
+case "$TARGET" in
+  uso) build_uso ;;
+  vv)  build_vv ;;
+  all) build_uso; build_vv ;;
+  *)   die "Unknown target '$TARGET' — use: uso | vv | all" ;;
+esac
+
+log "Starting/reloading PM2 apps"
+if pm2 jlist 2>/dev/null | grep -q '"name":"uso-portal"\|"name":"voucher-validation"'; then
   pm2 reload deploy/ecosystem.config.cjs --update-env
 else
   pm2 start deploy/ecosystem.config.cjs
 fi
 
-log "Persisting PM2 process list (survives reboot)"
+log "Persisting PM2 process list"
 pm2 save
 
 log "Deploy complete."

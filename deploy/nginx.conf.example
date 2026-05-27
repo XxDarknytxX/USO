@@ -1,41 +1,54 @@
 # =====================================================================
-# Nginx vhost for the USO Portal.
+# Nginx vhosts for the USO stack.
 #
-# Place at: /etc/nginx/sites-available/uso-portal
-# Symlink:  sudo ln -s /etc/nginx/sites-available/uso-portal /etc/nginx/sites-enabled/
+# Two hostnames:
+#   - portal.example.com  → public captive-portal payment app
+#                           (USO Portal frontend + /api/* to :5000)
+#   - admin.example.com   → internal admin dashboard
+#                           (VV frontend + /api/* to :4001)
+#
+# Place at: /etc/nginx/sites-available/uso-stack
+# Symlink:  sudo ln -s /etc/nginx/sites-available/uso-stack /etc/nginx/sites-enabled/
 # Test:     sudo nginx -t
 # Reload:   sudo systemctl reload nginx
 #
-# Then run certbot to add SSL:
-#   sudo certbot --nginx -d portal.example.com
-# Certbot will rewrite this file to add the 443 server block and redirect.
+# SSL:
+#   sudo certbot --nginx -d portal.example.com -d admin.example.com
+# Certbot will add 443 server blocks and HTTP→HTTPS redirects in place.
 #
-# IMPORTANT: replace `portal.example.com` and `/var/www/uso-portal` below.
+# IMPORTANT — replace these tokens before enabling:
+#   portal.example.com    → your public portal hostname
+#   admin.example.com     → your admin hostname (can be the same domain
+#                           on a different subdomain, or use a different
+#                           port if you don't want a second DNS record)
+#   /var/www/uso-portal   → wherever you cloned the repo
 # =====================================================================
 
-# Upstream — Node backend listening on 127.0.0.1:5000 (PM2-managed)
 upstream uso_backend {
     server 127.0.0.1:5000;
     keepalive 32;
 }
 
+upstream vv_backend {
+    server 127.0.0.1:4001;
+    keepalive 32;
+}
+
+# =====================================================================
+# Public Portal — portal.example.com
+# =====================================================================
 server {
     listen 80;
     listen [::]:80;
     server_name portal.example.com;
 
-    # Root = built frontend (frontend/build) — adjust path to where you cloned the repo
-    root /var/www/uso-portal/frontend/build;
+    root /var/www/uso-portal/uso-portal/frontend/build;
     index index.html;
 
-    # Real client IP for the backend (paired with TRUST_PROXY=1 in backend/.env)
     set_real_ip_from 127.0.0.1;
     real_ip_header X-Forwarded-For;
-
-    # Reasonable upload + timeout limits for M-PAiSA callbacks
     client_max_body_size 2m;
 
-    # Static assets — long cache, hashed by Vite
     location /assets/ {
         access_log off;
         expires 30d;
@@ -43,8 +56,6 @@ server {
         try_files $uri =404;
     }
 
-    # API + payment callbacks → Node backend
-    # Both `/api/*` and `/payment/*` routes are mounted in backend/routes/index.js
     location ~ ^/(api|payment)/ {
         proxy_pass         http://uso_backend;
         proxy_http_version 1.1;
@@ -57,16 +68,63 @@ server {
         proxy_send_timeout 60s;
     }
 
-    # SPA fallback — React Router handles all other routes client-side
     location / {
         try_files $uri $uri/ /index.html;
     }
 
-    # Don't log favicon/robots
     location = /favicon.ico { access_log off; log_not_found off; }
     location = /robots.txt  { access_log off; log_not_found off; }
 
-    # Gzip text responses
+    gzip on;
+    gzip_vary on;
+    gzip_min_length 1024;
+    gzip_types text/plain text/css application/json application/javascript text/javascript application/xml+rss image/svg+xml;
+}
+
+# =====================================================================
+# Admin Dashboard — admin.example.com
+# Restrict by IP / VPN / basic auth in production (this app handles
+# voucher management and user creation).
+# =====================================================================
+server {
+    listen 80;
+    listen [::]:80;
+    server_name admin.example.com;
+
+    root /var/www/uso-portal/voucher-validation/frontend/build;
+    index index.html;
+
+    set_real_ip_from 127.0.0.1;
+    real_ip_header X-Forwarded-For;
+    client_max_body_size 5m;
+
+    # OPTIONAL — uncomment + edit to allowlist your office/VPN IPs only.
+    # allow 203.0.113.0/24;
+    # deny all;
+
+    location /assets/ {
+        access_log off;
+        expires 30d;
+        add_header Cache-Control "public, immutable";
+        try_files $uri =404;
+    }
+
+    location /api/ {
+        proxy_pass         http://vv_backend;
+        proxy_http_version 1.1;
+        proxy_set_header   Host              $host;
+        proxy_set_header   X-Real-IP         $remote_addr;
+        proxy_set_header   X-Forwarded-For   $proxy_add_x_forwarded_for;
+        proxy_set_header   X-Forwarded-Proto $scheme;
+        proxy_set_header   Connection        "";
+        proxy_read_timeout 60s;
+        proxy_send_timeout 60s;
+    }
+
+    location / {
+        try_files $uri $uri/ /index.html;
+    }
+
     gzip on;
     gzip_vary on;
     gzip_min_length 1024;

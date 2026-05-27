@@ -1,0 +1,20 @@
+loadConfig({
+  "post_url": "https://PORTAL_HOSTNAME_HERE/status",
+  "oneclick": {
+    "oneclick_validity": "0",
+    "oneclick_qos": {
+      "up_rate": "0",
+      "down_rate": "0"
+    },
+    "oneclick_times": "0"
+  },
+  "custom_html": {
+    "login_options": [
+      "voucher"
+    ],
+    "lang": [
+      "en_US",
+      "es_ES"
+    ]
+  }
+});

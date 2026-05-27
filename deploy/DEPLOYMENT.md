@@ -1,20 +1,24 @@
-# USO Portal — Ubuntu Deployment Guide
+# USO Stack — Ubuntu Deployment Guide
 
-Target: clean Ubuntu 22.04 / 24.04 LTS server, single host running
-**Node backend + MySQL + Nginx + Let's Encrypt SSL**.
+Target: clean Ubuntu 22.04 / 24.04 LTS, single host running everything:
 
-The Voucher Validation service is assumed to be reachable from this host
-(either co-located on the same box on `localhost:4001`, or via private
-network — set `VOUCHER_VALIDATION_API_URL` accordingly in `backend/.env`).
+- **USO Portal** — public-facing payment app (`uso-portal/`, backend port `5000`)
+- **Voucher Validation** — admin dashboard + portal-facing API (`voucher-validation/`, backend port `4001`)
+- **MySQL 8** — two databases: `uso_project` + `voucher_management`
+- **Nginx** — two vhosts: `portal.example.com` (public) + `admin.example.com` (internal)
+- **Let's Encrypt** — SSL for both hostnames
+- **PM2** — runs both Node backends, survives reboot
 
 ---
 
 ## 1. Prerequisites
 
-- DNS A record for `portal.example.com` pointing to the server's public IP.
-- SSH access to the server with a sudo-capable user (`ubuntu`, `deploy`, etc.).
+- DNS A records for **both** hostnames pointing to the server's public IP:
+  - `portal.example.com`
+  - `admin.example.com` (or use a subdomain like `vv.example.com`)
+- SSH access to the server with a sudo-capable user.
 - M-PAiSA credentials (`MPAISA_CLIENT_ID`, `MPAISA_SECRET_KEY`).
-- Shared secret with the Voucher Validation service (`PORTAL_API_SECRET`).
+- Ruijie Cloud API credentials (`RUIJIE_APP_ID`, `RUIJIE_APP_SECRET`, `RUIJIE_GROUP_ID`, `RUIJIE_TENANT_ID`).
 
 ---
 
@@ -24,9 +28,12 @@ network — set `VOUCHER_VALIDATION_API_URL` accordingly in `backend/.env`).
 sudo mkdir -p /var/www
 sudo chown "$USER":"$USER" /var/www
 cd /var/www
-git clone https://github.com/<your-org>/uso-portal.git uso-portal
+git clone https://github.com/XxDarknytxX/USO.git uso-portal
 cd uso-portal
 ```
+
+(The repo is named `USO` but we clone it as `uso-portal/` so the path
+matches the `nginx.conf.example` example.)
 
 ---
 
@@ -36,92 +43,132 @@ Installs Node 20, MySQL 8, Nginx, PM2, Certbot, and opens the firewall:
 
 ```bash
 sudo bash deploy/setup-server.sh
-sudo mysql_secure_installation        # set a root password, remove anon users, etc.
+sudo mysql_secure_installation        # set a root password
 ```
 
 ---
 
-## 4. Create the database + app user
+## 4. Create both databases + app users
 
 ```bash
-sudo DB_PASSWORD='ReplaceWithStrongPassword' bash deploy/init-mysql.sh
+sudo USO_DB_PASSWORD='StrongPw1' VV_DB_PASSWORD='StrongPw2' \
+  bash deploy/init-mysql.sh
 ```
 
-The backend auto-creates tables on first start (see `backend/config/db.js`),
-so no schema file needs to be loaded.
+This creates:
+
+| DB | User | Used by |
+|----|------|---------|
+| `uso_project` | `uso_user` | USO Portal backend |
+| `voucher_management` | `vv_user` | Voucher Validation backend |
+
+Both backends auto-create their tables on first start.
 
 ---
 
-## 5. Configure the backend
+## 5. Configure both backends
 
 ```bash
-cp backend/.env.example backend/.env
-nano backend/.env
+cp uso-portal/backend/.env.example       uso-portal/backend/.env
+cp voucher-validation/backend/.env.example voucher-validation/backend/.env
+nano uso-portal/backend/.env
+nano voucher-validation/backend/.env
 ```
 
-Fill in:
+Generate one shared secret used by both:
+
+```bash
+openssl rand -hex 32        # paste into PORTAL_API_SECRET in BOTH .env files
+openssl rand -hex 64        # paste into JWT_SECRET in voucher-validation/backend/.env
+```
+
+Critical settings:
+
+**`uso-portal/backend/.env`**
 
 | Variable | Value |
 |----------|-------|
-| `NODE_ENV` | `production` |
-| `PORT` | `5000` |
-| `TRUST_PROXY` | `1` |
 | `CORS_ORIGIN` | `https://portal.example.com` |
-| `MPAISA_*` | Real M-PAiSA credentials |
 | `MPAISA_RETURN_URL` | `https://portal.example.com/payment-result` |
-| `DB_*` | Match what you set in step 4 |
-| `VOUCHER_VALIDATION_API_URL` | URL of the VV service |
-| `PORTAL_API_SECRET` | Must match the secret on the VV side |
-| `RUIJIE_AUTH_URL` | Leave default unless told otherwise |
+| `DB_USER` / `DB_PASSWORD` / `DB_NAME` | Match what `init-mysql.sh` created (`uso_user` / your password / `uso_project`) |
+| `VOUCHER_VALIDATION_API_URL` | `http://localhost:4001` (same host) |
+| `PORTAL_API_SECRET` | Same value in both .env files |
+
+**`voucher-validation/backend/.env`**
+
+| Variable | Value |
+|----------|-------|
+| `CORS_ORIGIN` | `https://admin.example.com` |
+| `DATABASE_USER` / `DATABASE_PASSWORD` / `DATABASE_NAME` | Match `init-mysql.sh` (`vv_user` / your password / `voucher_management`) |
+| `JWT_SECRET` | Long random string |
+| `PORTAL_API_SECRET` | Same value as in `uso-portal/backend/.env` |
+| `RUIJIE_*` | Real Ruijie Cloud API credentials |
 
 ---
 
-## 6. Build + start the app
+## 6. Build + start both apps
 
 ```bash
 bash deploy/deploy-app.sh
 ```
 
-This runs `npm ci` for backend and frontend, builds the React app into
-`frontend/build`, and launches the backend under PM2.
+This runs `npm ci` for all four package.json files, builds both React
+apps, and launches both backends under PM2.
 
-Check it's running:
+Check both are running:
 
 ```bash
 pm2 status
-pm2 logs uso-portal --lines 50
-curl http://localhost:5000/api/health
+pm2 logs --lines 30
+curl http://localhost:5000/api/health      # USO Portal
+curl http://localhost:4001/health          # Voucher Validation
 ```
 
 ---
 
-## 7. Configure Nginx
+## 7. Seed the first admin user (Voucher Validation)
+
+The VV admin dashboard needs an initial login. There's a seed script:
 
 ```bash
-sudo cp deploy/nginx.conf.example /etc/nginx/sites-available/uso-portal
-sudo nano /etc/nginx/sites-available/uso-portal
-# Replace `portal.example.com` and `/var/www/uso-portal` with your values.
+cd voucher-validation/backend
+node src/seed.js
+# Default credentials are baked into seed.js — open it first and
+# change the email/password before running, OR after first login
+# create a real admin via the Users page and delete the seed account.
+```
 
-sudo ln -s /etc/nginx/sites-available/uso-portal /etc/nginx/sites-enabled/
+---
+
+## 8. Configure Nginx
+
+```bash
+sudo cp deploy/nginx.conf.example /etc/nginx/sites-available/uso-stack
+sudo nano /etc/nginx/sites-available/uso-stack
+# Replace `portal.example.com`, `admin.example.com`, and
+# `/var/www/uso-portal` with your values.
+
+sudo ln -s /etc/nginx/sites-available/uso-stack /etc/nginx/sites-enabled/
 sudo rm -f /etc/nginx/sites-enabled/default
 sudo nginx -t
 sudo systemctl reload nginx
 ```
 
-Visit `http://portal.example.com` — the portal should load over HTTP.
+Visit `http://portal.example.com` and `http://admin.example.com` — both
+should load over HTTP.
 
 ---
 
-## 8. Enable HTTPS (Let's Encrypt)
+## 9. Enable HTTPS for both hostnames
 
 ```bash
-sudo certbot --nginx -d portal.example.com
+sudo certbot --nginx -d portal.example.com -d admin.example.com
 ```
 
-Certbot rewrites the Nginx vhost to add the `:443` server block and a
-`:80 → :443` redirect. It also installs a systemd timer for auto-renewal.
+Certbot rewrites the vhost file to add `:443` server blocks and
+HTTP→HTTPS redirects. Auto-renewal is installed as a systemd timer.
 
-Verify auto-renew:
+Verify:
 
 ```bash
 sudo certbot renew --dry-run
@@ -129,66 +176,84 @@ sudo certbot renew --dry-run
 
 ---
 
-## 9. Updating later (redeploy)
+## 10. Upload the captive-portal HTML to Ruijie
+
+The `captive-portal/` directory is what gets uploaded to the Ruijie
+controller (it doesn't run on this server — it runs on the AP).
+
+```bash
+cd captive-portal
+sed -i 's/PORTAL_HOSTNAME_HERE/portal.example.com/g' index.html loadConfig.json
+zip -r customHtml.zip . -x "README.md" "Archive.zip"
+# Upload customHtml.zip via the Ruijie Cloud dashboard.
+```
+
+---
+
+## 11. Updating later (redeploy)
 
 ```bash
 cd /var/www/uso-portal
 git pull
-bash deploy/deploy-app.sh
+bash deploy/deploy-app.sh             # rebuilds both apps + zero-downtime reload
+# or
+bash deploy/deploy-app.sh uso         # just USO Portal
+bash deploy/deploy-app.sh vv          # just Voucher Validation
 ```
-
-PM2 reloads the backend with zero downtime and the frontend rebuild
-replaces `frontend/build` (Nginx picks up the new files immediately).
 
 ---
 
-## 10. Operational commands
+## 12. Operational commands
 
 ```bash
-pm2 status                     # all PM2 apps
-pm2 logs uso-portal            # tail backend logs
-pm2 restart uso-portal         # full restart (clears memory)
-pm2 reload uso-portal          # zero-downtime reload
-pm2 monit                      # live CPU/mem dashboard
+pm2 status                                # both apps
+pm2 logs uso-portal --lines 50
+pm2 logs voucher-validation --lines 50
+pm2 reload uso-portal                     # zero-downtime
+pm2 restart voucher-validation            # full restart (clears memory)
+pm2 monit                                 # live dashboard
 
-sudo systemctl status nginx
 sudo systemctl reload nginx
-
 sudo mysql -u uso_user -p uso_project
-# Inside MySQL:
-#   SHOW TABLES;
-#   SELECT COUNT(*) FROM transactions;
+sudo mysql -u vv_user  -p voucher_management
 ```
 
-Backend logs are also written to `logs/uso-portal.{out,err}.log` in the
-project root (see `deploy/ecosystem.config.cjs`).
+Logs are also written to `logs/uso-portal.{out,err}.log` and
+`logs/voucher-validation.{out,err}.log` in the project root.
 
 ---
 
-## 11. Backup
+## 13. Backup
 
-Daily MySQL dump via cron (run as the deploy user):
+Daily MySQL dump of both DBs (run as the deploy user):
 
 ```bash
 mkdir -p /var/backups/uso
 crontab -e
-# Add:
-# 30 2 * * * /usr/bin/mysqldump -u uso_user -p'PASSWORD' uso_project | gzip > /var/backups/uso/uso_project-$(date +\%F).sql.gz
-# 0  3 * * * find /var/backups/uso -name 'uso_project-*.sql.gz' -mtime +14 -delete
 ```
 
-For production, prefer a `.my.cnf` with the password (chmod 600) over
-embedding it in the crontab.
+Add:
+
+```cron
+30 2 * * * /usr/bin/mysqldump -u uso_user -p'USO_PW' uso_project         | gzip > /var/backups/uso/uso_project-$(date +\%F).sql.gz
+35 2 * * * /usr/bin/mysqldump -u vv_user  -p'VV_PW'  voucher_management  | gzip > /var/backups/uso/voucher_management-$(date +\%F).sql.gz
+0  3 * * * find /var/backups/uso -name '*.sql.gz' -mtime +14 -delete
+```
+
+For production, use a `~/.my.cnf` (chmod 600) with the passwords instead
+of embedding them in the crontab.
 
 ---
 
-## 12. Troubleshooting
+## 14. Troubleshooting
 
 | Symptom | Check |
 |---------|-------|
-| Backend won't start | `pm2 logs uso-portal` — usually missing env var or DB unreachable |
-| `502 Bad Gateway` from Nginx | Backend down or wrong port — `curl http://127.0.0.1:5000/api/health` |
-| `Origin ... not allowed by CORS` | Add the origin to `CORS_ORIGIN` in `backend/.env`, then `pm2 reload uso-portal` |
-| Real client IP shows as 127.0.0.1 | `TRUST_PROXY=1` not set in `backend/.env` |
-| Voucher claim fails | VV service unreachable or `PORTAL_API_SECRET` mismatch |
-| M-PAiSA callback 404 | Confirm `MPAISA_RETURN_URL` points at `/payment-result` on the public hostname |
+| Backend won't start | `pm2 logs <app>` — usually missing env var or DB unreachable |
+| `502 Bad Gateway` from Nginx | Backend down or wrong port — `curl localhost:5000/api/health` / `curl localhost:4001/health` |
+| `Origin … not allowed by CORS` | Add the origin to `CORS_ORIGIN`, then `pm2 reload <app>` |
+| Real client IP shows 127.0.0.1 | `TRUST_PROXY=1` not set in the .env |
+| USO Portal calls to VV fail with 401 | `PORTAL_API_SECRET` doesn't match between the two .env files |
+| Admin login fails | `JWT_SECRET` empty or changed since the token was issued — re-login |
+| Voucher claim fails | VV not running, or `VOUCHER_VALIDATION_API_URL` in USO env points somewhere else |
+| M-PAiSA callback 404 | `MPAISA_RETURN_URL` doesn't match the actual public URL of `/payment-result` |

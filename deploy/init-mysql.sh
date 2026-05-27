@@ -1,49 +1,76 @@
 #!/usr/bin/env bash
 # =====================================================================
-# Create the MySQL database + dedicated user for the USO Portal backend.
+# Create both MySQL databases for the USO stack:
+#   - uso_project        (USO Portal backend)
+#   - voucher_management (Voucher Validation backend)
 #
-# Run as root (or via sudo) on the server. Reads credentials from
-# environment variables — fill these before running:
+# Each gets its own dedicated user. Run as root (sudo) on the server.
 #
-#   DB_NAME       (default: uso_project)
-#   DB_USER       (default: uso_user)
-#   DB_PASSWORD   (REQUIRED — no default)
+# Env vars (set before running):
+#   USO_DB_PASSWORD          REQUIRED — password for uso_user
+#   VV_DB_PASSWORD           REQUIRED — password for vv_user
+#   USO_DB_NAME              (default: uso_project)
+#   USO_DB_USER              (default: uso_user)
+#   VV_DB_NAME               (default: voucher_management)
+#   VV_DB_USER               (default: vv_user)
 #
 # Example:
-#   sudo DB_PASSWORD='StrongPasswordHere' bash deploy/init-mysql.sh
+#   sudo USO_DB_PASSWORD='StrongPw1' VV_DB_PASSWORD='StrongPw2' \
+#     bash deploy/init-mysql.sh
 #
-# The backend auto-creates tables on first run (see backend/config/db.js),
-# so no schema dump is needed here.
+# Both backends auto-create their tables on first start.
 # =====================================================================
 set -euo pipefail
 
-DB_NAME="${DB_NAME:-uso_project}"
-DB_USER="${DB_USER:-uso_user}"
-
-if [[ -z "${DB_PASSWORD:-}" ]]; then
-  echo "ERROR: DB_PASSWORD env var is required." >&2
-  echo "  Example: sudo DB_PASSWORD='StrongPasswordHere' bash $0" >&2
-  exit 1
-fi
+USO_DB_NAME="${USO_DB_NAME:-uso_project}"
+USO_DB_USER="${USO_DB_USER:-uso_user}"
+VV_DB_NAME="${VV_DB_NAME:-voucher_management}"
+VV_DB_USER="${VV_DB_USER:-vv_user}"
 
 if [[ $EUID -ne 0 ]]; then
-  echo "ERROR: must run as root (use sudo) so we can use the unix_socket root login." >&2
+  echo "ERROR: must run as root (use sudo)." >&2
   exit 1
 fi
 
-echo "==> Creating database '${DB_NAME}' and user '${DB_USER}'@'localhost'"
+if [[ -z "${USO_DB_PASSWORD:-}" || -z "${VV_DB_PASSWORD:-}" ]]; then
+  echo "ERROR: USO_DB_PASSWORD and VV_DB_PASSWORD are required." >&2
+  echo "  sudo USO_DB_PASSWORD='...' VV_DB_PASSWORD='...' bash $0" >&2
+  exit 1
+fi
+
+echo "==> Creating USO Portal DB '${USO_DB_NAME}' + user '${USO_DB_USER}'"
+echo "==> Creating Voucher Validation DB '${VV_DB_NAME}' + user '${VV_DB_USER}'"
 
 mysql --protocol=socket -uroot <<SQL
-CREATE DATABASE IF NOT EXISTS \`${DB_NAME}\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
-CREATE USER IF NOT EXISTS '${DB_USER}'@'localhost' IDENTIFIED BY '${DB_PASSWORD}';
-ALTER USER '${DB_USER}'@'localhost' IDENTIFIED BY '${DB_PASSWORD}';
-GRANT ALL PRIVILEGES ON \`${DB_NAME}\`.* TO '${DB_USER}'@'localhost';
+CREATE DATABASE IF NOT EXISTS \`${USO_DB_NAME}\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+CREATE USER IF NOT EXISTS '${USO_DB_USER}'@'localhost' IDENTIFIED BY '${USO_DB_PASSWORD}';
+ALTER USER '${USO_DB_USER}'@'localhost' IDENTIFIED BY '${USO_DB_PASSWORD}';
+GRANT ALL PRIVILEGES ON \`${USO_DB_NAME}\`.* TO '${USO_DB_USER}'@'localhost';
+
+CREATE DATABASE IF NOT EXISTS \`${VV_DB_NAME}\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+CREATE USER IF NOT EXISTS '${VV_DB_USER}'@'localhost' IDENTIFIED BY '${VV_DB_PASSWORD}';
+ALTER USER '${VV_DB_USER}'@'localhost' IDENTIFIED BY '${VV_DB_PASSWORD}';
+GRANT ALL PRIVILEGES ON \`${VV_DB_NAME}\`.* TO '${VV_DB_USER}'@'localhost';
+
 FLUSH PRIVILEGES;
 SQL
 
-echo "==> Done. Put these in backend/.env:"
-echo "    DB_HOST=localhost"
-echo "    DB_PORT=3306"
-echo "    DB_NAME=${DB_NAME}"
-echo "    DB_USER=${DB_USER}"
-echo "    DB_PASSWORD=<the one you just set>"
+cat <<EOF
+
+==> Done. Put these into the env files:
+
+uso-portal/backend/.env
+  DB_HOST=localhost
+  DB_PORT=3306
+  DB_NAME=${USO_DB_NAME}
+  DB_USER=${USO_DB_USER}
+  DB_PASSWORD=<USO_DB_PASSWORD you just set>
+
+voucher-validation/backend/.env
+  DATABASE_HOST=localhost
+  DATABASE_PORT=3306
+  DATABASE_NAME=${VV_DB_NAME}
+  DATABASE_USER=${VV_DB_USER}
+  DATABASE_PASSWORD=<VV_DB_PASSWORD you just set>
+
+EOF
