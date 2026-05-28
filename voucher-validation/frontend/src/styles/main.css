@@ -1,21 +1,22 @@
 /* =============================================================================
    Voucher Validation — Design System
-   "Operations Console" aesthetic: refined, dense, professional.
-   Vodafone red as the sole chromatic punctuation; everything else neutral.
+   Refined admin product aesthetic. Inter for everything readable;
+   JetBrains Mono reserved for codes, UUIDs, and other monospaced data.
+   Vodafone red as the sole chromatic punctuation.
    ============================================================================ */
 
 @import "tailwindcss";
 
 /* ---------- Web fonts ------------------------------------------------------ */
-@import url("https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap");
+@import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap");
 
 /* =============================================================================
    Tailwind v4 theme tokens
    ============================================================================ */
 @theme {
   /* -- Typography --------------------------------------------------------- */
-  --font-sans: "IBM Plex Sans", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
-  --font-mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
 
   /* -- Brand: Vodafone red ----------------------------------------------- */
   --color-brand-50:  #fff1f1;
@@ -65,22 +66,19 @@
 
 /* =============================================================================
    Semantic surface tokens via CSS variables.
-   Light theme is :root; dark theme activates on <html data-theme="dark">.
-   Components reference these via Tailwind arbitrary values like bg-[var(--surface)]
-   so the whole UI switches with a single attribute swap.
    ============================================================================ */
 :root {
   /* Surfaces */
-  --surface:           #ffffff;          /* primary page bg */
-  --surface-raised:    #ffffff;          /* cards, modals */
-  --surface-sunken:    #fafbfc;          /* table headers, sub-areas */
-  --surface-hover:     #f3f4f6;
-  --surface-pressed:   #e5e7eb;
+  --surface:           #ffffff;
+  --surface-raised:    #ffffff;
+  --surface-sunken:    #f7f8fa;
+  --surface-hover:     #f1f3f5;
+  --surface-pressed:   #e3e6ea;
 
   /* Text */
   --text-primary:      #14171c;
-  --text-secondary:    #4d535d;
-  --text-tertiary:     #6d747f;
+  --text-secondary:    #434851;
+  --text-tertiary:     #6b7280;
   --text-quaternary:   #9aa1ab;
   --text-disabled:     #c9ced5;
   --text-inverse:      #ffffff;
@@ -124,6 +122,12 @@
   --elev-2: 0 4px 12px -2px rgba(20, 23, 28, 0.06), 0 2px 4px -1px rgba(20, 23, 28, 0.03);
   --elev-3: 0 12px 32px -4px rgba(20, 23, 28, 0.10), 0 4px 12px -2px rgba(20, 23, 28, 0.04);
   --elev-4: 0 24px 64px -12px rgba(20, 23, 28, 0.16), 0 8px 24px -4px rgba(20, 23, 28, 0.06);
+
+  /* Radii — slightly softer than utilitarian */
+  --radius-sm: 6px;
+  --radius:    8px;
+  --radius-lg: 10px;
+  --radius-xl: 14px;
 }
 
 html[data-theme="dark"] {
@@ -134,7 +138,7 @@ html[data-theme="dark"] {
   --surface-pressed:   #262c36;
 
   --text-primary:      #f4f5f7;
-  --text-secondary:    #b8bdc6;
+  --text-secondary:    #c4c9d3;
   --text-tertiary:     #8a909b;
   --text-quaternary:   #5e6671;
   --text-disabled:     #3a4049;
@@ -190,7 +194,8 @@ body,
 
 body {
   font-family: var(--font-sans);
-  font-feature-settings: "ss01", "cv02", "cv11"; /* IBM Plex stylistic tweaks */
+  font-size: 14px;
+  line-height: 1.5;
   background-color: var(--surface);
   color: var(--text-primary);
   -webkit-font-smoothing: antialiased;
@@ -199,12 +204,13 @@ body {
   letter-spacing: -0.005em;
 }
 
-/* Numeric data should be tabular (tables, prices, counts) */
+/* Numeric data should be tabular when we explicitly opt into mono.
+   Inter has tabular-nums built in via opentype features, so default sans
+   numerals will align in tables too. */
 .tabular,
 .font-mono,
 [class*="font-mono"] {
-  font-variant-numeric: tabular-nums slashed-zero;
-  font-feature-settings: "zero", "ss02";
+  font-variant-numeric: tabular-nums;
 }
 
 /* =============================================================================
@@ -239,7 +245,6 @@ body {
   border-color: var(--border-focus);
 }
 
-/* Inputs with embedded focus (no extra box-shadow) */
 .focus-input {
   outline: none;
   transition: border-color 160ms var(--ease-out-quart),
@@ -260,7 +265,7 @@ body {
 }
 
 /* =============================================================================
-   Utility: subtle grain overlay (gives "real product" texture, not flat AI look)
+   Utility: subtle grain overlay
    ============================================================================ */
 .grain {
   position: relative;
@@ -280,7 +285,7 @@ html[data-theme="dark"] .grain::after {
 }
 
 /* =============================================================================
-   Skeleton loader (used on data tables while loading)
+   Skeleton loader
    ============================================================================ */
 @keyframes shimmer {
   0%   { background-position: -200% 0; }
@@ -295,11 +300,11 @@ html[data-theme="dark"] .grain::after {
   );
   background-size: 200% 100%;
   animation: shimmer 1.4s ease-in-out infinite;
-  border-radius: 6px;
+  border-radius: 8px;
 }
 
 /* =============================================================================
-   Modal backdrop blur fallback (some browsers don't support backdrop-filter well)
+   Modal backdrop blur fallback
    ============================================================================ */
 .backdrop-saturate {
   backdrop-filter: blur(8px) saturate(140%);
@@ -322,6 +327,7 @@ html[data-theme="dark"] .grain::after {
 
 /* =============================================================================
    Page chrome helpers
+   — Softened. No more terminal-style mono uppercase eyebrows.
    ============================================================================ */
 .page-shell {
   display: flex;
@@ -335,56 +341,70 @@ html[data-theme="dark"] .grain::after {
   align-items: flex-start;
   justify-content: space-between;
   gap: 24px;
-  padding: 24px 32px 16px;
+  padding: 28px 36px 22px;
   border-bottom: 1px solid var(--border-subtle);
 }
 
 .page-eyebrow {
-  font-family: var(--font-mono);
-  font-size: 11px;
+  font-family: var(--font-sans);
+  font-size: 12.5px;
   font-weight: 500;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: var(--text-quaternary);
+  letter-spacing: -0.005em;
+  color: var(--text-tertiary);
+  margin-bottom: 2px;
 }
 
 .page-title {
   font-family: var(--font-sans);
-  font-size: 22px;
+  font-size: 26px;
   font-weight: 600;
-  letter-spacing: -0.02em;
+  letter-spacing: -0.022em;
   color: var(--text-primary);
-  line-height: 1.2;
+  line-height: 1.18;
 }
 
 .page-subtitle {
-  font-size: 13px;
+  font-size: 14px;
   color: var(--text-tertiary);
-  margin-top: 4px;
+  margin-top: 5px;
+  line-height: 1.5;
+  letter-spacing: -0.005em;
 }
 
 /* =============================================================================
-   Brand mark (the little square with the logo glyph)
+   Soft label utility (replaces inline mono+uppercase+tracking patterns)
+   Use for table headers, micro-labels, section captions.
+   ============================================================================ */
+.label-soft {
+  font-family: var(--font-sans);
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: -0.005em;
+  color: var(--text-tertiary);
+}
+
+/* =============================================================================
+   Brand mark (the logo glyph chip)
    ============================================================================ */
 .brand-mark {
-  width: 32px;
-  height: 32px;
-  border-radius: 8px;
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
   background: linear-gradient(135deg, var(--color-brand-600), var(--color-brand-700));
   display: inline-flex;
   align-items: center;
   justify-content: center;
   color: #fff;
   box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.15),
-    0 1px 2px rgba(230, 0, 0, 0.32);
+    inset 0 1px 0 rgba(255, 255, 255, 0.18),
+    0 1px 2px rgba(230, 0, 0, 0.28);
   position: relative;
   overflow: hidden;
+  flex-shrink: 0;
 }
 .brand-mark::before {
-  /* a tiny gloss to feel like a real brand chip */
   content: "";
   position: absolute;
   inset: 0 0 50% 0;
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.18), rgba(255, 255, 255, 0));
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.20), rgba(255, 255, 255, 0));
 }

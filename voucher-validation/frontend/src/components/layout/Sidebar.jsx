@@ -48,7 +48,7 @@ export default function Sidebar() {
   return (
     <aside
       className={
-        (collapsed ? "w-[64px]" : "w-[220px]") +
+        (collapsed ? "w-[68px]" : "w-[232px]") +
         " flex flex-col shrink-0 h-screen sticky top-0 " +
         "bg-[var(--surface-sunken)] border-r border-[var(--border-subtle)] " +
         "transition-[width] duration-200"
@@ -57,20 +57,20 @@ export default function Sidebar() {
       {/* ----- Brand row ----- */}
       <div
         className={
-          "flex items-center h-14 px-3 border-b border-[var(--border-subtle)] " +
+          "flex items-center h-16 px-3.5 border-b border-[var(--border-subtle)] " +
           (collapsed ? "justify-center" : "justify-between gap-2")
         }
       >
         {!collapsed && (
-          <div className="flex items-center gap-2.5 min-w-0">
+          <div className="flex items-center gap-3 min-w-0">
             <span className="brand-mark">
-              <Ticket size={15} strokeWidth={2} />
+              <Ticket size={16} strokeWidth={2} />
             </span>
             <div className="flex flex-col min-w-0">
-              <span className="text-[13px] font-semibold tracking-tight text-[var(--text-primary)] truncate">
-                Voucher Mgr
+              <span className="text-[14px] font-semibold tracking-tight text-[var(--text-primary)] truncate leading-tight">
+                Voucher Manager
               </span>
-              <span className="text-[9.5px] font-mono uppercase tracking-[0.12em] text-[var(--text-quaternary)]">
+              <span className="text-[11.5px] text-[var(--text-tertiary)] leading-tight">
                 Vodafone Fiji
               </span>
             </div>
@@ -78,15 +78,15 @@ export default function Sidebar() {
         )}
         {collapsed && (
           <span className="brand-mark">
-            <Ticket size={15} strokeWidth={2} />
+            <Ticket size={16} strokeWidth={2} />
           </span>
         )}
       </div>
 
       {/* ----- Nav ----- */}
-      <nav className="flex-1 py-3 px-2 overflow-y-auto">
+      <nav className="flex-1 py-4 px-2.5 overflow-y-auto">
         {!collapsed && (
-          <p className="px-2 mb-2 text-[10px] font-mono uppercase tracking-[0.14em] text-[var(--text-quaternary)]">
+          <p className="px-2.5 mb-2.5 text-[11.5px] font-medium text-[var(--text-quaternary)]">
             Navigate
           </p>
         )}
@@ -97,8 +97,8 @@ export default function Sidebar() {
               to={path}
               title={collapsed ? label : undefined}
               className={({ isActive }) =>
-                "group flex items-center gap-2.5 rounded-md text-[13px] font-medium transition-colors duration-150 " +
-                (collapsed ? "justify-center h-9 w-9 mx-auto " : "px-2.5 h-8 ") +
+                "group flex items-center gap-3 rounded-lg text-[13.5px] font-medium transition-colors duration-150 " +
+                (collapsed ? "justify-center h-9 w-9 mx-auto " : "px-3 h-9 ") +
                 (isActive
                   ? "bg-[var(--brand-soft)] text-[var(--brand-fg-on-soft)]"
                   : "text-[var(--text-tertiary)] hover:bg-[var(--surface-hover)] hover:text-[var(--text-primary)]")
@@ -107,7 +107,7 @@ export default function Sidebar() {
               {({ isActive }) => (
                 <>
                   <Icon
-                    size={15}
+                    size={16}
                     strokeWidth={isActive ? 2.25 : 1.75}
                     className="shrink-0"
                   />
@@ -120,23 +120,23 @@ export default function Sidebar() {
       </nav>
 
       {/* ----- Footer: user + theme + logout ----- */}
-      <div className="border-t border-[var(--border-subtle)] p-2 flex flex-col gap-1">
+      <div className="border-t border-[var(--border-subtle)] p-2.5 flex flex-col gap-1">
         {!collapsed && (
-          <div className="flex items-center gap-2 px-2 py-2">
+          <div className="flex items-center gap-2.5 px-2 py-2">
             <span
               className={
-                "shrink-0 h-7 w-7 rounded-md flex items-center justify-center text-[11px] font-semibold uppercase " +
+                "shrink-0 h-8 w-8 rounded-lg flex items-center justify-center text-[12px] font-semibold uppercase " +
                 "bg-[var(--surface-hover)] text-[var(--text-secondary)] border border-[var(--border-subtle)]"
               }
             >
               {(email || "?").charAt(0)}
             </span>
             <div className="flex flex-col min-w-0">
-              <span className="text-[12px] text-[var(--text-primary)] truncate font-medium">
+              <span className="text-[12.5px] text-[var(--text-primary)] truncate font-medium leading-tight">
                 {email}
               </span>
-              <span className="flex items-center gap-1 text-[10px] font-mono uppercase tracking-[0.1em] text-[var(--text-quaternary)]">
-                {isAdmin ? <Shield size={9} /> : <Eye size={9} />}
+              <span className="flex items-center gap-1 text-[11.5px] text-[var(--text-tertiary)] capitalize leading-tight mt-0.5">
+                {isAdmin ? <Shield size={10} /> : <Eye size={10} />}
                 {role}
               </span>
             </div>
@@ -183,8 +183,8 @@ function SidebarAction({ collapsed, onClick, icon: Icon, label, tone }) {
       onClick={onClick}
       title={collapsed ? label : undefined}
       className={
-        "flex items-center gap-2.5 rounded-md text-[12.5px] font-medium transition-colors " +
-        (collapsed ? "justify-center h-8 w-8 mx-auto " : "px-2.5 h-8 ") +
+        "flex items-center gap-3 rounded-lg text-[13px] font-medium transition-colors " +
+        (collapsed ? "justify-center h-8 w-8 mx-auto " : "px-3 h-8 ") +
         toneClass
       }
     >

@@ -184,7 +184,7 @@ export default function VoucherDetailModal({
         <div className="relative px-7 pt-6 pb-5 border-b border-[var(--border-subtle)]">
           <div className="flex items-start justify-between gap-4">
             <div className="min-w-0 flex-1">
-              <span className="text-[10.5px] font-mono uppercase tracking-[0.12em] text-[var(--text-quaternary)] block mb-1">
+              <span className="text-[12px] font-medium text-[var(--text-tertiary)] block mb-1">
                 Voucher
               </span>
               <button
@@ -403,7 +403,7 @@ export default function VoucherDetailModal({
               <button
                 onClick={() => setRawOpen(!rawOpen)}
                 className={
-                  "inline-flex items-center gap-1.5 text-[11.5px] font-mono uppercase tracking-[0.1em] " +
+                  "inline-flex items-center gap-1.5 text-[11.5px] font-medium " +
                   "text-[var(--text-quaternary)] hover:text-[var(--text-secondary)] transition-colors"
                 }
               >
@@ -483,12 +483,12 @@ function StatCard({ icon, label, value, pct: percent }) {
   return (
     <div
       className={
-        "rounded-md p-3 bg-[var(--surface-sunken)] border border-[var(--border-subtle)]"
+        "rounded-lg p-3 bg-[var(--surface-sunken)] border border-[var(--border-subtle)]"
       }
     >
       <div className="flex items-center gap-1.5 text-[var(--text-tertiary)] mb-1.5">
         {icon}
-        <span className="text-[11px] font-medium uppercase tracking-wide">
+        <span className="text-[12.5px] font-medium">
           {label}
         </span>
       </div>
@@ -538,7 +538,7 @@ function EditableField({
   }
   return (
     <div className="flex flex-col gap-1">
-      <span className="text-[11px] font-mono uppercase tracking-wide text-[var(--text-quaternary)]">
+      <span className="text-[12.5px] font-medium text-[var(--text-tertiary)]">
         {label}
       </span>
       <span className="text-[13px] text-[var(--text-primary)]">
@@ -555,12 +555,12 @@ function TimeField({ icon, label, value }) {
   return (
     <div
       className={
-        "rounded-md p-3 bg-[var(--surface-sunken)] border border-[var(--border-subtle)]"
+        "rounded-lg p-3 bg-[var(--surface-sunken)] border border-[var(--border-subtle)]"
       }
     >
       <div className="flex items-center gap-1 text-[var(--text-quaternary)] mb-1">
         {icon}
-        <span className="text-[10.5px] font-mono uppercase tracking-wide">
+        <span className="text-[12px] font-medium">
           {label}
         </span>
       </div>
@@ -575,7 +575,7 @@ function TimeField({ icon, label, value }) {
 function InfoField({ label, value, mono }) {
   return (
     <div className="flex flex-col gap-0.5">
-      <span className="text-[10.5px] font-mono uppercase tracking-wide text-[var(--text-quaternary)]">
+      <span className="text-[12px] font-medium text-[var(--text-tertiary)]">
         {label}
       </span>
       <span

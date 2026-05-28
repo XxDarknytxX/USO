@@ -169,7 +169,7 @@ export default function TransactionFlowPage() {
         {/* Filters */}
         <div
           className={
-            "rounded-md p-4 space-y-3 " +
+            "rounded-lg p-4 space-y-3 " +
             "bg-[var(--surface-raised)] border border-[var(--border-default)] " +
             "shadow-[var(--elev-1)]"
           }
@@ -250,7 +250,7 @@ export default function TransactionFlowPage() {
         {loading ? (
           <div
             className={
-              "rounded-md p-4 space-y-2 " +
+              "rounded-lg p-4 space-y-2 " +
               "bg-[var(--surface-raised)] border border-[var(--border-default)]"
             }
           >
@@ -292,7 +292,7 @@ export default function TransactionFlowPage() {
         {!loading && transactions.length > 0 && (
           <div
             className={
-              "rounded-md overflow-hidden " +
+              "rounded-lg overflow-hidden " +
               "bg-[var(--surface-raised)] border border-[var(--border-default)]"
             }
           >
@@ -316,7 +316,7 @@ function TransactionCard({ txn, isExpanded, onToggle }) {
   return (
     <div
       className={
-        "rounded-md overflow-hidden transition-colors " +
+        "rounded-lg overflow-hidden transition-colors " +
         "bg-[var(--surface-raised)] border border-[var(--border-default)] " +
         "shadow-[var(--elev-1)]"
       }
@@ -378,7 +378,7 @@ function TransactionCard({ txn, isExpanded, onToggle }) {
           <p className="text-[11.5px] font-mono text-[var(--text-tertiary)]">
             {formatDate(txn.startedAt)}
           </p>
-          <p className="text-[10.5px] font-mono uppercase tracking-wide text-[var(--text-quaternary)] mt-0.5">
+          <p className="text-[12px] font-medium text-[var(--text-tertiary)] mt-0.5">
             {txn.eventCount} event{txn.eventCount !== 1 ? "s" : ""}
           </p>
         </div>
@@ -398,7 +398,7 @@ function TransactionCard({ txn, isExpanded, onToggle }) {
             className="overflow-hidden"
           >
             <div className="border-t border-[var(--border-subtle)] px-5 py-5 bg-[var(--surface-sunken)]">
-              <div className="flex items-center gap-1.5 mb-4 text-[10.5px] font-mono uppercase tracking-[0.14em] text-[var(--text-quaternary)]">
+              <div className="flex items-center gap-1.5 mb-4 text-[12px] font-medium text-[var(--text-tertiary)]">
                 <ArrowRight size={10} /> Event timeline
               </div>
 
@@ -478,7 +478,7 @@ function TimelineStep({ event, isLast }) {
         {event.event_data && (
           <button
             onClick={() => setOpen(!open)}
-            className="text-[10.5px] font-mono uppercase tracking-wide text-[var(--text-quaternary)] hover:text-[var(--text-secondary)] mt-1 transition-colors"
+            className="text-[12px] font-medium text-[var(--text-tertiary)] hover:text-[var(--text-secondary)] mt-1 transition-colors"
           >
             {open ? "Hide details" : "Show details"}
           </button>
@@ -514,7 +514,7 @@ function TimelineStep({ event, isLast }) {
 function FilterField({ label, children }) {
   return (
     <div className="flex flex-col gap-1">
-      <label className="text-[10.5px] font-mono uppercase tracking-wide text-[var(--text-quaternary)]">
+      <label className="text-[12px] font-medium text-[var(--text-tertiary)]">
         {label}
       </label>
       {children}

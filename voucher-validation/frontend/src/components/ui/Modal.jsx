@@ -125,7 +125,7 @@ function Header({
         )}
         <div className="flex flex-col min-w-0">
           {eyebrow && (
-            <span className="text-[10.5px] font-mono uppercase tracking-[0.12em] text-[var(--text-quaternary)] mb-0.5">
+            <span className="text-[12px] font-medium text-[var(--text-tertiary)] mb-0.5">
               {eyebrow}
             </span>
           )}

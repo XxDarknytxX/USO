@@ -191,15 +191,15 @@ export default function SyncPage() {
             <div className="overflow-x-auto">
               <table className="w-full text-[13px]">
                 <thead>
-                  <tr className="bg-[var(--surface-sunken)] text-left text-[10.5px] font-mono uppercase tracking-[0.1em] text-[var(--text-quaternary)]">
-                    <th className="px-5 py-2.5 font-mono font-medium">Date</th>
-                    <th className="px-5 py-2.5 font-mono font-medium">Status</th>
-                    <th className="px-5 py-2.5 font-mono font-medium">Fetched</th>
-                    <th className="px-5 py-2.5 font-mono font-medium">Processed</th>
-                    <th className="px-5 py-2.5 font-mono font-medium">New</th>
-                    <th className="px-5 py-2.5 font-mono font-medium">Updated</th>
-                    <th className="px-5 py-2.5 font-mono font-medium">Archived</th>
-                    <th className="px-5 py-2.5 font-mono font-medium">User</th>
+                  <tr className="bg-[var(--surface-sunken)] text-left text-[12px] font-medium text-[var(--text-tertiary)]">
+                    <th className="px-5 py-2.5 font-medium">Date</th>
+                    <th className="px-5 py-2.5 font-medium">Status</th>
+                    <th className="px-5 py-2.5 font-medium">Fetched</th>
+                    <th className="px-5 py-2.5 font-medium">Processed</th>
+                    <th className="px-5 py-2.5 font-medium">New</th>
+                    <th className="px-5 py-2.5 font-medium">Updated</th>
+                    <th className="px-5 py-2.5 font-medium">Archived</th>
+                    <th className="px-5 py-2.5 font-medium">User</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -248,7 +248,7 @@ function ActionCard({ icon, title, subtitle, children }) {
   return (
     <div
       className={
-        "p-5 rounded-md flex flex-col gap-3 " +
+        "p-5 rounded-lg flex flex-col gap-3 " +
         "bg-[var(--surface-raised)] border border-[var(--border-default)] " +
         "shadow-[var(--elev-1)]"
       }

@@ -265,7 +265,7 @@ export default function PortalConfigPage() {
             <div className="flex-1 min-h-0 overflow-auto">
               <table className="w-full text-[13px]">
                 <thead className="sticky top-0 z-10 bg-[var(--surface-sunken)]/95 backdrop-blur">
-                  <tr className="text-left text-[10.5px] font-mono uppercase tracking-[0.1em] text-[var(--text-quaternary)]">
+                  <tr className="text-left text-[12px] font-medium text-[var(--text-tertiary)]">
                     <Th>Key</Th>
                     <Th>Name</Th>
                     <Th>Category</Th>

@@ -76,7 +76,7 @@ export default function Login() {
               <span className="text-[15px] font-semibold tracking-tight">
                 Voucher Manager
               </span>
-              <span className="text-[10.5px] font-mono uppercase tracking-[0.18em] text-white/55">
+              <span className="text-[12px] font-medium text-white/65">
                 Vodafone Fiji · USO Portal
               </span>
             </div>
@@ -104,7 +104,7 @@ export default function Login() {
               ].map((feat) => (
                 <span
                   key={feat}
-                  className="px-2.5 h-7 inline-flex items-center text-[11px] font-mono uppercase tracking-[0.08em] rounded border border-white/15 bg-white/5 text-white/85"
+                  className="px-2.5 h-7 inline-flex items-center text-[11px] font-medium rounded border border-white/15 bg-white/5 text-white/85"
                 >
                   {feat}
                 </span>
@@ -113,7 +113,7 @@ export default function Login() {
           </div>
 
           {/* Bottom */}
-          <div className="flex items-center gap-2 text-[11px] font-mono uppercase tracking-[0.14em] text-white/45">
+          <div className="flex items-center gap-2 text-[11px] font-medium text-white/45">
             <ShieldCheck size={13} />
             <span>Secured · JWT · TLS 1.3</span>
           </div>
@@ -132,14 +132,14 @@ export default function Login() {
               <h2 className="text-[15px] font-semibold text-[var(--text-primary)] tracking-tight">
                 Voucher Manager
               </h2>
-              <p className="text-[10.5px] font-mono uppercase tracking-[0.12em] text-[var(--text-quaternary)]">
+              <p className="text-[12px] font-medium text-[var(--text-tertiary)]">
                 Vodafone Fiji
               </p>
             </div>
           </div>
 
           <div className="mb-8">
-            <span className="text-[10.5px] font-mono uppercase tracking-[0.14em] text-[var(--text-quaternary)] block mb-2">
+            <span className="text-[12px] font-medium text-[var(--text-tertiary)] block mb-2">
               Sign in
             </span>
             <h1 className="text-[24px] font-semibold tracking-tight text-[var(--text-primary)]">
@@ -222,7 +222,7 @@ export default function Login() {
             </Button>
           </form>
 
-          <p className="mt-10 text-center text-[11px] font-mono uppercase tracking-[0.12em] text-[var(--text-quaternary)]">
+          <p className="mt-10 text-center text-[12.5px] font-medium text-[var(--text-tertiary)]">
             Voucher Manager · v1.0
           </p>
         </div>

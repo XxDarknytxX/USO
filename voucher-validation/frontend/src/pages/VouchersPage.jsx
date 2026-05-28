@@ -345,7 +345,7 @@ export default function VouchersPage() {
       <div className="flex-1 min-h-0 px-8 py-4">
         <div
           className={
-            "h-full flex flex-col rounded-md " +
+            "h-full flex flex-col rounded-lg " +
             "bg-[var(--surface-raised)] border border-[var(--border-default)] " +
             "shadow-[var(--elev-1)] overflow-hidden"
           }
@@ -369,7 +369,7 @@ export default function VouchersPage() {
                   <tr
                     className={
                       "bg-[var(--surface-sunken)] text-left " +
-                      "text-[10.5px] font-mono uppercase tracking-[0.1em] text-[var(--text-quaternary)]"
+                      "text-[12px] font-medium text-[var(--text-tertiary)]"
                     }
                   >
                     {isAdmin && (
@@ -528,7 +528,7 @@ export default function VouchersPage() {
 /* ------------ Local helpers ------------------------------------------------ */
 
 function Th({ children }) {
-  return <th className="px-3 py-2.5 font-mono font-medium">{children}</th>;
+  return <th className="px-3 py-2.5 font-medium">{children}</th>;
 }
 
 function Td({ children, mono = false }) {

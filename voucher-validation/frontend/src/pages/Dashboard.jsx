@@ -652,7 +652,7 @@ export default function Dashboard() {
 
         {/* ----- Package breakdown cards ----- */}
         <div>
-          <h2 className="text-[10.5px] font-mono uppercase tracking-[0.12em] text-[var(--text-quaternary)] mb-3">
+          <h2 className="text-[12px] font-medium text-[var(--text-tertiary)] mb-3">
             Package breakdown
           </h2>
           <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
@@ -670,7 +670,7 @@ export default function Dashboard() {
                   key={i}
                   onClick={() => handlePackageDrillDown(pkg.package_name)}
                   className={
-                    "p-4 rounded-md cursor-pointer transition-[border-color,background-color] " +
+                    "p-4 rounded-lg cursor-pointer transition-[border-color,background-color] " +
                     "bg-[var(--surface-raised)] border border-[var(--border-default)] " +
                     "hover:border-[var(--brand)] hover:bg-[var(--surface-hover)]"
                   }
@@ -693,8 +693,8 @@ export default function Dashboard() {
                   </div>
 
                   <div>
-                    <div className="flex items-center justify-between text-[10.5px] mb-1.5 font-mono">
-                      <span className="text-[var(--text-quaternary)] uppercase tracking-wide">
+                    <div className="flex items-center justify-between text-[11.5px] mb-1.5 font-medium">
+                      <span className="text-[var(--text-tertiary)]">
                         Data usage
                       </span>
                       <span className="text-[var(--text-tertiary)]">
@@ -772,11 +772,11 @@ export default function Dashboard() {
                 <div
                   key={s.label}
                   className={
-                    "p-3 rounded-md bg-[var(--surface-sunken)] " +
+                    "p-3 rounded-lg bg-[var(--surface-sunken)] " +
                     "border border-[var(--border-subtle)]"
                   }
                 >
-                  <p className="text-[10.5px] font-mono uppercase tracking-wide text-[var(--text-quaternary)] mb-1">
+                  <p className="text-[12px] font-medium text-[var(--text-tertiary)] mb-1">
                     {s.label}
                   </p>
                   <p className="text-[18px] font-semibold text-[var(--text-primary)]">
@@ -796,14 +796,14 @@ export default function Dashboard() {
                   <tr
                     className={
                       "bg-[var(--surface-sunken)] text-left " +
-                      "text-[10.5px] font-mono uppercase tracking-[0.1em] text-[var(--text-quaternary)]"
+                      "text-[12px] font-medium text-[var(--text-tertiary)]"
                     }
                   >
-                    <th className="px-4 py-2.5 font-mono font-medium">Code</th>
-                    <th className="px-4 py-2.5 font-mono font-medium">Status</th>
-                    <th className="px-4 py-2.5 font-mono font-medium">Clients</th>
-                    <th className="px-4 py-2.5 font-mono font-medium">Time</th>
-                    <th className="px-4 py-2.5 font-mono font-medium">Data</th>
+                    <th className="px-4 py-2.5 font-medium">Code</th>
+                    <th className="px-4 py-2.5 font-medium">Status</th>
+                    <th className="px-4 py-2.5 font-medium">Clients</th>
+                    <th className="px-4 py-2.5 font-medium">Time</th>
+                    <th className="px-4 py-2.5 font-medium">Data</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -847,7 +847,7 @@ function MetricCard({ label, value, icon, sub }) {
   return (
     <div
       className={
-        "rounded-md p-4 " +
+        "rounded-lg p-4 " +
         "bg-[var(--surface-raised)] border border-[var(--border-default)] " +
         "shadow-[var(--elev-1)]"
       }
@@ -861,7 +861,7 @@ function MetricCard({ label, value, icon, sub }) {
         >
           {icon}
         </span>
-        <span className="text-[10.5px] font-mono uppercase tracking-[0.1em] text-[var(--text-quaternary)]">
+        <span className="text-[12px] font-medium text-[var(--text-tertiary)]">
           {label}
         </span>
       </div>
@@ -879,7 +879,7 @@ function ChartCard({ title, subtitle, icon, children }) {
   return (
     <div
       className={
-        "rounded-md p-4 flex flex-col " +
+        "rounded-lg p-4 flex flex-col " +
         "bg-[var(--surface-raised)] border border-[var(--border-default)] " +
         "shadow-[var(--elev-1)]"
       }
@@ -890,7 +890,7 @@ function ChartCard({ title, subtitle, icon, children }) {
             {title}
           </h3>
           {subtitle && (
-            <p className="text-[10.5px] font-mono uppercase tracking-wide text-[var(--text-quaternary)] mt-0.5 truncate">
+            <p className="text-[12px] font-medium text-[var(--text-tertiary)] mt-0.5 truncate">
               {subtitle}
             </p>
           )}
@@ -915,7 +915,7 @@ function MiniStat({ label, value, accent }) {
       >
         {typeof value === "number" ? value.toLocaleString() : value}
       </p>
-      <p className="text-[10px] font-mono uppercase tracking-wide text-[var(--text-quaternary)] mt-0.5">
+      <p className="text-[11.5px] font-medium text-[var(--text-tertiary)] mt-0.5">
         {label}
       </p>
     </div>
@@ -949,7 +949,7 @@ function ChartTooltip({ active, payload, label }) {
       }
     >
       {label && (
-        <p className="font-mono text-[10.5px] uppercase tracking-wide text-[var(--text-quaternary)] mb-1">
+        <p className="font-mono text-[11.5px] font-medium text-[var(--text-tertiary)] mb-1">
           {label}
         </p>
       )}

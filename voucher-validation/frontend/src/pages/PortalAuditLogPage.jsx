@@ -168,7 +168,7 @@ export default function PortalAuditLogPage() {
         {/* Filters */}
         <div
           className={
-            "rounded-md p-4 space-y-3 " +
+            "rounded-lg p-4 space-y-3 " +
             "bg-[var(--surface-raised)] border border-[var(--border-default)] " +
             "shadow-[var(--elev-1)]"
           }
@@ -275,16 +275,16 @@ export default function PortalAuditLogPage() {
             <div className="overflow-x-auto">
               <table className="w-full text-[13px]">
                 <thead>
-                  <tr className="bg-[var(--surface-sunken)] text-left text-[10.5px] font-mono uppercase tracking-[0.1em] text-[var(--text-quaternary)]">
+                  <tr className="bg-[var(--surface-sunken)] text-left text-[12px] font-medium text-[var(--text-tertiary)]">
                     <th className="px-3 py-2.5 w-8" />
-                    <th className="px-3 py-2.5 font-mono font-medium">Timestamp</th>
-                    <th className="px-3 py-2.5 font-mono font-medium">Event</th>
-                    <th className="px-3 py-2.5 font-mono font-medium">Transaction</th>
-                    <th className="px-3 py-2.5 font-mono font-medium">Plan</th>
-                    <th className="px-3 py-2.5 font-mono font-medium">Voucher</th>
-                    <th className="px-3 py-2.5 font-mono font-medium">Amount</th>
-                    <th className="px-3 py-2.5 font-mono font-medium">Phone</th>
-                    <th className="px-3 py-2.5 font-mono font-medium">Source</th>
+                    <th className="px-3 py-2.5 font-medium">Timestamp</th>
+                    <th className="px-3 py-2.5 font-medium">Event</th>
+                    <th className="px-3 py-2.5 font-medium">Transaction</th>
+                    <th className="px-3 py-2.5 font-medium">Plan</th>
+                    <th className="px-3 py-2.5 font-medium">Voucher</th>
+                    <th className="px-3 py-2.5 font-medium">Amount</th>
+                    <th className="px-3 py-2.5 font-medium">Phone</th>
+                    <th className="px-3 py-2.5 font-medium">Source</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -370,7 +370,7 @@ function LogRow({ log, isExpanded, onToggle }) {
                         "bg-[var(--surface-raised)] border border-[var(--border-subtle)]"
                       }
                     >
-                      <span className="text-[10.5px] font-mono uppercase tracking-wide text-[var(--text-quaternary)] block mb-1">
+                      <span className="text-[12px] font-medium text-[var(--text-tertiary)] block mb-1">
                         Summary
                       </span>
                       <p className="text-[13px] text-[var(--text-primary)]">
@@ -400,7 +400,7 @@ function LogRow({ log, isExpanded, onToggle }) {
                   </div>
 
                   <div>
-                    <span className="text-[10.5px] font-mono uppercase tracking-wide text-[var(--text-quaternary)] block mb-2">
+                    <span className="text-[12px] font-medium text-[var(--text-tertiary)] block mb-2">
                       Event data
                     </span>
                     <JsonViewer data={log.event_data} />
@@ -418,7 +418,7 @@ function LogRow({ log, isExpanded, onToggle }) {
 function DetailItem({ label, value }) {
   return (
     <div>
-      <span className="text-[10.5px] font-mono uppercase tracking-wide text-[var(--text-quaternary)]">
+      <span className="text-[12px] font-medium text-[var(--text-tertiary)]">
         {label}
       </span>
       <p className="text-[12.5px] text-[var(--text-secondary)] font-mono mt-0.5 break-all">
@@ -431,7 +431,7 @@ function DetailItem({ label, value }) {
 function FilterField({ label, children }) {
   return (
     <div className="flex flex-col gap-1">
-      <label className="text-[10.5px] font-mono uppercase tracking-wide text-[var(--text-quaternary)]">
+      <label className="text-[12px] font-medium text-[var(--text-tertiary)]">
         {label}
       </label>
       {children}

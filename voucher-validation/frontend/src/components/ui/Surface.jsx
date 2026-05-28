@@ -82,7 +82,7 @@ export function Section({ label, children, className = "" }) {
         <div className="flex items-center gap-3">
           <span
             className={
-              "text-[10.5px] font-mono uppercase tracking-[0.12em] " +
+              "text-[10.5px] font-medium " +
               "text-[var(--text-quaternary)]"
             }
           >

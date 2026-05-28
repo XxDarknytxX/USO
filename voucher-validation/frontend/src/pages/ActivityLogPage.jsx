@@ -146,7 +146,7 @@ export default function ActivityLogPage() {
       <div className="flex-1 min-h-0 px-8 py-5">
         <div
           className={
-            "h-full flex flex-col rounded-md " +
+            "h-full flex flex-col rounded-lg " +
             "bg-[var(--surface-raised)] border border-[var(--border-default)] " +
             "shadow-[var(--elev-1)] overflow-hidden"
           }
@@ -167,12 +167,12 @@ export default function ActivityLogPage() {
             <div className="flex-1 min-h-0 overflow-auto">
               <table className="w-full text-[13px]">
                 <thead className="sticky top-0 z-10">
-                  <tr className="bg-[var(--surface-sunken)] text-left text-[10.5px] font-mono uppercase tracking-[0.1em] text-[var(--text-quaternary)]">
-                    <th className="px-4 py-2.5 font-mono font-medium">Timestamp</th>
-                    <th className="px-4 py-2.5 font-mono font-medium">Event</th>
-                    <th className="px-4 py-2.5 font-mono font-medium">Voucher</th>
-                    <th className="px-4 py-2.5 font-mono font-medium">Status change</th>
-                    <th className="px-4 py-2.5 font-mono font-medium">Notes</th>
+                  <tr className="bg-[var(--surface-sunken)] text-left text-[12px] font-medium text-[var(--text-tertiary)]">
+                    <th className="px-4 py-2.5 font-medium">Timestamp</th>
+                    <th className="px-4 py-2.5 font-medium">Event</th>
+                    <th className="px-4 py-2.5 font-medium">Voucher</th>
+                    <th className="px-4 py-2.5 font-medium">Status change</th>
+                    <th className="px-4 py-2.5 font-medium">Notes</th>
                   </tr>
                 </thead>
                 <tbody>
