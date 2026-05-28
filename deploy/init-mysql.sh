@@ -38,6 +38,24 @@ if [[ -z "${USO_DB_PASSWORD:-}" || -z "${VV_DB_PASSWORD:-}" ]]; then
   exit 1
 fi
 
+# MySQL 8 ships with utf8mb4_0900_ai_ci as the server-wide default. Our backend
+# code sometimes auto-creates tables/columns with explicit COLLATE clauses set
+# to utf8mb4_unicode_ci, while other queries (and string literals) come in with
+# the server default. The mismatch breaks joins with
+# ER_CANT_AGGREGATE_2COLLATIONS. Force the server default to unicode_ci so all
+# new connections, columns, and literals agree.
+echo "==> Setting MySQL server-wide collation to utf8mb4_unicode_ci"
+tee /etc/mysql/mysql.conf.d/zz-uso-collation.cnf >/dev/null <<'CNF'
+[mysqld]
+character-set-server = utf8mb4
+collation-server     = utf8mb4_unicode_ci
+
+[client]
+default-character-set = utf8mb4
+CNF
+systemctl restart mysql
+sleep 3
+
 echo "==> Creating USO Portal DB '${USO_DB_NAME}' + user '${USO_DB_USER}'"
 echo "==> Creating Voucher Validation DB '${VV_DB_NAME}' + user '${VV_DB_USER}'"
 
