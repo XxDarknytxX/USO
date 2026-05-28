@@ -80,12 +80,7 @@ export function Section({ label, children, className = "" }) {
     <div className={`flex flex-col gap-3 ${className}`}>
       {label && (
         <div className="flex items-center gap-3">
-          <span
-            className={
-              "text-[10.5px] font-medium " +
-              "text-[var(--text-quaternary)]"
-            }
-          >
+          <span className="text-[13px] font-semibold text-[var(--text-primary)] tracking-tight">
             {label}
           </span>
           <span className="flex-1 h-px bg-[var(--border-subtle)]" />

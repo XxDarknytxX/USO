@@ -268,7 +268,7 @@ export default function Dashboard() {
             </Badge>
           )}
           {lastSync && (
-            <span className="text-[11px] font-mono text-[var(--text-quaternary)]">
+            <span className="text-[12px] text-[var(--text-tertiary)]">
               Last sync · {new Date(lastSync.sync_started_at).toLocaleString()}
             </span>
           )}
@@ -869,7 +869,7 @@ function MetricCard({ label, value, icon, sub }) {
         {value}
       </p>
       {sub && (
-        <p className="text-[11px] text-[var(--text-tertiary)] mt-1 font-mono">{sub}</p>
+        <p className="text-[12px] text-[var(--text-tertiary)] mt-1">{sub}</p>
       )}
     </div>
   );
@@ -909,7 +909,7 @@ function MiniStat({ label, value, accent }) {
     <div className="text-left">
       <p
         className={
-          "text-[14.5px] font-semibold font-mono " +
+          "text-[15px] font-semibold " +
           (accent ? "text-[var(--brand)]" : "text-[var(--text-primary)]")
         }
       >
@@ -931,7 +931,7 @@ function ProgressLine({ label, pct, color }) {
           style={{ width: `${Math.min(pct, 100)}%`, background: color }}
         />
       </div>
-      <span className="text-[10px] font-mono text-[var(--text-quaternary)] w-16 text-right">
+      <span className="text-[11.5px] text-[var(--text-tertiary)] w-16 text-right">
         {pct}% {label}
       </span>
     </div>
@@ -949,7 +949,7 @@ function ChartTooltip({ active, payload, label }) {
       }
     >
       {label && (
-        <p className="font-mono text-[11.5px] font-medium text-[var(--text-tertiary)] mb-1">
+        <p className="text-[11.5px] font-medium text-[var(--text-tertiary)] mb-1">
           {label}
         </p>
       )}
@@ -989,7 +989,7 @@ function PieTooltip({ active, payload }) {
         />
         <span className="font-medium text-[var(--text-primary)]">{d.name}</span>
       </div>
-      <p className="mt-0.5 text-[var(--text-tertiary)] font-mono">
+      <p className="mt-0.5 text-[var(--text-tertiary)]">
         {d.value?.toLocaleString()} vouchers
       </p>
     </div>

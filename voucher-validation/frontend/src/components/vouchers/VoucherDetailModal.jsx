@@ -434,7 +434,7 @@ export default function VoucherDetailModal({
         <Modal.Footer>
           {editing ? (
             <>
-              <span className="mr-auto text-[12px] text-[var(--text-tertiary)] font-mono">
+              <span className="mr-auto text-[12.5px] text-[var(--text-tertiary)]">
                 Editing user details
               </span>
               <Button

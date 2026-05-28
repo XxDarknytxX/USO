@@ -84,17 +84,17 @@
   --text-inverse:      #ffffff;
   --text-on-brand:     #ffffff;
 
-  /* Borders / dividers */
-  --border-subtle:     rgba(20, 23, 28, 0.06);
-  --border-default:    rgba(20, 23, 28, 0.10);
-  --border-strong:     rgba(20, 23, 28, 0.18);
+  /* Borders / dividers — kept light to avoid the "boxed-in" feel */
+  --border-subtle:     rgba(20, 23, 28, 0.045);
+  --border-default:    rgba(20, 23, 28, 0.07);
+  --border-strong:     rgba(20, 23, 28, 0.12);
   --border-focus:      var(--color-brand-600);
 
-  /* Input */
+  /* Input — slightly more visible than default borders */
   --input-bg:          #ffffff;
   --input-bg-hover:    #fafbfc;
-  --input-border:      rgba(20, 23, 28, 0.12);
-  --input-border-hover:rgba(20, 23, 28, 0.22);
+  --input-border:      rgba(20, 23, 28, 0.09);
+  --input-border-hover:rgba(20, 23, 28, 0.16);
 
   /* Brand surfaces */
   --brand:             var(--color-brand-600);
@@ -145,15 +145,15 @@ html[data-theme="dark"] {
   --text-inverse:      #0d1014;
   --text-on-brand:     #ffffff;
 
-  --border-subtle:     rgba(255, 255, 255, 0.05);
-  --border-default:    rgba(255, 255, 255, 0.09);
-  --border-strong:     rgba(255, 255, 255, 0.16);
+  --border-subtle:     rgba(255, 255, 255, 0.04);
+  --border-default:    rgba(255, 255, 255, 0.07);
+  --border-strong:     rgba(255, 255, 255, 0.12);
   --border-focus:      var(--color-brand-500);
 
   --input-bg:          #14181e;
   --input-bg-hover:    #181d24;
-  --input-border:      rgba(255, 255, 255, 0.10);
-  --input-border-hover:rgba(255, 255, 255, 0.20);
+  --input-border:      rgba(255, 255, 255, 0.08);
+  --input-border-hover:rgba(255, 255, 255, 0.16);
 
   --brand:             var(--color-brand-500);
   --brand-hover:       var(--color-brand-400);

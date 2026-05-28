@@ -134,7 +134,7 @@ export default function UsersPage() {
                     <th className="px-5 py-2.5 font-medium">User</th>
                     <th className="px-5 py-2.5 font-medium">Role</th>
                     <th className="px-5 py-2.5 font-medium">Joined</th>
-                    <th className="px-5 py-2.5 font-mono font-medium text-right">
+                    <th className="px-5 py-2.5 font-medium text-right">
                       Actions
                     </th>
                   </tr>
@@ -159,7 +159,7 @@ export default function UsersPage() {
                             <span className="text-[13px] font-medium text-[var(--text-primary)] truncate">
                               {u.name || "—"}
                             </span>
-                            <span className="text-[11.5px] text-[var(--text-tertiary)] font-mono truncate">
+                            <span className="text-[12px] text-[var(--text-tertiary)] truncate">
                               {u.email}
                             </span>
                           </div>
@@ -172,7 +172,7 @@ export default function UsersPage() {
                           {u.role}
                         </Badge>
                       </td>
-                      <td className="px-5 py-3 text-[12px] text-[var(--text-tertiary)] font-mono">
+                      <td className="px-5 py-3 text-[12.5px] text-[var(--text-tertiary)]">
                         {new Date(u.created_at).toLocaleDateString("en-AU", {
                           day: "numeric",
                           month: "short",
@@ -198,7 +198,7 @@ export default function UsersPage() {
                               <Trash2 size={14} />
                             </IconButton>
                           ) : (
-                            <span className="text-[11px] text-[var(--text-quaternary)] italic px-2 font-mono">
+                            <span className="text-[11.5px] text-[var(--text-quaternary)] italic px-2">
                               you
                             </span>
                           )}

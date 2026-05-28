@@ -323,7 +323,7 @@ function LogRow({ log, isExpanded, onToggle }) {
         <td className="px-3 py-2.5 text-[var(--text-quaternary)]">
           {isExpanded ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
         </td>
-        <td className="px-3 py-2.5 text-[12px] font-mono text-[var(--text-tertiary)] whitespace-nowrap">
+        <td className="px-3 py-2.5 text-[12.5px] text-[var(--text-tertiary)] whitespace-nowrap">
           {formatTimestamp(log.event_timestamp)}
         </td>
         <td className="px-3 py-2.5">

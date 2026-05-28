@@ -13,7 +13,7 @@ export default function Pagination({ page, totalPages, total, onPageChange }) {
         "border-t border-[var(--border-subtle)] bg-[var(--surface-sunken)]"
       }
     >
-      <span className="text-[12px] text-[var(--text-tertiary)] font-mono">
+      <span className="text-[12.5px] text-[var(--text-tertiary)]">
         Page {page} of {totalPages}
         <span className="text-[var(--text-quaternary)]"> · {total} items</span>
       </span>

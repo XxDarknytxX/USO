@@ -181,7 +181,7 @@ export default function ActivityLogPage() {
                       key={evt.id}
                       className="border-t border-[var(--border-subtle)] hover:bg-[var(--surface-hover)] transition-colors"
                     >
-                      <td className="px-4 py-2.5 text-[12px] font-mono text-[var(--text-tertiary)] whitespace-nowrap">
+                      <td className="px-4 py-2.5 text-[12.5px] text-[var(--text-tertiary)] whitespace-nowrap">
                         {new Date(evt.event_timestamp).toLocaleString()}
                       </td>
                       <td className="px-4 py-2.5">

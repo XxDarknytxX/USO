@@ -200,7 +200,7 @@ export default function VoucherCreateForm({ onClose, onCreated }) {
       </Modal.Body>
 
       <Modal.Footer>
-        <span className="mr-auto text-[12px] text-[var(--text-tertiary)] font-mono">
+        <span className="mr-auto text-[12.5px] text-[var(--text-tertiary)]">
           {selectedGroup ? (
             <>
               {(selectedGroup.name || selectedGroup.userGroupName) + " · "}
@@ -273,7 +273,7 @@ function ProfileCard({ group, selected, onSelect }) {
         </span>
       </div>
 
-      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11.5px] text-[var(--text-tertiary)] font-mono">
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[12px] text-[var(--text-tertiary)]">
         {group.timePeriod != null && (
           <span className="flex items-center gap-1">
             <Clock size={11} /> {formatTime(group.timePeriod)}

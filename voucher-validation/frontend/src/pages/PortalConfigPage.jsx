@@ -297,7 +297,7 @@ export default function PortalConfigPage() {
                           <span className="font-medium text-[var(--text-primary)] truncate">
                             {plan.name}
                           </span>
-                          {plan.popular && (
+                          {Boolean(plan.popular) && (
                             <span
                               title="Popular"
                               className="text-[var(--warning-fg)]"

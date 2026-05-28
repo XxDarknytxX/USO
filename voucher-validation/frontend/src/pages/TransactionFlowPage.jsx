@@ -347,7 +347,7 @@ function TransactionCard({ txn, isExpanded, onToggle }) {
             </span>
             <Badge tone={cfg.tone}>{cfg.label}</Badge>
           </div>
-          <div className="flex items-center gap-3 mt-1 text-[11.5px] text-[var(--text-tertiary)] font-mono">
+          <div className="flex items-center gap-3 mt-1 text-[12px] text-[var(--text-tertiary)]">
             {txn.planKey && (
               <span className="flex items-center gap-1">
                 <Tag size={10} />
@@ -375,7 +375,7 @@ function TransactionCard({ txn, isExpanded, onToggle }) {
         </div>
 
         <div className="text-right shrink-0 mr-1">
-          <p className="text-[11.5px] font-mono text-[var(--text-tertiary)]">
+          <p className="text-[12px] text-[var(--text-tertiary)]">
             {formatDate(txn.startedAt)}
           </p>
           <p className="text-[12px] font-medium text-[var(--text-tertiary)] mt-0.5">
@@ -454,7 +454,7 @@ function TimelineStep({ event, isLast }) {
           <span className="text-[12.5px] font-semibold text-[var(--text-primary)]">
             {formatLabel(event.event_type)}
           </span>
-          <span className="text-[10.5px] font-mono text-[var(--text-quaternary)]">
+          <span className="text-[11.5px] text-[var(--text-quaternary)]">
             {formatTs(event.event_timestamp)}
           </span>
           {event.voucher_code && (

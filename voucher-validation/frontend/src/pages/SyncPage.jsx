@@ -102,7 +102,7 @@ export default function SyncPage() {
             subtitle="Pull the latest inventory from Ruijie Cloud"
           >
             {lastSync && (
-              <p className="text-[11.5px] font-mono text-[var(--text-tertiary)] leading-relaxed">
+              <p className="text-[12.5px] text-[var(--text-tertiary)] leading-relaxed">
                 Last sync · {formatDate(lastSync.sync_started_at)}
                 <br />
                 {lastSync.total_processed} processed · {lastSync.total_new} new ·{" "}
@@ -229,7 +229,7 @@ export default function SyncPage() {
                       <Td accent="success">{log.total_new}</Td>
                       <Td accent="info">{log.total_updated}</Td>
                       <Td accent="warning">{log.total_archived || 0}</Td>
-                      <td className="px-5 py-2.5 text-[12px] text-[var(--text-tertiary)] font-mono">
+                      <td className="px-5 py-2.5 text-[12.5px] text-[var(--text-tertiary)]">
                         {log.user_email || "—"}
                       </td>
                     </tr>
@@ -279,7 +279,7 @@ function Td({ children, accent }) {
           ? "text-[var(--warning-fg)]"
           : "text-[var(--text-secondary)]";
   return (
-    <td className={`px-5 py-2.5 text-[12.5px] font-mono font-medium ${color}`}>
+    <td className={`px-5 py-2.5 text-[13px] font-semibold ${color}`}>
       {children}
     </td>
   );
