@@ -1,12 +1,24 @@
 // src/pages/Dashboard.jsx
-import React, { useEffect, useState } from "react";
-import { api } from "../services/api";
-import { voucherApi } from "../services/api";
+// Operations dashboard — metrics, charts, package drilldowns.
+// Rebuilt on the design system: tokenized surfaces, Vodafone red as the only
+// chromatic punctuation, dark-mode-aware tooltips and charts.
+
+import React, { useEffect, useMemo, useState } from "react";
 import toast from "react-hot-toast";
 import {
-  BarChart, Bar, XAxis, YAxis, CartesianGrid,
-  ResponsiveContainer, PieChart, Pie, Cell, AreaChart,
-  Area, Tooltip, Legend,
+  BarChart,
+  Bar,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  ResponsiveContainer,
+  PieChart,
+  Pie,
+  Cell,
+  AreaChart,
+  Area,
+  Tooltip,
+  Legend,
 } from "recharts";
 import {
   Users,
@@ -20,17 +32,39 @@ import {
   RefreshCw,
   Zap,
   HardDrive,
-  XCircle,
   ArrowUpRight,
+  Ticket,
 } from "lucide-react";
 
-// Classify a package into a time-based category by its time_period (minutes)
+import { api, voucherApi } from "../services/api";
+import { Modal, Badge, EmptyState } from "../components/ui";
+
+// Categorize package by time_period (minutes)
 function classifyPackage(timePeriodMinutes) {
   const mins = Number(timePeriodMinutes || 0);
   if (mins <= 1440) return "daily";
   if (mins <= 10080) return "weekly";
   return "monthly";
 }
+
+// Palette: brand red + neutrals. Charts pull from these via getCSSVar.
+function getVar(name, fallback) {
+  if (typeof window === "undefined") return fallback;
+  return (
+    getComputedStyle(document.documentElement).getPropertyValue(name).trim() ||
+    fallback
+  );
+}
+
+// Stable hashed palette derived from brand tokens. Six rotating accents.
+const PALETTE_VARS = [
+  "--color-brand-600",
+  "--color-brand-400",
+  "--color-brand-800",
+  "--color-ink-500",
+  "--color-ink-700",
+  "--color-ink-400",
+];
 
 export default function Dashboard() {
   const [loading, setLoading] = useState(true);
@@ -50,7 +84,6 @@ export default function Dashboard() {
     try {
       await voucherApi.sync();
     } catch (err) {
-      console.warn("Auto-sync failed:", err.message);
       toast.error("Auto-sync failed — showing cached data");
     } finally {
       setSyncing(false);
@@ -72,7 +105,7 @@ export default function Dashboard() {
         String(error?.message || "").includes("401") ||
         String(error?.message || "").includes("token")
       ) {
-        toast.error("Session expired. Please login again.");
+        toast.error("Session expired. Please log in again.");
       }
     } finally {
       setLoading(false);
@@ -105,226 +138,210 @@ export default function Dashboard() {
     return `${(val / 1024).toFixed(1)} GB`;
   }
 
-  // ── Data helpers ───────────────────────────────────────────
-
-  const getFilteredPackageStats = () => {
+  const filteredPackageStats = useMemo(() => {
     if (!voucherStats?.packageStats) return [];
     if (activeView === "overview") return voucherStats.packageStats;
     return voucherStats.packageStats.filter(
       (pkg) => classifyPackage(Number(pkg.avg_duration_minutes || 0)) === activeView
     );
-  };
+  }, [voucherStats, activeView]);
 
-  const getTopMetrics = () => {
-    const filtered = getFilteredPackageStats();
-    const totalVouchers = filtered.reduce((s, p) => s + Number(p.total || 0), 0);
-    const unusedVouchers = filtered.reduce((s, p) => s + Number(p.unused || 0), 0);
-    const activeVouchers = filtered.reduce((s, p) => s + Number(p.active || 0), 0);
-    const liveUsers = filtered.reduce((s, p) => s + Number(p.currently_in_use || 0), 0);
-    const totalDataUsage = filtered.reduce((s, p) => s + Number(p.total_used_quota_mb || 0), 0);
-    const totalQuota = filtered.reduce((s, p) => s + Number(p.total_quota_mb || 0), 0);
-    const expired = filtered.reduce((s, p) => s + Number(p.expired || 0), 0);
-    const inactive = filtered.reduce((s, p) => s + Number(p.inactive || 0), 0);
-    return { totalVouchers, unusedVouchers, activeVouchers, liveUsers, totalDataUsage, totalQuota, expired, inactive };
-  };
+  const metrics = useMemo(() => {
+    const f = filteredPackageStats;
+    return {
+      totalVouchers: f.reduce((s, p) => s + Number(p.total || 0), 0),
+      unusedVouchers: f.reduce((s, p) => s + Number(p.unused || 0), 0),
+      activeVouchers: f.reduce((s, p) => s + Number(p.active || 0), 0),
+      liveUsers: f.reduce((s, p) => s + Number(p.currently_in_use || 0), 0),
+      totalDataUsage: f.reduce(
+        (s, p) => s + Number(p.total_used_quota_mb || 0),
+        0
+      ),
+      totalQuota: f.reduce((s, p) => s + Number(p.total_quota_mb || 0), 0),
+      expired: f.reduce((s, p) => s + Number(p.expired || 0), 0),
+      inactive: f.reduce((s, p) => s + Number(p.inactive || 0), 0),
+    };
+  }, [filteredPackageStats]);
 
-  // Pie chart — package distribution (total vouchers per package)
-  const getPieData = () => {
-    const filtered = getFilteredPackageStats();
-    return filtered
-      .filter((p) => Number(p.total || 0) > 0)
-      .map((p) => ({
-        name: p.package_name || "Unknown",
-        value: Number(p.total || 0),
-      }));
-  };
-
-  // Status donut data
-  const getStatusData = () => {
-    const m = getTopMetrics();
-    const data = [];
-    if (m.unusedVouchers > 0) data.push({ name: "Unused", value: m.unusedVouchers, color: "#3B82F6" });
-    if (m.activeVouchers > 0) data.push({ name: "Active", value: m.activeVouchers, color: "#10B981" });
-    if (m.expired > 0) data.push({ name: "Expired", value: m.expired, color: "#EF4444" });
-    if (m.inactive > 0) data.push({ name: "Inactive", value: m.inactive, color: "#6B7280" });
-    return data;
-  };
-
-  // Bar chart — quota comparison per package
-  const getQuotaBarData = () => {
-    const filtered = getFilteredPackageStats();
-    return filtered.map((p) => ({
+  const pieData = filteredPackageStats
+    .filter((p) => Number(p.total || 0) > 0)
+    .map((p) => ({
       name: p.package_name || "Unknown",
-      shortName: (p.package_name || "Unknown").length > 12
-        ? (p.package_name || "Unknown").substring(0, 12) + "..."
-        : (p.package_name || "Unknown"),
-      allocated: Math.round(Number(p.total_quota_mb || 0) / 1024),
-      consumed: Math.round(Number(p.total_used_quota_mb || 0) / 1024),
+      value: Number(p.total || 0),
     }));
-  };
 
-  // Sync trend
-  const getSyncTrendData = () =>
-    syncLogs
-      .slice(-7)
-      .reverse()
-      .map((log) => ({
-        date: new Date(log.sync_started_at).toLocaleDateString("en-US", {
-          month: "short",
-          day: "numeric",
-        }),
-        processed: log.total_processed || 0,
-        new: log.total_new || 0,
-        updated: log.total_updated || 0,
-      }));
+  const statusData = (() => {
+    const m = metrics;
+    const out = [];
+    if (m.unusedVouchers > 0)
+      out.push({
+        name: "Unused",
+        value: m.unusedVouchers,
+        color: getVar("--info-fg", "#1d4ed8"),
+      });
+    if (m.activeVouchers > 0)
+      out.push({
+        name: "Active",
+        value: m.activeVouchers,
+        color: getVar("--success-fg", "#15803d"),
+      });
+    if (m.expired > 0)
+      out.push({
+        name: "Expired",
+        value: m.expired,
+        color: getVar("--brand", "#e60000"),
+      });
+    if (m.inactive > 0)
+      out.push({
+        name: "Inactive",
+        value: m.inactive,
+        color: getVar("--text-tertiary", "#6d747f"),
+      });
+    return out;
+  })();
 
-  // ── Chart colors ───────────────────────────────────────────
-  const PIE_COLORS = ["#8B5CF6", "#EC4899", "#06B6D4", "#F59E0B", "#10B981", "#6366F1"];
+  const quotaBarData = filteredPackageStats.map((p) => ({
+    name: p.package_name || "Unknown",
+    shortName:
+      (p.package_name || "Unknown").length > 12
+        ? (p.package_name || "Unknown").substring(0, 12) + "…"
+        : p.package_name || "Unknown",
+    allocated: Math.round(Number(p.total_quota_mb || 0) / 1024),
+    consumed: Math.round(Number(p.total_used_quota_mb || 0) / 1024),
+  }));
 
-  // ── Custom tooltip ─────────────────────────────────────────
-  const ChartTooltip = ({ active, payload, label }) => {
-    if (!active || !payload?.length) return null;
+  const syncTrendData = syncLogs
+    .slice(-7)
+    .reverse()
+    .map((log) => ({
+      date: new Date(log.sync_started_at).toLocaleDateString("en-US", {
+        month: "short",
+        day: "numeric",
+      }),
+      processed: log.total_processed || 0,
+      new: log.total_new || 0,
+      updated: log.total_updated || 0,
+    }));
+
+  if (loading) {
     return (
-      <div className="bg-gray-900 text-white rounded-xl px-4 py-3 shadow-xl text-xs border border-gray-700">
-        {label && <p className="font-semibold text-gray-300 mb-1.5">{label}</p>}
-        {payload.map((entry, i) => (
-          <div key={i} className="flex items-center gap-2 py-0.5">
-            <span className="w-2 h-2 rounded-full shrink-0" style={{ background: entry.color }} />
-            <span className="text-gray-400">{entry.name}:</span>
-            <span className="font-bold">{typeof entry.value === "number" ? entry.value.toLocaleString() : entry.value}</span>
-          </div>
-        ))}
-      </div>
-    );
-  };
-
-  const PieTooltip = ({ active, payload }) => {
-    if (!active || !payload?.length) return null;
-    const d = payload[0];
-    return (
-      <div className="bg-gray-900 text-white rounded-xl px-4 py-3 shadow-xl text-xs border border-gray-700">
-        <div className="flex items-center gap-2">
-          <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ background: d.payload?.color || d.payload?.fill }} />
-          <span className="font-semibold">{d.name}</span>
+      <div className="page-shell">
+        <div className="flex-1 flex flex-col items-center justify-center gap-3 text-[var(--text-tertiary)]">
+          <div
+            className="w-9 h-9 rounded-full border-[3px] animate-spin"
+            style={{
+              borderColor: "var(--surface-pressed)",
+              borderTopColor: "var(--brand)",
+            }}
+          />
+          <p className="text-[13px] font-medium">
+            {syncing ? "Syncing with Ruijie Cloud…" : "Loading analytics…"}
+          </p>
         </div>
-        <p className="mt-1 text-gray-300">{d.value?.toLocaleString()} vouchers</p>
       </div>
     );
-  };
+  }
 
-  // ── Render ─────────────────────────────────────────────────
-
-  if (loading)
-    return (
-      <div className="flex flex-col items-center justify-center h-full gap-4">
-        <div className="w-12 h-12 border-[3px] border-purple-100 border-t-purple-500 rounded-full animate-spin" />
-        <p className="text-sm font-medium text-gray-400">
-          {syncing ? "Syncing with Ruijie Cloud..." : "Loading analytics..."}
-        </p>
-      </div>
-    );
-
-  const metrics = getTopMetrics();
-  const pieData = getPieData();
-  const statusData = getStatusData();
-  const quotaBarData = getQuotaBarData();
-  const syncTrendData = getSyncTrendData();
   const lastSync = syncLogs[0];
 
   return (
-    <div className="flex flex-col h-full overflow-y-auto">
-      <div className="p-6 space-y-6 flex-1">
-        {/* ── Header ────────────────────────────────────────── */}
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="w-11 h-11 bg-gradient-to-br from-purple-500 to-pink-500 rounded-2xl flex items-center justify-center shadow-lg shadow-purple-200">
-              <BarChart3 className="w-5 h-5 text-white" />
-            </div>
-            <div>
-              <h1 className="text-2xl font-bold text-gray-900">Dashboard</h1>
-              <p className="text-xs text-gray-400 font-medium mt-0.5">
-                Voucher analytics & overview
-              </p>
-            </div>
-          </div>
-
-          <div className="flex items-center gap-3">
-            {syncing && (
-              <div className="flex items-center gap-1.5 text-xs text-purple-500 font-medium bg-purple-50 px-3 py-1.5 rounded-lg">
-                <RefreshCw size={12} className="animate-spin" />
-                Syncing...
-              </div>
-            )}
-            {lastSync && (
-              <div className="text-[11px] text-gray-300 font-medium">
-                Last sync: {new Date(lastSync.sync_started_at).toLocaleString()}
-              </div>
-            )}
+    <div className="page-shell">
+      {/* ----- Header ----- */}
+      <div className="page-header">
+        <div className="flex items-center gap-3 min-w-0">
+          <span className="brand-mark">
+            <BarChart3 size={15} />
+          </span>
+          <div className="flex flex-col min-w-0">
+            <span className="page-eyebrow">Operations</span>
+            <h1 className="page-title">Dashboard</h1>
+            <p className="page-subtitle">
+              Voucher inventory, sync health, and consumption across all plans.
+            </p>
           </div>
         </div>
 
-        {/* ── View Tabs ─────────────────────────────────────── */}
-        <div className="flex items-center bg-gray-100/80 rounded-xl p-1 w-fit">
+        <div className="flex items-center gap-3">
+          {syncing && (
+            <Badge tone="brand" icon={<RefreshCw size={11} className="animate-spin" />}>
+              Syncing
+            </Badge>
+          )}
+          {lastSync && (
+            <span className="text-[11px] font-mono text-[var(--text-quaternary)]">
+              Last sync · {new Date(lastSync.sync_started_at).toLocaleString()}
+            </span>
+          )}
+        </div>
+      </div>
+
+      <div className="px-8 py-6 space-y-6">
+        {/* ----- View tabs ----- */}
+        <div
+          className={
+            "inline-flex items-center rounded-md p-0.5 " +
+            "bg-[var(--surface-raised)] border border-[var(--border-default)]"
+          }
+        >
           {[
-            { key: "overview", label: "All Packages" },
+            { key: "overview", label: "All" },
             { key: "daily", label: "Daily" },
             { key: "weekly", label: "Weekly" },
             { key: "monthly", label: "Monthly" },
-          ].map(({ key, label }) => (
-            <button
-              key={key}
-              onClick={() => setActiveView(key)}
-              className={`px-4 py-2 text-xs font-semibold rounded-lg transition-all ${
-                activeView === key
-                  ? "bg-white text-gray-800 shadow-sm"
-                  : "text-gray-400 hover:text-gray-600"
-              }`}
-            >
-              {label}
-            </button>
-          ))}
+          ].map(({ key, label }) => {
+            const active = activeView === key;
+            return (
+              <button
+                key={key}
+                onClick={() => setActiveView(key)}
+                className={
+                  "h-7 px-3 text-[12px] font-medium rounded transition-colors " +
+                  (active
+                    ? "bg-[var(--surface-hover)] text-[var(--text-primary)]"
+                    : "text-[var(--text-tertiary)] hover:text-[var(--text-primary)]")
+                }
+              >
+                {label}
+              </button>
+            );
+          })}
         </div>
 
-        {/* ── Metric Cards ──────────────────────────────────── */}
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+        {/* ----- Metric tiles ----- */}
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
           <MetricCard
-            label="Total Vouchers"
+            label="Total vouchers"
             value={metrics.totalVouchers.toLocaleString()}
-            icon={<Database size={18} />}
-            color="purple"
-            sub={`${metrics.activeVouchers} active`}
+            icon={<Database size={14} />}
+            sub={`${metrics.activeVouchers.toLocaleString()} active`}
           />
           <MetricCard
-            label="Live Users"
+            label="Live users"
             value={metrics.liveUsers.toLocaleString()}
-            icon={<Users size={18} />}
-            color="blue"
+            icon={<Users size={14} />}
             sub="Currently connected"
           />
           <MetricCard
-            label="Data Consumed"
+            label="Data consumed"
             value={formatQuota(metrics.totalDataUsage)}
-            icon={<HardDrive size={18} />}
-            color="green"
-            sub={`of ${formatQuota(metrics.totalQuota)} total`}
+            icon={<HardDrive size={14} />}
+            sub={`of ${formatQuota(metrics.totalQuota)}`}
           />
           <MetricCard
-            label="Active Rate"
+            label="Active rate"
             value={
               metrics.totalVouchers
                 ? `${Math.round((metrics.activeVouchers / metrics.totalVouchers) * 100)}%`
                 : "0%"
             }
-            icon={<Zap size={18} />}
-            color="orange"
-            sub={`${metrics.expiredUsed} expired / used`}
+            icon={<Zap size={14} />}
+            sub={`${metrics.expired.toLocaleString()} expired`}
           />
         </div>
 
-        {/* ── Charts Row 1 ──────────────────────────────────── */}
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
-          {/* Package Distribution Pie */}
-          <ChartCard title="Package Distribution" icon={<Activity size={15} />}>
+        {/* ----- Charts Row 1 ----- */}
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+          <ChartCard title="Package distribution" icon={<Activity size={14} />}>
             {pieData.length === 0 ? (
               <EmptyChart />
             ) : (
@@ -335,9 +352,9 @@ export default function Dashboard() {
                       data={pieData}
                       cx="50%"
                       cy="45%"
-                      innerRadius={50}
-                      outerRadius={85}
-                      paddingAngle={3}
+                      innerRadius={48}
+                      outerRadius={84}
+                      paddingAngle={2}
                       dataKey="value"
                       nameKey="name"
                       strokeWidth={0}
@@ -345,7 +362,7 @@ export default function Dashboard() {
                       {pieData.map((_, i) => (
                         <Cell
                           key={i}
-                          fill={PIE_COLORS[i % PIE_COLORS.length]}
+                          fill={getVar(PALETTE_VARS[i % PALETTE_VARS.length], "#e60000")}
                           className="cursor-pointer hover:opacity-80 transition-opacity"
                           onClick={() => handlePackageDrillDown(pieData[i].name)}
                         />
@@ -355,9 +372,16 @@ export default function Dashboard() {
                     <Legend
                       verticalAlign="bottom"
                       iconType="circle"
-                      iconSize={8}
+                      iconSize={7}
                       wrapperStyle={{ fontSize: 11, paddingTop: 4 }}
-                      formatter={(val) => <span className="text-gray-500 ml-1">{val}</span>}
+                      formatter={(val) => (
+                        <span
+                          className="ml-1"
+                          style={{ color: "var(--text-tertiary)" }}
+                        >
+                          {val}
+                        </span>
+                      )}
                     />
                   </PieChart>
                 </ResponsiveContainer>
@@ -365,22 +389,21 @@ export default function Dashboard() {
             )}
           </ChartCard>
 
-          {/* Status Breakdown Donut */}
-          <ChartCard title="Status Breakdown" icon={<CheckCircle size={15} />}>
+          <ChartCard title="Status breakdown" icon={<CheckCircle size={14} />}>
             {statusData.length === 0 ? (
               <EmptyChart />
             ) : (
               <div className="flex flex-col h-full">
-                <div className="flex-1 min-h-0">
+                <div className="flex-1 min-h-[180px]">
                   <ResponsiveContainer width="100%" height="100%">
                     <PieChart>
                       <Pie
                         data={statusData}
                         cx="50%"
                         cy="50%"
-                        innerRadius={45}
+                        innerRadius={44}
                         outerRadius={70}
-                        paddingAngle={4}
+                        paddingAngle={3}
                         dataKey="value"
                         nameKey="name"
                         strokeWidth={0}
@@ -393,15 +416,19 @@ export default function Dashboard() {
                     </PieChart>
                   </ResponsiveContainer>
                 </div>
-                {/* Legend below */}
-                <div className="shrink-0 flex flex-col gap-2 pt-3 border-t border-gray-50 mt-2">
+                <div className="shrink-0 mt-3 pt-3 border-t border-[var(--border-subtle)] flex flex-col gap-1.5">
                   {statusData.map((d, i) => (
                     <div key={i} className="flex items-center justify-between">
-                      <div className="flex items-center gap-2">
-                        <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ background: d.color }} />
-                        <span className="text-xs text-gray-500 font-medium">{d.name}</span>
-                      </div>
-                      <span className="text-xs font-bold text-gray-700">{d.value.toLocaleString()}</span>
+                      <span className="flex items-center gap-2 text-[12px] text-[var(--text-secondary)]">
+                        <span
+                          className="w-2 h-2 rounded-full shrink-0"
+                          style={{ background: d.color }}
+                        />
+                        {d.name}
+                      </span>
+                      <span className="text-[12px] font-mono font-semibold text-[var(--text-primary)]">
+                        {d.value.toLocaleString()}
+                      </span>
                     </div>
                   ))}
                 </div>
@@ -409,28 +436,30 @@ export default function Dashboard() {
             )}
           </ChartCard>
 
-          {/* Data Quota Usage Bar */}
-          <ChartCard title="Data Quota by Package" subtitle="Allocated vs Consumed (GB)" icon={<TrendingUp size={15} />}>
+          <ChartCard
+            title="Quota by package"
+            subtitle="Allocated · Consumed (GB)"
+            icon={<TrendingUp size={14} />}
+          >
             {quotaBarData.length === 0 ? (
               <EmptyChart />
             ) : (
               <div className="h-[260px]">
                 <ResponsiveContainer width="100%" height="100%">
-                  <BarChart data={quotaBarData} barGap={2} barCategoryGap="25%" margin={{ top: 5, right: 5, bottom: 5, left: -10 }}>
-                    <defs>
-                      <linearGradient id="barAllocated" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="0%" stopColor="#8B5CF6" stopOpacity={0.9} />
-                        <stop offset="100%" stopColor="#8B5CF6" stopOpacity={0.5} />
-                      </linearGradient>
-                      <linearGradient id="barConsumed" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="0%" stopColor="#EC4899" stopOpacity={0.9} />
-                        <stop offset="100%" stopColor="#EC4899" stopOpacity={0.5} />
-                      </linearGradient>
-                    </defs>
-                    <CartesianGrid strokeDasharray="3 3" stroke="#f3f4f6" vertical={false} />
+                  <BarChart
+                    data={quotaBarData}
+                    barGap={2}
+                    barCategoryGap="25%"
+                    margin={{ top: 5, right: 5, bottom: 5, left: -10 }}
+                  >
+                    <CartesianGrid
+                      strokeDasharray="3 3"
+                      stroke="var(--border-subtle)"
+                      vertical={false}
+                    />
                     <XAxis
                       dataKey="shortName"
-                      tick={{ fontSize: 10, fill: "#9ca3af" }}
+                      tick={{ fontSize: 10, fill: "var(--text-quaternary)" }}
                       tickLine={false}
                       axisLine={false}
                       interval={0}
@@ -439,11 +468,10 @@ export default function Dashboard() {
                       height={40}
                     />
                     <YAxis
-                      tick={{ fontSize: 10, fill: "#9ca3af" }}
+                      tick={{ fontSize: 10, fill: "var(--text-quaternary)" }}
                       tickLine={false}
                       axisLine={false}
-                      width={35}
-                      label={{ value: "GB", position: "insideTopLeft", offset: -5, style: { fontSize: 10, fill: "#9ca3af" } }}
+                      width={32}
                     />
                     <Tooltip content={<ChartTooltip />} />
                     <Legend
@@ -452,10 +480,29 @@ export default function Dashboard() {
                       iconType="circle"
                       iconSize={7}
                       wrapperStyle={{ fontSize: 10, paddingBottom: 4 }}
-                      formatter={(val) => <span className="text-gray-500 ml-1">{val}</span>}
+                      formatter={(val) => (
+                        <span
+                          className="ml-1"
+                          style={{ color: "var(--text-tertiary)" }}
+                        >
+                          {val}
+                        </span>
+                      )}
                     />
-                    <Bar dataKey="allocated" name="Allocated" fill="url(#barAllocated)" radius={[5, 5, 0, 0]} maxBarSize={28} />
-                    <Bar dataKey="consumed" name="Consumed" fill="url(#barConsumed)" radius={[5, 5, 0, 0]} maxBarSize={28} />
+                    <Bar
+                      dataKey="allocated"
+                      name="Allocated"
+                      fill={getVar("--color-ink-400", "#9aa1ab")}
+                      radius={[3, 3, 0, 0]}
+                      maxBarSize={26}
+                    />
+                    <Bar
+                      dataKey="consumed"
+                      name="Consumed"
+                      fill={getVar("--brand", "#e60000")}
+                      radius={[3, 3, 0, 0]}
+                      maxBarSize={26}
+                    />
                   </BarChart>
                 </ResponsiveContainer>
               </div>
@@ -463,199 +510,200 @@ export default function Dashboard() {
           </ChartCard>
         </div>
 
-        {/* ── Charts Row 2 ──────────────────────────────────── */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
-          {/* Sync Activity Trend */}
-          <ChartCard title="Sync Activity" subtitle="Last 7 syncs" icon={<Clock size={15} />}>
+        {/* ----- Charts Row 2 ----- */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          <ChartCard
+            title="Sync activity"
+            subtitle="Last 7 syncs"
+            icon={<Clock size={14} />}
+          >
             {syncTrendData.length === 0 ? (
               <EmptyChart message="No sync history yet" />
             ) : (
               <div className="h-[240px]">
-              <ResponsiveContainer width="100%" height="100%">
-                <AreaChart data={syncTrendData} margin={{ top: 5, right: 5, bottom: 5, left: -10 }}>
-                  <defs>
-                    <linearGradient id="syncProcessed" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="0%" stopColor="#8B5CF6" stopOpacity={0.3} />
-                      <stop offset="100%" stopColor="#8B5CF6" stopOpacity={0} />
-                    </linearGradient>
-                    <linearGradient id="syncNew" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="0%" stopColor="#10B981" stopOpacity={0.3} />
-                      <stop offset="100%" stopColor="#10B981" stopOpacity={0} />
-                    </linearGradient>
-                  </defs>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#f3f4f6" vertical={false} />
-                  <XAxis
-                    dataKey="date"
-                    tick={{ fontSize: 11, fill: "#9ca3af" }}
-                    tickLine={false}
-                    axisLine={false}
-                  />
-                  <YAxis
-                    tick={{ fontSize: 10, fill: "#9ca3af" }}
-                    tickLine={false}
-                    axisLine={false}
-                    width={35}
-                    label={{ value: "Count", position: "insideTopLeft", offset: -5, style: { fontSize: 10, fill: "#9ca3af" } }}
-                  />
-                  <Tooltip content={<ChartTooltip />} />
-                  <Legend
-                    verticalAlign="top"
-                    align="right"
-                    iconType="circle"
-                    iconSize={8}
-                    wrapperStyle={{ fontSize: 11, paddingBottom: 8 }}
-                    formatter={(val) => <span className="text-gray-500 ml-1">{val}</span>}
-                  />
-                  <Area
-                    type="monotone"
-                    dataKey="processed"
-                    name="Processed"
-                    stroke="#8B5CF6"
-                    strokeWidth={2.5}
-                    fill="url(#syncProcessed)"
-                    dot={{ r: 3, fill: "#8B5CF6", strokeWidth: 0 }}
-                    activeDot={{ r: 5, fill: "#8B5CF6", strokeWidth: 2, stroke: "#fff" }}
-                  />
-                  <Area
-                    type="monotone"
-                    dataKey="new"
-                    name="New"
-                    stroke="#10B981"
-                    strokeWidth={2}
-                    fill="url(#syncNew)"
-                    dot={{ r: 3, fill: "#10B981", strokeWidth: 0 }}
-                    activeDot={{ r: 5, fill: "#10B981", strokeWidth: 2, stroke: "#fff" }}
-                  />
-                </AreaChart>
-              </ResponsiveContainer>
+                <ResponsiveContainer width="100%" height="100%">
+                  <AreaChart
+                    data={syncTrendData}
+                    margin={{ top: 5, right: 5, bottom: 5, left: -10 }}
+                  >
+                    <defs>
+                      <linearGradient id="syncProcessed" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="0%" stopColor={getVar("--brand", "#e60000")} stopOpacity={0.28} />
+                        <stop offset="100%" stopColor={getVar("--brand", "#e60000")} stopOpacity={0} />
+                      </linearGradient>
+                      <linearGradient id="syncNew" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="0%" stopColor={getVar("--success-fg", "#15803d")} stopOpacity={0.28} />
+                        <stop offset="100%" stopColor={getVar("--success-fg", "#15803d")} stopOpacity={0} />
+                      </linearGradient>
+                    </defs>
+                    <CartesianGrid strokeDasharray="3 3" stroke="var(--border-subtle)" vertical={false} />
+                    <XAxis
+                      dataKey="date"
+                      tick={{ fontSize: 11, fill: "var(--text-quaternary)" }}
+                      tickLine={false}
+                      axisLine={false}
+                    />
+                    <YAxis
+                      tick={{ fontSize: 10, fill: "var(--text-quaternary)" }}
+                      tickLine={false}
+                      axisLine={false}
+                      width={32}
+                    />
+                    <Tooltip content={<ChartTooltip />} />
+                    <Legend
+                      verticalAlign="top"
+                      align="right"
+                      iconType="circle"
+                      iconSize={7}
+                      wrapperStyle={{ fontSize: 11, paddingBottom: 8 }}
+                      formatter={(val) => (
+                        <span
+                          className="ml-1"
+                          style={{ color: "var(--text-tertiary)" }}
+                        >
+                          {val}
+                        </span>
+                      )}
+                    />
+                    <Area
+                      type="monotone"
+                      dataKey="processed"
+                      name="Processed"
+                      stroke={getVar("--brand", "#e60000")}
+                      strokeWidth={2}
+                      fill="url(#syncProcessed)"
+                      dot={{ r: 2.5, fill: getVar("--brand", "#e60000"), strokeWidth: 0 }}
+                      activeDot={{ r: 4, stroke: "var(--surface-raised)", strokeWidth: 2 }}
+                    />
+                    <Area
+                      type="monotone"
+                      dataKey="new"
+                      name="New"
+                      stroke={getVar("--success-fg", "#15803d")}
+                      strokeWidth={2}
+                      fill="url(#syncNew)"
+                      dot={{ r: 2.5, fill: getVar("--success-fg", "#15803d"), strokeWidth: 0 }}
+                      activeDot={{ r: 4, stroke: "var(--surface-raised)", strokeWidth: 2 }}
+                    />
+                  </AreaChart>
+                </ResponsiveContainer>
               </div>
             )}
           </ChartCard>
 
-          {/* Quick Overview Panel */}
-          <ChartCard title="Quick Overview" icon={<Wifi size={15} />}>
-            <div className="space-y-3 overflow-y-auto max-h-[280px]">
-              {getFilteredPackageStats().map((pkg, i) => {
+          <ChartCard title="Quick overview" icon={<Wifi size={14} />}>
+            <div className="space-y-2 overflow-y-auto max-h-[280px] pr-1">
+              {filteredPackageStats.map((pkg, i) => {
                 const total = Number(pkg.total || 0);
                 const active = Number(pkg.active || 0);
                 const pct = total ? Math.round((active / total) * 100) : 0;
-                const usedQuota = Number(pkg.total_used_quota_mb || 0);
-                const totalQuota = Number(pkg.total_quota_mb || 0);
-                const dataPct = totalQuota ? Math.round((usedQuota / totalQuota) * 100) : 0;
+                const usedQ = Number(pkg.total_used_quota_mb || 0);
+                const totalQ = Number(pkg.total_quota_mb || 0);
+                const dataPct = totalQ ? Math.round((usedQ / totalQ) * 100) : 0;
+                const color = getVar(PALETTE_VARS[i % PALETTE_VARS.length], "#e60000");
 
                 return (
                   <div
                     key={i}
-                    className="group p-3.5 bg-gray-50/80 hover:bg-purple-50/60 rounded-xl transition-all cursor-pointer border border-transparent hover:border-purple-100"
                     onClick={() => handlePackageDrillDown(pkg.package_name)}
+                    className={
+                      "group p-3 rounded-md cursor-pointer border transition-colors " +
+                      "bg-[var(--surface-sunken)] border-[var(--border-subtle)] " +
+                      "hover:bg-[var(--surface-hover)] hover:border-[var(--border-default)]"
+                    }
                   >
-                    <div className="flex items-center justify-between mb-2.5">
-                      <div className="flex items-center gap-2.5">
-                        <div
-                          className="w-2.5 h-2.5 rounded-full shrink-0"
-                          style={{ background: PIE_COLORS[i % PIE_COLORS.length] }}
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="flex items-center gap-2 text-[12.5px] font-medium text-[var(--text-primary)] truncate">
+                        <span
+                          className="w-2 h-2 rounded-full shrink-0"
+                          style={{ background: color }}
                         />
-                        <span className="text-sm font-semibold text-gray-700 group-hover:text-purple-700 transition-colors">
-                          {pkg.package_name || "Unknown"}
+                        {pkg.package_name || "Unknown"}
+                      </span>
+                      <div className="flex items-center gap-2 shrink-0">
+                        <span className="text-[12px] font-mono font-semibold text-[var(--text-primary)]">
+                          {total.toLocaleString()}
                         </span>
-                      </div>
-                      <div className="flex items-center gap-3">
-                        <span className="text-xs font-bold text-gray-800">{total}</span>
-                        <span className="text-[10px] text-gray-400">vouchers</span>
-                        <ArrowUpRight size={13} className="text-gray-300 group-hover:text-purple-400 transition-colors" />
+                        <ArrowUpRight
+                          size={12}
+                          className="text-[var(--text-quaternary)] group-hover:text-[var(--brand)] transition-colors"
+                        />
                       </div>
                     </div>
-                    {/* Active bar */}
-                    <div className="flex items-center gap-3">
-                      <div className="flex-1">
-                        <div className="h-1.5 bg-gray-200/80 rounded-full overflow-hidden">
-                          <div
-                            className="h-full rounded-full transition-all duration-700"
-                            style={{
-                              width: `${Math.min(pct, 100)}%`,
-                              background: PIE_COLORS[i % PIE_COLORS.length],
-                            }}
-                          />
-                        </div>
-                      </div>
-                      <span className="text-[10px] font-semibold text-gray-400 w-10 text-right">
-                        {pct}% active
-                      </span>
-                    </div>
-                    {/* Data usage bar */}
-                    <div className="flex items-center gap-3 mt-1.5">
-                      <div className="flex-1">
-                        <div className="h-1.5 bg-gray-200/80 rounded-full overflow-hidden">
-                          <div
-                            className="h-full bg-gradient-to-r from-pink-400 to-orange-400 rounded-full transition-all duration-700"
-                            style={{ width: `${Math.min(dataPct, 100)}%` }}
-                          />
-                        </div>
-                      </div>
-                      <span className="text-[10px] font-semibold text-gray-400 w-10 text-right">
-                        {dataPct}% data
-                      </span>
-                    </div>
+                    <ProgressLine
+                      label="active"
+                      pct={pct}
+                      color={color}
+                    />
+                    <ProgressLine
+                      label="data"
+                      pct={dataPct}
+                      color="var(--brand)"
+                    />
                   </div>
                 );
               })}
-
-              {getFilteredPackageStats().length === 0 && <EmptyChart message="No packages in this category" />}
+              {filteredPackageStats.length === 0 && (
+                <EmptyChart message="No packages in this category" />
+              )}
             </div>
           </ChartCard>
         </div>
 
-        {/* ── Package Detail Cards ──────────────────────────── */}
+        {/* ----- Package breakdown cards ----- */}
         <div>
-          <h2 className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-4">
-            Package Breakdown
+          <h2 className="text-[10.5px] font-mono uppercase tracking-[0.12em] text-[var(--text-quaternary)] mb-3">
+            Package breakdown
           </h2>
-          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-            {getFilteredPackageStats().map((pkg, i) => {
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
+            {filteredPackageStats.map((pkg, i) => {
               const total = Number(pkg.total || 0);
               const active = Number(pkg.active || 0);
-              const expired = Number(pkg.expired || 0);
               const liveUsers = Number(pkg.currently_in_use || 0);
               const usedQ = Math.round(Number(pkg.total_used_quota_mb || 0) / 1024);
               const totalQ = Math.round(Number(pkg.total_quota_mb || 0) / 1024);
               const dataPct = totalQ ? Math.round((usedQ / totalQ) * 100) : 0;
+              const color = getVar(PALETTE_VARS[i % PALETTE_VARS.length], "#e60000");
 
               return (
                 <div
                   key={i}
-                  className="bg-white rounded-2xl border border-gray-100 p-5 hover:border-purple-200 hover:shadow-md transition-all cursor-pointer group"
                   onClick={() => handlePackageDrillDown(pkg.package_name)}
+                  className={
+                    "p-4 rounded-md cursor-pointer transition-[border-color,background-color] " +
+                    "bg-[var(--surface-raised)] border border-[var(--border-default)] " +
+                    "hover:border-[var(--brand)] hover:bg-[var(--surface-hover)]"
+                  }
                 >
                   <div className="flex items-center justify-between mb-4">
-                    <div className="flex items-center gap-2.5">
-                      <div
-                        className="w-3 h-3 rounded-full shrink-0"
-                        style={{ background: PIE_COLORS[i % PIE_COLORS.length] }}
+                    <span className="flex items-center gap-2 text-[13px] font-semibold text-[var(--text-primary)] truncate">
+                      <span
+                        className="w-2.5 h-2.5 rounded-full shrink-0"
+                        style={{ background: color }}
                       />
-                      <h3 className="text-sm font-bold text-gray-800 group-hover:text-purple-600 transition-colors">
-                        {pkg.package_name || "Unknown"}
-                      </h3>
-                    </div>
-                    <ArrowUpRight size={14} className="text-gray-200 group-hover:text-purple-400 transition-colors" />
+                      {pkg.package_name || "Unknown"}
+                    </span>
+                    <ArrowUpRight size={13} className="text-[var(--text-quaternary)]" />
                   </div>
 
-                  <div className="grid grid-cols-3 gap-3 mb-4">
+                  <div className="grid grid-cols-3 gap-2 mb-3">
                     <MiniStat label="Total" value={total} />
-                    <MiniStat label="Active" value={active} color="text-green-600" />
-                    <MiniStat label="Live" value={liveUsers} color="text-blue-600" />
+                    <MiniStat label="Active" value={active} />
+                    <MiniStat label="Live" value={liveUsers} accent />
                   </div>
 
-                  {/* Data progress */}
                   <div>
-                    <div className="flex items-center justify-between text-[10px] mb-1.5">
-                      <span className="text-gray-400 font-medium">Data Usage</span>
-                      <span className="font-semibold text-gray-500">
+                    <div className="flex items-center justify-between text-[10.5px] mb-1.5 font-mono">
+                      <span className="text-[var(--text-quaternary)] uppercase tracking-wide">
+                        Data usage
+                      </span>
+                      <span className="text-[var(--text-tertiary)]">
                         {usedQ} / {totalQ} GB
                       </span>
                     </div>
-                    <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
+                    <div className="h-1.5 bg-[var(--surface-sunken)] rounded-full overflow-hidden">
                       <div
-                        className="h-full bg-gradient-to-r from-purple-500 to-pink-500 rounded-full transition-all duration-700"
+                        className="h-full bg-[var(--brand)] rounded-full transition-[width] duration-500"
                         style={{ width: `${Math.min(dataPct, 100)}%` }}
                       />
                     </div>
@@ -667,158 +715,303 @@ export default function Dashboard() {
         </div>
       </div>
 
-      {/* ── Drill-Down Modal ──────────────────────────────── */}
+      {/* ----- Drill-down modal ----- */}
       {selectedPackage && drillDownData && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-6 bg-black/40 backdrop-blur-sm">
-          <div className="w-full max-w-5xl max-h-[85vh] overflow-auto bg-white rounded-2xl shadow-2xl">
-            {/* Modal accent */}
-            <div className="h-1 bg-gradient-to-r from-purple-500 via-pink-500 to-orange-400" />
+        <Modal
+          open
+          onClose={() => {
+            setSelectedPackage(null);
+            setDrillDownData(null);
+          }}
+          width="2xl"
+        >
+          <Modal.Header
+            eyebrow="Package detail"
+            title={selectedPackage}
+            subtitle={`${drillDownData.total || 0} vouchers in this package`}
+            icon={Ticket}
+            onClose={() => {
+              setSelectedPackage(null);
+              setDrillDownData(null);
+            }}
+          />
 
-            <div className="p-6">
-              {/* Header */}
-              <div className="flex items-center justify-between mb-6">
-                <div>
-                  <h3 className="text-lg font-bold text-gray-900">{selectedPackage}</h3>
-                  <p className="text-xs text-gray-400 mt-0.5">Package detail view</p>
-                </div>
-                <button
-                  onClick={() => { setSelectedPackage(null); setDrillDownData(null); }}
-                  className="w-9 h-9 flex items-center justify-center rounded-lg bg-gray-100 hover:bg-gray-200 transition-colors"
+          <Modal.Body>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-5">
+              {[
+                { label: "Total", value: drillDownData.total },
+                {
+                  label: "Active now",
+                  value:
+                    drillDownData.vouchers?.filter(
+                      (v) => Number(v.current_clients) > 0
+                    ).length || 0,
+                },
+                {
+                  label: "Usage rate",
+                  value: drillDownData.total
+                    ? `${Math.round(
+                        (drillDownData.vouchers?.filter(
+                          (v) => Number(v.used_time) > 0
+                        ).length /
+                          drillDownData.total) *
+                          100
+                      )}%`
+                    : "0%",
+                },
+                {
+                  label: "Data used",
+                  value: formatQuota(
+                    drillDownData.vouchers?.reduce(
+                      (s, v) => s + Number(v.used_quota || 0),
+                      0
+                    ) || 0
+                  ),
+                },
+              ].map((s) => (
+                <div
+                  key={s.label}
+                  className={
+                    "p-3 rounded-md bg-[var(--surface-sunken)] " +
+                    "border border-[var(--border-subtle)]"
+                  }
                 >
-                  <XCircle size={16} className="text-gray-500" />
-                </button>
-              </div>
-
-              {/* Stat chips */}
-              <div className="grid grid-cols-4 gap-3 mb-6">
-                {[
-                  { label: "Total", value: drillDownData.total, color: "purple" },
-                  { label: "Active Now", value: drillDownData.vouchers?.filter((v) => Number(v.current_clients) > 0).length || 0, color: "green" },
-                  { label: "Usage Rate", value: drillDownData.total ? `${Math.round((drillDownData.vouchers?.filter((v) => Number(v.used_time) > 0).length / drillDownData.total) * 100)}%` : "0%", color: "blue" },
-                  { label: "Data Used", value: formatQuota(drillDownData.vouchers?.reduce((s, v) => s + Number(v.used_quota || 0), 0) || 0), color: "orange" },
-                ].map((s, i) => (
-                  <div key={i} className="bg-gray-50 rounded-xl p-4 text-center">
-                    <p className="text-lg font-bold text-gray-800">{s.value}</p>
-                    <p className="text-[11px] text-gray-400 font-medium mt-0.5">{s.label}</p>
-                  </div>
-                ))}
-              </div>
-
-              {/* Table */}
-              <div className="rounded-xl border border-gray-100 overflow-hidden">
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr className="bg-gray-50 text-[11px] text-gray-400 uppercase tracking-wider font-semibold text-left">
-                      <th className="px-4 py-3">Code</th>
-                      <th className="px-4 py-3">Status</th>
-                      <th className="px-4 py-3">Clients</th>
-                      <th className="px-4 py-3">Time</th>
-                      <th className="px-4 py-3">Data</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-gray-50">
-                    {(drillDownData.vouchers || []).slice(0, 15).map((v) => (
-                      <tr key={v.uuid} className="hover:bg-gray-50/60 transition-colors">
-                        <td className="px-4 py-3">
-                          <span className="font-mono text-xs font-semibold text-purple-600 bg-purple-50/60 px-2 py-0.5 rounded-md">
-                            {v.voucher_code}
-                          </span>
-                        </td>
-                        <td className="px-4 py-3">
-                          <span
-                            className={`text-[11px] font-semibold px-2.5 py-1 rounded-full ${
-                              v.status === "1"
-                                ? "bg-green-50 text-green-600"
-                                : v.status === "2"
-                                ? "bg-amber-50 text-amber-600"
-                                : v.status === "3"
-                                ? "bg-red-50 text-red-600"
-                                : "bg-gray-100 text-gray-500"
-                            }`}
-                          >
-                            {v.status === "1" ? "Active" : v.status === "2" ? "Used" : v.status === "3" ? "Disabled" : "Inactive"}
-                          </span>
-                        </td>
-                        <td className="px-4 py-3 text-xs text-gray-600">
-                          {v.current_clients}/{v.max_clients}
-                        </td>
-                        <td className="px-4 py-3 text-xs text-gray-600">
-                          {formatDuration(v.used_time)} / {formatDuration(v.time_period)}
-                        </td>
-                        <td className="px-4 py-3 text-xs text-gray-600">
-                          {formatQuota(v.used_quota)} / {formatQuota(v.quota)}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+                  <p className="text-[10.5px] font-mono uppercase tracking-wide text-[var(--text-quaternary)] mb-1">
+                    {s.label}
+                  </p>
+                  <p className="text-[18px] font-semibold text-[var(--text-primary)]">
+                    {s.value}
+                  </p>
+                </div>
+              ))}
             </div>
-          </div>
-        </div>
+
+            <div
+              className={
+                "rounded-md border border-[var(--border-default)] overflow-hidden"
+              }
+            >
+              <table className="w-full text-[13px]">
+                <thead>
+                  <tr
+                    className={
+                      "bg-[var(--surface-sunken)] text-left " +
+                      "text-[10.5px] font-mono uppercase tracking-[0.1em] text-[var(--text-quaternary)]"
+                    }
+                  >
+                    <th className="px-4 py-2.5 font-mono font-medium">Code</th>
+                    <th className="px-4 py-2.5 font-mono font-medium">Status</th>
+                    <th className="px-4 py-2.5 font-mono font-medium">Clients</th>
+                    <th className="px-4 py-2.5 font-mono font-medium">Time</th>
+                    <th className="px-4 py-2.5 font-mono font-medium">Data</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {(drillDownData.vouchers || []).slice(0, 15).map((v) => (
+                    <tr
+                      key={v.uuid}
+                      className="border-t border-[var(--border-subtle)] hover:bg-[var(--surface-hover)] transition-colors"
+                    >
+                      <td className="px-4 py-2.5">
+                        <span className="font-mono text-[12.5px] font-medium px-1.5 py-0.5 rounded bg-[var(--brand-soft)] text-[var(--brand-fg-on-soft)]">
+                          {v.voucher_code}
+                        </span>
+                      </td>
+                      <td className="px-4 py-2.5">
+                        <StatusBadgeMini status={v.status} />
+                      </td>
+                      <td className="px-4 py-2.5 text-[12.5px] font-mono text-[var(--text-secondary)]">
+                        {v.current_clients}/{v.max_clients}
+                      </td>
+                      <td className="px-4 py-2.5 text-[12.5px] font-mono text-[var(--text-secondary)]">
+                        {formatDuration(v.used_time)} / {formatDuration(v.time_period)}
+                      </td>
+                      <td className="px-4 py-2.5 text-[12.5px] font-mono text-[var(--text-secondary)]">
+                        {formatQuota(v.used_quota)} / {formatQuota(v.quota)}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </Modal.Body>
+        </Modal>
       )}
     </div>
   );
 }
 
-// ── Sub-components ─────────────────────────────────────────
+/* ------------ Sub-components --------------------------------------------- */
 
-function MetricCard({ label, value, icon, color, sub }) {
-  const styles = {
-    purple: { bg: "bg-purple-50", icon: "bg-purple-100 text-purple-500", accent: "text-purple-600" },
-    blue: { bg: "bg-blue-50", icon: "bg-blue-100 text-blue-500", accent: "text-blue-600" },
-    green: { bg: "bg-green-50", icon: "bg-green-100 text-green-500", accent: "text-green-600" },
-    orange: { bg: "bg-orange-50", icon: "bg-orange-100 text-orange-500", accent: "text-orange-600" },
-  };
-  const s = styles[color];
-
+function MetricCard({ label, value, icon, sub }) {
   return (
-    <div className={`${s.bg} rounded-2xl p-5 transition-all hover:shadow-md`}>
-      <div className="flex items-center justify-between mb-3">
-        <div className={`w-9 h-9 ${s.icon} rounded-xl flex items-center justify-center`}>
+    <div
+      className={
+        "rounded-md p-4 " +
+        "bg-[var(--surface-raised)] border border-[var(--border-default)] " +
+        "shadow-[var(--elev-1)]"
+      }
+    >
+      <div className="flex items-center gap-2 mb-2">
+        <span
+          className={
+            "h-7 w-7 rounded-md inline-flex items-center justify-center " +
+            "bg-[var(--brand-soft)] text-[var(--brand-fg-on-soft)]"
+          }
+        >
           {icon}
-        </div>
+        </span>
+        <span className="text-[10.5px] font-mono uppercase tracking-[0.1em] text-[var(--text-quaternary)]">
+          {label}
+        </span>
       </div>
-      <p className="text-2xl font-bold text-gray-900">{value}</p>
-      <p className="text-xs font-semibold text-gray-500 mt-0.5">{label}</p>
-      {sub && <p className="text-[10px] text-gray-400 mt-1">{sub}</p>}
+      <p className="text-[22px] font-semibold text-[var(--text-primary)] tracking-tight">
+        {value}
+      </p>
+      {sub && (
+        <p className="text-[11px] text-[var(--text-tertiary)] mt-1 font-mono">{sub}</p>
+      )}
     </div>
   );
 }
 
 function ChartCard({ title, subtitle, icon, children }) {
   return (
-    <div className="bg-white rounded-2xl border border-gray-100 p-5 shadow-sm hover:shadow-md transition-all overflow-hidden flex flex-col">
-      <div className="flex items-center justify-between mb-4 shrink-0">
+    <div
+      className={
+        "rounded-md p-4 flex flex-col " +
+        "bg-[var(--surface-raised)] border border-[var(--border-default)] " +
+        "shadow-[var(--elev-1)]"
+      }
+    >
+      <div className="flex items-center justify-between mb-3 shrink-0">
         <div className="min-w-0">
-          <h3 className="text-sm font-bold text-gray-800 truncate">{title}</h3>
-          {subtitle && <p className="text-[10px] text-gray-400 mt-0.5 truncate">{subtitle}</p>}
+          <h3 className="text-[13px] font-semibold text-[var(--text-primary)] tracking-tight truncate">
+            {title}
+          </h3>
+          {subtitle && (
+            <p className="text-[10.5px] font-mono uppercase tracking-wide text-[var(--text-quaternary)] mt-0.5 truncate">
+              {subtitle}
+            </p>
+          )}
         </div>
-        <div className="w-8 h-8 bg-gray-50 rounded-lg flex items-center justify-center text-gray-400 shrink-0 ml-2">
+        <span className="h-7 w-7 rounded-md inline-flex items-center justify-center bg-[var(--surface-sunken)] text-[var(--text-tertiary)] border border-[var(--border-subtle)] shrink-0 ml-2">
           {icon}
-        </div>
+        </span>
       </div>
-      <div className="flex-1 min-h-0">
-        {children}
-      </div>
+      <div className="flex-1 min-h-0">{children}</div>
     </div>
   );
 }
 
-function MiniStat({ label, value, color = "text-gray-800" }) {
+function MiniStat({ label, value, accent }) {
   return (
-    <div className="text-center">
-      <p className={`text-lg font-bold ${color}`}>{typeof value === "number" ? value.toLocaleString() : value}</p>
-      <p className="text-[10px] text-gray-400 font-medium">{label}</p>
+    <div className="text-left">
+      <p
+        className={
+          "text-[14.5px] font-semibold font-mono " +
+          (accent ? "text-[var(--brand)]" : "text-[var(--text-primary)]")
+        }
+      >
+        {typeof value === "number" ? value.toLocaleString() : value}
+      </p>
+      <p className="text-[10px] font-mono uppercase tracking-wide text-[var(--text-quaternary)] mt-0.5">
+        {label}
+      </p>
     </div>
   );
+}
+
+function ProgressLine({ label, pct, color }) {
+  return (
+    <div className="flex items-center gap-2 mt-1">
+      <div className="flex-1 h-1 bg-[var(--surface-raised)] rounded-full overflow-hidden">
+        <div
+          className="h-full rounded-full transition-[width] duration-500"
+          style={{ width: `${Math.min(pct, 100)}%`, background: color }}
+        />
+      </div>
+      <span className="text-[10px] font-mono text-[var(--text-quaternary)] w-16 text-right">
+        {pct}% {label}
+      </span>
+    </div>
+  );
+}
+
+function ChartTooltip({ active, payload, label }) {
+  if (!active || !payload?.length) return null;
+  return (
+    <div
+      className={
+        "rounded-md px-3 py-2 text-[11.5px] " +
+        "bg-[var(--surface-raised)] border border-[var(--border-default)] " +
+        "shadow-[var(--elev-2)]"
+      }
+    >
+      {label && (
+        <p className="font-mono text-[10.5px] uppercase tracking-wide text-[var(--text-quaternary)] mb-1">
+          {label}
+        </p>
+      )}
+      {payload.map((entry, i) => (
+        <div key={i} className="flex items-center gap-2 py-0.5">
+          <span
+            className="w-2 h-2 rounded-full shrink-0"
+            style={{ background: entry.color }}
+          />
+          <span className="text-[var(--text-tertiary)]">{entry.name}:</span>
+          <span className="font-mono font-semibold text-[var(--text-primary)]">
+            {typeof entry.value === "number"
+              ? entry.value.toLocaleString()
+              : entry.value}
+          </span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function PieTooltip({ active, payload }) {
+  if (!active || !payload?.length) return null;
+  const d = payload[0];
+  return (
+    <div
+      className={
+        "rounded-md px-3 py-2 text-[11.5px] " +
+        "bg-[var(--surface-raised)] border border-[var(--border-default)] " +
+        "shadow-[var(--elev-2)]"
+      }
+    >
+      <div className="flex items-center gap-2">
+        <span
+          className="w-2 h-2 rounded-full shrink-0"
+          style={{ background: d.payload?.color || d.payload?.fill }}
+        />
+        <span className="font-medium text-[var(--text-primary)]">{d.name}</span>
+      </div>
+      <p className="mt-0.5 text-[var(--text-tertiary)] font-mono">
+        {d.value?.toLocaleString()} vouchers
+      </p>
+    </div>
+  );
+}
+
+function StatusBadgeMini({ status }) {
+  const map = {
+    "1": { label: "Unused", tone: "info" },
+    "2": { label: "Active", tone: "success" },
+    "3": { label: "Expired", tone: "danger" },
+    "0": { label: "Inactive", tone: "neutral" },
+  };
+  const c = map[String(status)] || map["0"];
+  return <Badge tone={c.tone}>{c.label}</Badge>;
 }
 
 function EmptyChart({ message = "No data available" }) {
   return (
-    <div className="flex flex-col items-center justify-center h-48 text-gray-300">
-      <BarChart3 size={28} className="mb-2 text-gray-200" />
-      <p className="text-xs font-medium">{message}</p>
+    <div className="flex flex-col items-center justify-center h-48 text-[var(--text-quaternary)]">
+      <BarChart3 size={26} className="mb-2 opacity-60" />
+      <p className="text-[12px] font-medium">{message}</p>
     </div>
   );
 }

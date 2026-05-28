@@ -1,6 +1,7 @@
 // src/pages/SyncPage.jsx
+// Manual sync controls + history table.
+
 import { useEffect, useState } from "react";
-import { voucherApi } from "../services/api";
 import toast from "react-hot-toast";
 import {
   RefreshCw,
@@ -11,8 +12,12 @@ import {
   ArrowDownCircle,
 } from "lucide-react";
 
+import { voucherApi } from "../services/api";
+import { Button, Badge, EmptyState } from "../components/ui";
+
 export default function SyncPage() {
   const [syncing, setSyncing] = useState(false);
+  const [testing, setTesting] = useState(false);
   const [connectionStatus, setConnectionStatus] = useState(null);
   const [syncLogs, setSyncLogs] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -26,7 +31,7 @@ export default function SyncPage() {
     try {
       const data = await voucherApi.syncLogs();
       setSyncLogs(data.logs || []);
-    } catch (err) {
+    } catch {
       toast.error("Failed to load sync logs");
     } finally {
       setLoading(false);
@@ -38,7 +43,7 @@ export default function SyncPage() {
     try {
       const result = await voucherApi.sync();
       toast.success(
-        `Sync completed! ${result.totalProcessed} processed (${result.newVouchers} new, ${result.updatedVouchers} updated, ${result.archivedVouchers || 0} archived)`
+        `Sync complete · ${result.totalProcessed} processed (${result.newVouchers} new, ${result.updatedVouchers} updated, ${result.archivedVouchers || 0} archived)`
       );
       loadLogs();
     } catch (err) {
@@ -49,201 +54,233 @@ export default function SyncPage() {
   }
 
   async function testConnection() {
+    setTesting(true);
     try {
       const result = await voucherApi.testConnection();
       setConnectionStatus(result);
-      if (result.success) {
-        toast.success("Connection successful");
-      } else {
-        toast.error("Connection failed");
-      }
+      if (result.success) toast.success("Connection successful");
+      else toast.error("Connection failed");
     } catch (err) {
       setConnectionStatus({ success: false, error: err.message });
       toast.error("Connection test failed");
+    } finally {
+      setTesting(false);
     }
   }
 
-  function formatDate(dateLike) {
-    if (!dateLike) return "—";
-    const d = new Date(dateLike);
-    return isNaN(d.getTime()) ? "—" : d.toLocaleString();
+  function formatDate(d) {
+    if (!d) return "—";
+    const dt = new Date(d);
+    return isNaN(dt.getTime()) ? "—" : dt.toLocaleString();
   }
 
   const lastSync = syncLogs[0];
 
   return (
-    <div className="p-6 space-y-6">
-      {/* Header */}
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <div className="w-10 h-10 bg-purple-100 rounded-xl flex items-center justify-center">
-            <RefreshCw className="w-5 h-5 text-purple-600" />
+    <div className="page-shell">
+      <div className="page-header">
+        <div className="flex items-center gap-3 min-w-0">
+          <span className="brand-mark">
+            <RefreshCw size={15} />
+          </span>
+          <div className="flex flex-col min-w-0">
+            <span className="page-eyebrow">Integration</span>
+            <h1 className="page-title">Sync Management</h1>
+            <p className="page-subtitle">
+              Pull the latest voucher inventory from Ruijie Cloud.
+            </p>
           </div>
-          <h1 className="text-2xl font-bold text-gray-800">
-            Sync Management
-          </h1>
         </div>
       </div>
 
-      {/* Action cards */}
-      <div className="grid grid-cols-2 gap-4">
-        {/* Sync card */}
-        <div className="bg-white border border-gray-200 rounded-xl p-6 shadow-sm">
-          <div className="flex items-center gap-3 mb-4">
-            <div className="w-10 h-10 bg-purple-50 rounded-lg flex items-center justify-center">
-              <ArrowDownCircle className="w-5 h-5 text-purple-600" />
-            </div>
-            <div>
-              <h3 className="text-sm font-semibold text-gray-800">
-                Sync Vouchers
-              </h3>
-              <p className="text-xs text-gray-500">
-                Pull latest from Ruijie Cloud
-              </p>
-            </div>
-          </div>
-          {lastSync && (
-            <div className="mb-4 p-3 bg-gray-50 rounded-lg text-xs text-gray-600">
-              <p>
-                Last sync: {formatDate(lastSync.sync_started_at)}
-              </p>
-              <p>
-                {lastSync.total_processed} processed, {lastSync.total_new} new,{" "}
+      <div className="px-8 py-6 space-y-5">
+        {/* ----- Action cards ----- */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+          <ActionCard
+            icon={<ArrowDownCircle size={15} />}
+            title="Sync vouchers"
+            subtitle="Pull the latest inventory from Ruijie Cloud"
+          >
+            {lastSync && (
+              <p className="text-[11.5px] font-mono text-[var(--text-tertiary)] leading-relaxed">
+                Last sync · {formatDate(lastSync.sync_started_at)}
+                <br />
+                {lastSync.total_processed} processed · {lastSync.total_new} new ·{" "}
                 {lastSync.total_updated} updated
               </p>
-            </div>
-          )}
-          <button
-            onClick={handleSync}
-            disabled={syncing}
-            className="w-full px-4 py-2.5 bg-gradient-to-r from-purple-500 to-pink-500 text-white rounded-lg font-medium text-sm transition-all shadow-sm flex items-center justify-center gap-2 hover:shadow-md disabled:opacity-50"
-          >
-            <RefreshCw
-              className={`w-4 h-4 ${syncing ? "animate-spin" : ""}`}
-            />
-            {syncing ? "Syncing..." : "Sync Now"}
-          </button>
-        </div>
-
-        {/* Connection test card */}
-        <div className="bg-white border border-gray-200 rounded-xl p-6 shadow-sm">
-          <div className="flex items-center gap-3 mb-4">
-            <div className="w-10 h-10 bg-blue-50 rounded-lg flex items-center justify-center">
-              <Wifi className="w-5 h-5 text-blue-600" />
-            </div>
-            <div>
-              <h3 className="text-sm font-semibold text-gray-800">
-                API Connection
-              </h3>
-              <p className="text-xs text-gray-500">
-                Test Ruijie Cloud API connectivity
-              </p>
-            </div>
-          </div>
-          {connectionStatus && (
-            <div
-              className={`mb-4 p-3 rounded-lg text-xs flex items-center gap-2 ${
-                connectionStatus.success
-                  ? "bg-green-50 text-green-700"
-                  : "bg-red-50 text-red-700"
-              }`}
+            )}
+            <Button
+              onClick={handleSync}
+              variant="primary"
+              size="md"
+              loading={syncing}
+              iconLeft={!syncing && <RefreshCw size={14} />}
+              className="w-full mt-1"
             >
-              {connectionStatus.success ? (
-                <CheckCircle size={14} />
-              ) : (
-                <XCircle size={14} />
-              )}
-              <span>
-                {connectionStatus.success
-                  ? "Connected successfully"
-                  : connectionStatus.error || "Connection failed"}
-              </span>
+              {syncing ? "Syncing…" : "Sync now"}
+            </Button>
+          </ActionCard>
+
+          <ActionCard
+            icon={<Wifi size={15} />}
+            title="API connection"
+            subtitle="Test Ruijie Cloud API connectivity"
+          >
+            {connectionStatus && (
+              <div
+                className={
+                  "flex items-start gap-2 px-3 py-2 rounded-md text-[12px] font-medium border " +
+                  (connectionStatus.success
+                    ? "bg-[var(--success-soft)] text-[var(--success-fg)] border-transparent"
+                    : "bg-[var(--danger-soft)] text-[var(--danger-fg)] border-[var(--brand-soft-hover)]")
+                }
+              >
+                {connectionStatus.success ? (
+                  <CheckCircle size={13} className="mt-[2px] shrink-0" />
+                ) : (
+                  <XCircle size={13} className="mt-[2px] shrink-0" />
+                )}
+                <span>
+                  {connectionStatus.success
+                    ? "Connected successfully"
+                    : connectionStatus.error || "Connection failed"}
+                </span>
+              </div>
+            )}
+            <Button
+              onClick={testConnection}
+              variant="secondary"
+              size="md"
+              loading={testing}
+              iconLeft={!testing && <Wifi size={14} />}
+              className="w-full mt-1"
+            >
+              Test connection
+            </Button>
+          </ActionCard>
+        </div>
+
+        {/* ----- History table ----- */}
+        <div
+          className={
+            "rounded-md " +
+            "bg-[var(--surface-raised)] border border-[var(--border-default)] " +
+            "shadow-[var(--elev-1)] overflow-hidden"
+          }
+        >
+          <div className="flex items-center justify-between px-5 py-3 border-b border-[var(--border-subtle)]">
+            <h3 className="text-[13px] font-semibold text-[var(--text-primary)] tracking-tight">
+              Sync history
+            </h3>
+            <Clock size={14} className="text-[var(--text-quaternary)]" />
+          </div>
+
+          {loading ? (
+            <div className="p-4 space-y-2">
+              {Array.from({ length: 5 }).map((_, i) => (
+                <div key={i} className="h-10 rounded skeleton" />
+              ))}
+            </div>
+          ) : syncLogs.length === 0 ? (
+            <EmptyState
+              icon={Clock}
+              title="No sync history"
+              description="Run a sync to populate this log."
+            />
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-[13px]">
+                <thead>
+                  <tr className="bg-[var(--surface-sunken)] text-left text-[10.5px] font-mono uppercase tracking-[0.1em] text-[var(--text-quaternary)]">
+                    <th className="px-5 py-2.5 font-mono font-medium">Date</th>
+                    <th className="px-5 py-2.5 font-mono font-medium">Status</th>
+                    <th className="px-5 py-2.5 font-mono font-medium">Fetched</th>
+                    <th className="px-5 py-2.5 font-mono font-medium">Processed</th>
+                    <th className="px-5 py-2.5 font-mono font-medium">New</th>
+                    <th className="px-5 py-2.5 font-mono font-medium">Updated</th>
+                    <th className="px-5 py-2.5 font-mono font-medium">Archived</th>
+                    <th className="px-5 py-2.5 font-mono font-medium">User</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {syncLogs.map((log) => (
+                    <tr
+                      key={log.id}
+                      className="border-t border-[var(--border-subtle)] hover:bg-[var(--surface-hover)] transition-colors"
+                    >
+                      <td className="px-5 py-2.5 text-[12.5px] font-mono text-[var(--text-secondary)]">
+                        {formatDate(log.sync_started_at)}
+                      </td>
+                      <td className="px-5 py-2.5">
+                        <Badge
+                          tone={
+                            log.status === "completed"
+                              ? "success"
+                              : log.status === "failed"
+                                ? "danger"
+                                : "warning"
+                          }
+                        >
+                          {log.status}
+                        </Badge>
+                      </td>
+                      <Td>{log.total_fetched}</Td>
+                      <Td>{log.total_processed}</Td>
+                      <Td accent="success">{log.total_new}</Td>
+                      <Td accent="info">{log.total_updated}</Td>
+                      <Td accent="warning">{log.total_archived || 0}</Td>
+                      <td className="px-5 py-2.5 text-[12px] text-[var(--text-tertiary)] font-mono">
+                        {log.user_email || "—"}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </div>
           )}
-          <button
-            onClick={testConnection}
-            className="w-full px-4 py-2.5 bg-white border border-gray-200 text-gray-700 rounded-lg font-medium text-sm transition-all hover:bg-gray-50 flex items-center justify-center gap-2"
-          >
-            <Wifi className="w-4 h-4" />
-            Test Connection
-          </button>
         </div>
-      </div>
-
-      {/* Sync log table */}
-      <div className="bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden">
-        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200">
-          <h3 className="text-sm font-semibold text-gray-800">Sync History</h3>
-          <Clock size={16} className="text-gray-400" />
-        </div>
-
-        {loading ? (
-          <div className="flex items-center justify-center py-12">
-            <div className="w-6 h-6 border-2 border-purple-200 border-t-purple-600 rounded-full animate-spin" />
-          </div>
-        ) : syncLogs.length === 0 ? (
-          <div className="text-center py-12 text-gray-400 text-sm">
-            No sync history yet
-          </div>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="bg-gray-50 text-left text-gray-500 text-xs uppercase tracking-wider">
-                  <th className="px-6 py-3">Date</th>
-                  <th className="px-6 py-3">Status</th>
-                  <th className="px-6 py-3">Fetched</th>
-                  <th className="px-6 py-3">Processed</th>
-                  <th className="px-6 py-3">New</th>
-                  <th className="px-6 py-3">Updated</th>
-                  <th className="px-6 py-3">Archived</th>
-                  <th className="px-6 py-3">User</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-100">
-                {syncLogs.map((log) => (
-                  <tr key={log.id} className="hover:bg-gray-50">
-                    <td className="px-6 py-3 text-gray-700">
-                      {formatDate(log.sync_started_at)}
-                    </td>
-                    <td className="px-6 py-3">
-                      <span
-                        className={`inline-flex px-2 py-0.5 rounded-full text-xs font-medium ${
-                          log.status === "completed"
-                            ? "bg-green-50 text-green-700"
-                            : log.status === "failed"
-                            ? "bg-red-50 text-red-700"
-                            : "bg-yellow-50 text-yellow-700"
-                        }`}
-                      >
-                        {log.status}
-                      </span>
-                    </td>
-                    <td className="px-6 py-3 text-gray-600">
-                      {log.total_fetched}
-                    </td>
-                    <td className="px-6 py-3 text-gray-600">
-                      {log.total_processed}
-                    </td>
-                    <td className="px-6 py-3 text-green-600 font-medium">
-                      {log.total_new}
-                    </td>
-                    <td className="px-6 py-3 text-blue-600 font-medium">
-                      {log.total_updated}
-                    </td>
-                    <td className="px-6 py-3 text-orange-600 font-medium">
-                      {log.total_archived || 0}
-                    </td>
-                    <td className="px-6 py-3 text-gray-500">
-                      {log.user_email || "—"}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
       </div>
     </div>
+  );
+}
+
+function ActionCard({ icon, title, subtitle, children }) {
+  return (
+    <div
+      className={
+        "p-5 rounded-md flex flex-col gap-3 " +
+        "bg-[var(--surface-raised)] border border-[var(--border-default)] " +
+        "shadow-[var(--elev-1)]"
+      }
+    >
+      <div className="flex items-center gap-2.5">
+        <span className="h-8 w-8 rounded-md inline-flex items-center justify-center bg-[var(--brand-soft)] text-[var(--brand-fg-on-soft)]">
+          {icon}
+        </span>
+        <div className="flex flex-col">
+          <h3 className="text-[13px] font-semibold text-[var(--text-primary)] tracking-tight">
+            {title}
+          </h3>
+          <p className="text-[11.5px] text-[var(--text-tertiary)]">{subtitle}</p>
+        </div>
+      </div>
+      {children}
+    </div>
+  );
+}
+
+function Td({ children, accent }) {
+  const color =
+    accent === "success"
+      ? "text-[var(--success-fg)]"
+      : accent === "info"
+        ? "text-[var(--info-fg)]"
+        : accent === "warning"
+          ? "text-[var(--warning-fg)]"
+          : "text-[var(--text-secondary)]";
+  return (
+    <td className={`px-5 py-2.5 text-[12.5px] font-mono font-medium ${color}`}>
+      {children}
+    </td>
   );
 }

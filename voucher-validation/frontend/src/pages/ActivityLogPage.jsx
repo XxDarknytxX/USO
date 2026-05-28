@@ -1,9 +1,13 @@
 // src/pages/ActivityLogPage.jsx
+// Voucher lifecycle event log.
+
 import { useEffect, useState, useCallback } from "react";
+import toast from "react-hot-toast";
+import { History, Filter, X } from "lucide-react";
+
 import { voucherApi } from "../services/api";
 import Pagination from "../components/shared/Pagination";
-import toast from "react-hot-toast";
-import { History, Filter } from "lucide-react";
+import { Badge, EmptyState } from "../components/ui";
 
 const EVENT_TYPES = [
   "created",
@@ -18,17 +22,17 @@ const EVENT_TYPES = [
   "field_updated",
 ];
 
-const eventColors = {
-  created: "bg-green-50 text-green-700",
-  updated: "bg-blue-50 text-blue-700",
-  archived: "bg-orange-50 text-orange-700",
-  restored: "bg-teal-50 text-teal-700",
-  disabled: "bg-red-50 text-red-700",
-  enabled: "bg-emerald-50 text-emerald-700",
-  deleted: "bg-red-50 text-red-700",
-  synced: "bg-purple-50 text-purple-700",
-  bulk_operation: "bg-indigo-50 text-indigo-700",
-  field_updated: "bg-cyan-50 text-cyan-700",
+const EVENT_TONES = {
+  created: "success",
+  enabled: "success",
+  restored: "success",
+  updated: "info",
+  synced: "info",
+  field_updated: "info",
+  bulk_operation: "info",
+  archived: "warning",
+  disabled: "danger",
+  deleted: "danger",
 };
 
 export default function ActivityLogPage() {
@@ -63,114 +67,157 @@ export default function ActivityLogPage() {
   }, [fetchEvents]);
 
   const totalPages = Math.ceil(total / limit);
+  const hasFilters = eventType || voucherUuid.trim();
 
   return (
-    <div className="p-6 space-y-4">
-      {/* Header */}
-      <div className="flex items-center gap-3">
-        <div className="w-10 h-10 bg-purple-100 rounded-xl flex items-center justify-center">
-          <History className="w-5 h-5 text-purple-600" />
-        </div>
-        <div>
-          <h1 className="text-2xl font-bold text-gray-800">Activity Log</h1>
-          <p className="text-sm text-gray-500">{total} events</p>
+    <div className="page-shell">
+      <div className="page-header">
+        <div className="flex items-center gap-3 min-w-0">
+          <span className="brand-mark">
+            <History size={15} />
+          </span>
+          <div className="flex flex-col min-w-0">
+            <span className="page-eyebrow">Audit</span>
+            <h1 className="page-title">Activity Log</h1>
+            <p className="page-subtitle">{total.toLocaleString()} voucher events</p>
+          </div>
         </div>
       </div>
 
-      {/* Filters */}
-      <div className="flex items-center gap-3">
-        <Filter size={14} className="text-gray-400" />
-        <select
-          value={eventType}
-          onChange={(e) => {
-            setEventType(e.target.value);
-            setPage(1);
-          }}
-          className="border border-gray-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-purple-500"
-        >
-          <option value="">All Events</option>
-          {EVENT_TYPES.map((t) => (
-            <option key={t} value={t}>
-              {t.replace("_", " ")}
-            </option>
-          ))}
-        </select>
+      {/* Toolbar */}
+      <div className="shrink-0 flex flex-wrap items-center gap-2 px-8 py-3 border-b border-[var(--border-subtle)] bg-[var(--surface-sunken)]">
+        <div className="relative">
+          <Filter
+            size={12}
+            className="absolute left-2.5 top-1/2 -translate-y-1/2 text-[var(--text-quaternary)] pointer-events-none"
+          />
+          <select
+            value={eventType}
+            onChange={(e) => {
+              setEventType(e.target.value);
+              setPage(1);
+            }}
+            className={
+              "h-8 pl-7 pr-3 text-[12.5px] font-medium rounded-md appearance-none cursor-pointer " +
+              "bg-[var(--surface-raised)] border border-[var(--border-default)] " +
+              "text-[var(--text-secondary)] hover:border-[var(--input-border-hover)] focus-input"
+            }
+          >
+            <option value="">All events</option>
+            {EVENT_TYPES.map((t) => (
+              <option key={t} value={t}>
+                {t.replace("_", " ")}
+              </option>
+            ))}
+          </select>
+        </div>
+
         <input
           type="text"
-          placeholder="Filter by voucher UUID..."
+          placeholder="Filter by voucher UUID…"
           value={voucherUuid}
           onChange={(e) => {
             setVoucherUuid(e.target.value);
             setPage(1);
           }}
-          className="border border-gray-200 rounded-lg px-3 py-1.5 text-sm w-64 focus:outline-none focus:ring-2 focus:ring-purple-500"
+          className={
+            "h-8 px-3 text-[12.5px] rounded-md w-64 font-mono " +
+            "bg-[var(--surface-raised)] border border-[var(--border-default)] " +
+            "text-[var(--text-primary)] placeholder:text-[var(--text-quaternary)] " +
+            "hover:border-[var(--input-border-hover)] focus-input"
+          }
         />
+
+        {hasFilters && (
+          <button
+            onClick={() => {
+              setEventType("");
+              setVoucherUuid("");
+              setPage(1);
+            }}
+            className="inline-flex items-center gap-1 text-[12px] text-[var(--text-tertiary)] hover:text-[var(--brand)] transition-colors"
+          >
+            <X size={11} /> Clear
+          </button>
+        )}
       </div>
 
       {/* Table */}
-      <div className="bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden">
-        {loading ? (
-          <div className="flex items-center justify-center py-16">
-            <div className="w-6 h-6 border-2 border-purple-200 border-t-purple-600 rounded-full animate-spin" />
-          </div>
-        ) : events.length === 0 ? (
-          <div className="text-center py-16 text-gray-400 text-sm">
-            No activity events found
-          </div>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="bg-gray-50 text-left text-gray-500 text-xs uppercase tracking-wider">
-                  <th className="px-4 py-3">Timestamp</th>
-                  <th className="px-4 py-3">Event</th>
-                  <th className="px-4 py-3">Voucher</th>
-                  <th className="px-4 py-3">Status Change</th>
-                  <th className="px-4 py-3">Notes</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-100">
-                {events.map((evt) => (
-                  <tr key={evt.id} className="hover:bg-gray-50">
-                    <td className="px-4 py-3 text-gray-600 text-xs whitespace-nowrap">
-                      {new Date(evt.event_timestamp).toLocaleString()}
-                    </td>
-                    <td className="px-4 py-3">
-                      <span
-                        className={`inline-flex px-2 py-0.5 rounded-full text-xs font-medium capitalize ${
-                          eventColors[evt.event_type] ||
-                          "bg-gray-50 text-gray-600"
-                        }`}
-                      >
-                        {evt.event_type.replace("_", " ")}
-                      </span>
-                    </td>
-                    <td className="px-4 py-3 font-mono text-purple-600 text-xs">
-                      {evt.voucher_uuid
-                        ? evt.voucher_uuid.substring(0, 12) + "..."
-                        : "—"}
-                    </td>
-                    <td className="px-4 py-3 text-xs text-gray-600">
-                      {evt.old_status && evt.new_status
-                        ? `${evt.old_status} → ${evt.new_status}`
-                        : "—"}
-                    </td>
-                    <td className="px-4 py-3 text-xs text-gray-500 max-w-[200px] truncate">
-                      {evt.notes || "—"}
-                    </td>
+      <div className="flex-1 min-h-0 px-8 py-5">
+        <div
+          className={
+            "h-full flex flex-col rounded-md " +
+            "bg-[var(--surface-raised)] border border-[var(--border-default)] " +
+            "shadow-[var(--elev-1)] overflow-hidden"
+          }
+        >
+          {loading ? (
+            <div className="p-4 space-y-2">
+              {Array.from({ length: 6 }).map((_, i) => (
+                <div key={i} className="h-10 rounded skeleton" />
+              ))}
+            </div>
+          ) : events.length === 0 ? (
+            <EmptyState
+              icon={History}
+              title="No activity events"
+              description={hasFilters ? "Try clearing filters." : "Events will appear as vouchers change."}
+            />
+          ) : (
+            <div className="flex-1 min-h-0 overflow-auto">
+              <table className="w-full text-[13px]">
+                <thead className="sticky top-0 z-10">
+                  <tr className="bg-[var(--surface-sunken)] text-left text-[10.5px] font-mono uppercase tracking-[0.1em] text-[var(--text-quaternary)]">
+                    <th className="px-4 py-2.5 font-mono font-medium">Timestamp</th>
+                    <th className="px-4 py-2.5 font-mono font-medium">Event</th>
+                    <th className="px-4 py-2.5 font-mono font-medium">Voucher</th>
+                    <th className="px-4 py-2.5 font-mono font-medium">Status change</th>
+                    <th className="px-4 py-2.5 font-mono font-medium">Notes</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
+                </thead>
+                <tbody>
+                  {events.map((evt) => (
+                    <tr
+                      key={evt.id}
+                      className="border-t border-[var(--border-subtle)] hover:bg-[var(--surface-hover)] transition-colors"
+                    >
+                      <td className="px-4 py-2.5 text-[12px] font-mono text-[var(--text-tertiary)] whitespace-nowrap">
+                        {new Date(evt.event_timestamp).toLocaleString()}
+                      </td>
+                      <td className="px-4 py-2.5">
+                        <Badge tone={EVENT_TONES[evt.event_type] || "neutral"}>
+                          {evt.event_type.replace("_", " ")}
+                        </Badge>
+                      </td>
+                      <td className="px-4 py-2.5 font-mono text-[12px] text-[var(--brand-fg-on-soft)]">
+                        {evt.voucher_uuid
+                          ? evt.voucher_uuid.substring(0, 12) + "…"
+                          : "—"}
+                      </td>
+                      <td className="px-4 py-2.5 text-[12px] font-mono text-[var(--text-secondary)]">
+                        {evt.old_status && evt.new_status
+                          ? `${evt.old_status} → ${evt.new_status}`
+                          : "—"}
+                      </td>
+                      <td className="px-4 py-2.5 text-[12px] text-[var(--text-tertiary)] max-w-[260px] truncate">
+                        {evt.notes || "—"}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
 
-        <Pagination
-          page={page}
-          totalPages={totalPages}
-          total={total}
-          onPageChange={setPage}
-        />
+          {!loading && events.length > 0 && (
+            <Pagination
+              page={page}
+              totalPages={totalPages}
+              total={total}
+              onPageChange={setPage}
+            />
+          )}
+        </div>
       </div>
     </div>
   );

@@ -1,5 +1,8 @@
 // src/components/layout/Sidebar.jsx
+// Collapsible left rail. Brand mark, primary nav, user identity, theme toggle, logout.
+
 import { NavLink } from "react-router-dom";
+import { useState } from "react";
 import {
   BarChart3,
   Ticket,
@@ -14,9 +17,13 @@ import {
   Globe,
   FileText,
   GitBranch,
+  Sun,
+  Moon,
+  Eye,
 } from "lucide-react";
-import { useState } from "react";
+
 import { useAuth } from "../../hooks/useAuth";
+import { useTheme } from "../../hooks/useTheme";
 
 const allNavItems = [
   { path: "/dashboard", label: "Dashboard", icon: BarChart3 },
@@ -33,84 +40,156 @@ const allNavItems = [
 export default function Sidebar() {
   const [collapsed, setCollapsed] = useState(false);
   const { email, role, isAdmin, logout } = useAuth();
+  const { theme, toggle } = useTheme();
 
   const navItems = allNavItems.filter((item) => !item.adminOnly || isAdmin);
+  const isDark = theme === "dark";
 
   return (
     <aside
-      className={`${
-        collapsed ? "w-[68px]" : "w-60"
-      } flex flex-col bg-white border-r border-gray-100 transition-all duration-300 h-screen sticky top-0`}
+      className={
+        (collapsed ? "w-[64px]" : "w-[220px]") +
+        " flex flex-col shrink-0 h-screen sticky top-0 " +
+        "bg-[var(--surface-sunken)] border-r border-[var(--border-subtle)] " +
+        "transition-[width] duration-200"
+      }
     >
-      {/* Logo / Header */}
-      <div className="flex items-center justify-between h-16 px-4 border-b border-gray-100">
+      {/* ----- Brand row ----- */}
+      <div
+        className={
+          "flex items-center h-14 px-3 border-b border-[var(--border-subtle)] " +
+          (collapsed ? "justify-center" : "justify-between gap-2")
+        }
+      >
         {!collapsed && (
-          <div className="flex items-center gap-2.5">
-            <div className="w-8 h-8 bg-gradient-to-br from-purple-500 to-pink-500 rounded-lg flex items-center justify-center shadow-md shadow-purple-200">
-              <Ticket className="w-4 h-4 text-white" />
-            </div>
-            <span className="text-sm font-bold text-gray-800 tracking-tight">
-              Voucher Mgr
+          <div className="flex items-center gap-2.5 min-w-0">
+            <span className="brand-mark">
+              <Ticket size={15} strokeWidth={2} />
             </span>
+            <div className="flex flex-col min-w-0">
+              <span className="text-[13px] font-semibold tracking-tight text-[var(--text-primary)] truncate">
+                Voucher Mgr
+              </span>
+              <span className="text-[9.5px] font-mono uppercase tracking-[0.12em] text-[var(--text-quaternary)]">
+                Vodafone Fiji
+              </span>
+            </div>
           </div>
         )}
-        <button
-          onClick={() => setCollapsed(!collapsed)}
-          className="p-1.5 rounded-lg text-gray-400 hover:text-gray-600 hover:bg-gray-50 transition-all"
-        >
-          {collapsed ? <ChevronRight size={16} /> : <ChevronLeft size={16} />}
-        </button>
+        {collapsed && (
+          <span className="brand-mark">
+            <Ticket size={15} strokeWidth={2} />
+          </span>
+        )}
       </div>
 
-      {/* Nav */}
-      <nav className="flex-1 py-4 px-3 space-y-1 overflow-y-auto">
-        {navItems.map(({ path, label, icon: Icon }) => (
-          <NavLink
-            key={path}
-            to={path}
-            className={({ isActive }) =>
-              `flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all duration-200 ${
-                isActive
-                  ? "bg-gradient-to-r from-purple-50 to-pink-50 text-purple-700 shadow-sm"
-                  : "text-gray-500 hover:bg-gray-50 hover:text-gray-800"
-              }`
-            }
-          >
-            <Icon size={18} className="shrink-0" />
-            {!collapsed && <span className="truncate">{label}</span>}
-          </NavLink>
-        ))}
+      {/* ----- Nav ----- */}
+      <nav className="flex-1 py-3 px-2 overflow-y-auto">
+        {!collapsed && (
+          <p className="px-2 mb-2 text-[10px] font-mono uppercase tracking-[0.14em] text-[var(--text-quaternary)]">
+            Navigate
+          </p>
+        )}
+        <div className="flex flex-col gap-0.5">
+          {navItems.map(({ path, label, icon: Icon }) => (
+            <NavLink
+              key={path}
+              to={path}
+              title={collapsed ? label : undefined}
+              className={({ isActive }) =>
+                "group flex items-center gap-2.5 rounded-md text-[13px] font-medium transition-colors duration-150 " +
+                (collapsed ? "justify-center h-9 w-9 mx-auto " : "px-2.5 h-8 ") +
+                (isActive
+                  ? "bg-[var(--brand-soft)] text-[var(--brand-fg-on-soft)]"
+                  : "text-[var(--text-tertiary)] hover:bg-[var(--surface-hover)] hover:text-[var(--text-primary)]")
+              }
+            >
+              {({ isActive }) => (
+                <>
+                  <Icon
+                    size={15}
+                    strokeWidth={isActive ? 2.25 : 1.75}
+                    className="shrink-0"
+                  />
+                  {!collapsed && <span className="truncate">{label}</span>}
+                </>
+              )}
+            </NavLink>
+          ))}
+        </div>
       </nav>
 
-      {/* User info + Logout */}
-      <div className="p-3 border-t border-gray-100 space-y-2">
-        {/* User info */}
+      {/* ----- Footer: user + theme + logout ----- */}
+      <div className="border-t border-[var(--border-subtle)] p-2 flex flex-col gap-1">
         {!collapsed && (
-          <div className="px-3 py-2">
-            <p className="text-xs font-medium text-gray-700 truncate">{email}</p>
-            <div className="flex items-center gap-1.5 mt-1">
-              <Shield size={11} className={isAdmin ? "text-purple-500" : "text-gray-400"} />
-              <span
-                className={`text-[10px] font-semibold uppercase tracking-wider ${
-                  isAdmin ? "text-purple-500" : "text-gray-400"
-                }`}
-              >
+          <div className="flex items-center gap-2 px-2 py-2">
+            <span
+              className={
+                "shrink-0 h-7 w-7 rounded-md flex items-center justify-center text-[11px] font-semibold uppercase " +
+                "bg-[var(--surface-hover)] text-[var(--text-secondary)] border border-[var(--border-subtle)]"
+              }
+            >
+              {(email || "?").charAt(0)}
+            </span>
+            <div className="flex flex-col min-w-0">
+              <span className="text-[12px] text-[var(--text-primary)] truncate font-medium">
+                {email}
+              </span>
+              <span className="flex items-center gap-1 text-[10px] font-mono uppercase tracking-[0.1em] text-[var(--text-quaternary)]">
+                {isAdmin ? <Shield size={9} /> : <Eye size={9} />}
                 {role}
               </span>
             </div>
           </div>
         )}
 
-        <button
+        {/* Theme toggle */}
+        <SidebarAction
+          collapsed={collapsed}
+          onClick={toggle}
+          icon={isDark ? Sun : Moon}
+          label={isDark ? "Light mode" : "Dark mode"}
+        />
+
+        {/* Collapse */}
+        <SidebarAction
+          collapsed={collapsed}
+          onClick={() => setCollapsed(!collapsed)}
+          icon={collapsed ? ChevronRight : ChevronLeft}
+          label="Collapse"
+        />
+
+        {/* Logout */}
+        <SidebarAction
+          collapsed={collapsed}
           onClick={logout}
-          className={`flex items-center gap-3 w-full px-3 py-2.5 rounded-xl text-sm font-medium text-gray-500 hover:bg-red-50 hover:text-red-600 transition-all ${
-            collapsed ? "justify-center" : ""
-          }`}
-        >
-          <LogOut size={18} className="shrink-0" />
-          {!collapsed && <span>Logout</span>}
-        </button>
+          icon={LogOut}
+          label="Log out"
+          tone="danger"
+        />
       </div>
     </aside>
+  );
+}
+
+function SidebarAction({ collapsed, onClick, icon: Icon, label, tone }) {
+  const toneClass =
+    tone === "danger"
+      ? "text-[var(--text-tertiary)] hover:text-[var(--brand)] hover:bg-[var(--brand-soft)]"
+      : "text-[var(--text-tertiary)] hover:text-[var(--text-primary)] hover:bg-[var(--surface-hover)]";
+
+  return (
+    <button
+      onClick={onClick}
+      title={collapsed ? label : undefined}
+      className={
+        "flex items-center gap-2.5 rounded-md text-[12.5px] font-medium transition-colors " +
+        (collapsed ? "justify-center h-8 w-8 mx-auto " : "px-2.5 h-8 ") +
+        toneClass
+      }
+    >
+      <Icon size={14} strokeWidth={1.75} className="shrink-0" />
+      {!collapsed && <span className="truncate">{label}</span>}
+    </button>
   );
 }

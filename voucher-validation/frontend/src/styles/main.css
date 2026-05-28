@@ -1,1 +1,390 @@
+/* =============================================================================
+   Voucher Validation — Design System
+   "Operations Console" aesthetic: refined, dense, professional.
+   Vodafone red as the sole chromatic punctuation; everything else neutral.
+   ============================================================================ */
+
 @import "tailwindcss";
+
+/* ---------- Web fonts ------------------------------------------------------ */
+@import url("https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap");
+
+/* =============================================================================
+   Tailwind v4 theme tokens
+   ============================================================================ */
+@theme {
+  /* -- Typography --------------------------------------------------------- */
+  --font-sans: "IBM Plex Sans", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+
+  /* -- Brand: Vodafone red ----------------------------------------------- */
+  --color-brand-50:  #fff1f1;
+  --color-brand-100: #ffdede;
+  --color-brand-200: #ffc3c3;
+  --color-brand-300: #ff9696;
+  --color-brand-400: #ff5e5e;
+  --color-brand-500: #ff2b2b;
+  --color-brand-600: #e60000; /* Vodafone red */
+  --color-brand-700: #c20000;
+  --color-brand-800: #9b0202;
+  --color-brand-900: #7a0a0a;
+  --color-brand-950: #420202;
+
+  /* -- Neutrals (warm, slight cool bias) --------------------------------- */
+  --color-ink-50:  #f7f8f9;
+  --color-ink-100: #eff1f3;
+  --color-ink-200: #e3e6ea;
+  --color-ink-300: #c9ced5;
+  --color-ink-400: #9aa1ab;
+  --color-ink-500: #6d747f;
+  --color-ink-600: #4d535d;
+  --color-ink-700: #363b44;
+  --color-ink-800: #21252c;
+  --color-ink-900: #14171c;
+  --color-ink-950: #0a0c10;
+
+  /* -- Status colors (muted) --------------------------------------------- */
+  --color-success-500: #16a34a;
+  --color-success-600: #15803d;
+  --color-warning-500: #d97706;
+  --color-warning-600: #b45309;
+  --color-danger-500:  #e60000; /* uses brand */
+  --color-info-500:    #2563eb;
+
+  /* -- Motion ------------------------------------------------------------ */
+  --ease-out-quart: cubic-bezier(0.165, 0.84, 0.44, 1);
+  --ease-spring:    cubic-bezier(0.34, 1.56, 0.64, 1);
+
+  /* -- Shadows (low-opacity, layered) ------------------------------------ */
+  --shadow-xs:  0 1px 0 0 rgba(20, 23, 28, 0.04);
+  --shadow-sm:  0 1px 2px 0 rgba(20, 23, 28, 0.06), 0 1px 1px 0 rgba(20, 23, 28, 0.04);
+  --shadow-md:  0 4px 12px -2px rgba(20, 23, 28, 0.08), 0 2px 4px -1px rgba(20, 23, 28, 0.04);
+  --shadow-lg:  0 12px 32px -4px rgba(20, 23, 28, 0.10), 0 4px 12px -2px rgba(20, 23, 28, 0.06);
+  --shadow-xl:  0 24px 64px -12px rgba(20, 23, 28, 0.18), 0 8px 24px -4px rgba(20, 23, 28, 0.10);
+}
+
+/* =============================================================================
+   Semantic surface tokens via CSS variables.
+   Light theme is :root; dark theme activates on <html data-theme="dark">.
+   Components reference these via Tailwind arbitrary values like bg-[var(--surface)]
+   so the whole UI switches with a single attribute swap.
+   ============================================================================ */
+:root {
+  /* Surfaces */
+  --surface:           #ffffff;          /* primary page bg */
+  --surface-raised:    #ffffff;          /* cards, modals */
+  --surface-sunken:    #fafbfc;          /* table headers, sub-areas */
+  --surface-hover:     #f3f4f6;
+  --surface-pressed:   #e5e7eb;
+
+  /* Text */
+  --text-primary:      #14171c;
+  --text-secondary:    #4d535d;
+  --text-tertiary:     #6d747f;
+  --text-quaternary:   #9aa1ab;
+  --text-disabled:     #c9ced5;
+  --text-inverse:      #ffffff;
+  --text-on-brand:     #ffffff;
+
+  /* Borders / dividers */
+  --border-subtle:     rgba(20, 23, 28, 0.06);
+  --border-default:    rgba(20, 23, 28, 0.10);
+  --border-strong:     rgba(20, 23, 28, 0.18);
+  --border-focus:      var(--color-brand-600);
+
+  /* Input */
+  --input-bg:          #ffffff;
+  --input-bg-hover:    #fafbfc;
+  --input-border:      rgba(20, 23, 28, 0.12);
+  --input-border-hover:rgba(20, 23, 28, 0.22);
+
+  /* Brand surfaces */
+  --brand:             var(--color-brand-600);
+  --brand-hover:       var(--color-brand-700);
+  --brand-pressed:     var(--color-brand-800);
+  --brand-soft:        var(--color-brand-50);
+  --brand-soft-hover:  var(--color-brand-100);
+  --brand-fg-on-soft:  var(--color-brand-700);
+
+  /* Status soft surfaces */
+  --success-soft:      #ecfdf5;
+  --success-fg:        #15803d;
+  --warning-soft:      #fffbeb;
+  --warning-fg:        #b45309;
+  --danger-soft:       #fff1f1;
+  --danger-fg:         #c20000;
+  --info-soft:         #eff6ff;
+  --info-fg:           #1d4ed8;
+
+  /* Overlay */
+  --overlay:           rgba(10, 12, 16, 0.45);
+
+  /* Shadows */
+  --elev-1: 0 1px 2px 0 rgba(20, 23, 28, 0.04), 0 1px 1px 0 rgba(20, 23, 28, 0.03);
+  --elev-2: 0 4px 12px -2px rgba(20, 23, 28, 0.06), 0 2px 4px -1px rgba(20, 23, 28, 0.03);
+  --elev-3: 0 12px 32px -4px rgba(20, 23, 28, 0.10), 0 4px 12px -2px rgba(20, 23, 28, 0.04);
+  --elev-4: 0 24px 64px -12px rgba(20, 23, 28, 0.16), 0 8px 24px -4px rgba(20, 23, 28, 0.06);
+}
+
+html[data-theme="dark"] {
+  --surface:           #0d1014;
+  --surface-raised:    #161a20;
+  --surface-sunken:    #0a0c10;
+  --surface-hover:     #1d222a;
+  --surface-pressed:   #262c36;
+
+  --text-primary:      #f4f5f7;
+  --text-secondary:    #b8bdc6;
+  --text-tertiary:     #8a909b;
+  --text-quaternary:   #5e6671;
+  --text-disabled:     #3a4049;
+  --text-inverse:      #0d1014;
+  --text-on-brand:     #ffffff;
+
+  --border-subtle:     rgba(255, 255, 255, 0.05);
+  --border-default:    rgba(255, 255, 255, 0.09);
+  --border-strong:     rgba(255, 255, 255, 0.16);
+  --border-focus:      var(--color-brand-500);
+
+  --input-bg:          #14181e;
+  --input-bg-hover:    #181d24;
+  --input-border:      rgba(255, 255, 255, 0.10);
+  --input-border-hover:rgba(255, 255, 255, 0.20);
+
+  --brand:             var(--color-brand-500);
+  --brand-hover:       var(--color-brand-400);
+  --brand-pressed:     var(--color-brand-600);
+  --brand-soft:        rgba(230, 0, 0, 0.10);
+  --brand-soft-hover:  rgba(230, 0, 0, 0.18);
+  --brand-fg-on-soft:  var(--color-brand-300);
+
+  --success-soft:      rgba(22, 163, 74, 0.12);
+  --success-fg:        #4ade80;
+  --warning-soft:      rgba(217, 119, 6, 0.12);
+  --warning-fg:        #fbbf24;
+  --danger-soft:       rgba(230, 0, 0, 0.12);
+  --danger-fg:         #ff6b6b;
+  --info-soft:         rgba(37, 99, 235, 0.12);
+  --info-fg:           #60a5fa;
+
+  --overlay:           rgba(0, 0, 0, 0.72);
+
+  --elev-1: 0 1px 2px 0 rgba(0, 0, 0, 0.32), 0 1px 1px 0 rgba(0, 0, 0, 0.16);
+  --elev-2: 0 4px 12px -2px rgba(0, 0, 0, 0.32), 0 2px 4px -1px rgba(0, 0, 0, 0.16);
+  --elev-3: 0 12px 32px -4px rgba(0, 0, 0, 0.42), 0 4px 12px -2px rgba(0, 0, 0, 0.20);
+  --elev-4: 0 24px 64px -12px rgba(0, 0, 0, 0.60), 0 8px 24px -4px rgba(0, 0, 0, 0.32);
+}
+
+/* =============================================================================
+   Base resets / globals
+   ============================================================================ */
+* {
+  border-color: var(--border-default);
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  font-family: var(--font-sans);
+  font-feature-settings: "ss01", "cv02", "cv11"; /* IBM Plex stylistic tweaks */
+  background-color: var(--surface);
+  color: var(--text-primary);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+  letter-spacing: -0.005em;
+}
+
+/* Numeric data should be tabular (tables, prices, counts) */
+.tabular,
+.font-mono,
+[class*="font-mono"] {
+  font-variant-numeric: tabular-nums slashed-zero;
+  font-feature-settings: "zero", "ss02";
+}
+
+/* =============================================================================
+   Scrollbar
+   ============================================================================ */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--border-default);
+  border-radius: 10px;
+  border: 2px solid var(--surface);
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--border-strong);
+}
+
+/* =============================================================================
+   Focus ring (used by primitives via .focus-ring utility)
+   ============================================================================ */
+.focus-ring {
+  outline: none;
+}
+.focus-ring:focus-visible {
+  box-shadow:
+    0 0 0 2px var(--surface),
+    0 0 0 4px var(--border-focus);
+  border-color: var(--border-focus);
+}
+
+/* Inputs with embedded focus (no extra box-shadow) */
+.focus-input {
+  outline: none;
+  transition: border-color 160ms var(--ease-out-quart),
+              box-shadow 160ms var(--ease-out-quart),
+              background-color 160ms var(--ease-out-quart);
+}
+.focus-input:focus-visible {
+  border-color: var(--border-focus);
+  box-shadow: 0 0 0 3px var(--brand-soft);
+}
+
+/* =============================================================================
+   Selection
+   ============================================================================ */
+::selection {
+  background: var(--brand-soft-hover);
+  color: var(--brand-fg-on-soft);
+}
+
+/* =============================================================================
+   Utility: subtle grain overlay (gives "real product" texture, not flat AI look)
+   ============================================================================ */
+.grain {
+  position: relative;
+}
+.grain::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0.03;
+  mix-blend-mode: multiply;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence baseFrequency='0.9' /%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' /%3E%3C/svg%3E");
+}
+html[data-theme="dark"] .grain::after {
+  mix-blend-mode: screen;
+  opacity: 0.04;
+}
+
+/* =============================================================================
+   Skeleton loader (used on data tables while loading)
+   ============================================================================ */
+@keyframes shimmer {
+  0%   { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+.skeleton {
+  background: linear-gradient(
+    90deg,
+    var(--surface-sunken) 0%,
+    var(--surface-hover) 50%,
+    var(--surface-sunken) 100%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 1.4s ease-in-out infinite;
+  border-radius: 6px;
+}
+
+/* =============================================================================
+   Modal backdrop blur fallback (some browsers don't support backdrop-filter well)
+   ============================================================================ */
+.backdrop-saturate {
+  backdrop-filter: blur(8px) saturate(140%);
+  -webkit-backdrop-filter: blur(8px) saturate(140%);
+}
+
+/* =============================================================================
+   Animations
+   ============================================================================ */
+@keyframes fade-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+@keyframes slide-up {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.animate-fade-in   { animation: fade-in 200ms var(--ease-out-quart) both; }
+.animate-slide-up  { animation: slide-up 240ms var(--ease-out-quart) both; }
+
+/* =============================================================================
+   Page chrome helpers
+   ============================================================================ */
+.page-shell {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  background-color: var(--surface);
+}
+
+.page-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 24px;
+  padding: 24px 32px 16px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.page-eyebrow {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-quaternary);
+}
+
+.page-title {
+  font-family: var(--font-sans);
+  font-size: 22px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  color: var(--text-primary);
+  line-height: 1.2;
+}
+
+.page-subtitle {
+  font-size: 13px;
+  color: var(--text-tertiary);
+  margin-top: 4px;
+}
+
+/* =============================================================================
+   Brand mark (the little square with the logo glyph)
+   ============================================================================ */
+.brand-mark {
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  background: linear-gradient(135deg, var(--color-brand-600), var(--color-brand-700));
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.15),
+    0 1px 2px rgba(230, 0, 0, 0.32);
+  position: relative;
+  overflow: hidden;
+}
+.brand-mark::before {
+  /* a tiny gloss to feel like a real brand chip */
+  content: "";
+  position: absolute;
+  inset: 0 0 50% 0;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.18), rgba(255, 255, 255, 0));
+}

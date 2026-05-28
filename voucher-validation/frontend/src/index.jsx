@@ -1,9 +1,13 @@
-import React from 'react';
-import ReactDOM from 'react-dom/client';
-import './styles/main.css'; // This line should be present
-import App from './App.jsx';
+import React from "react";
+import ReactDOM from "react-dom/client";
+import "./styles/main.css";
+import App from "./App.jsx";
+import { bootstrapTheme } from "./hooks/useTheme";
 
-const root = ReactDOM.createRoot(document.getElementById('root'));
+// Apply the persisted theme BEFORE React mounts to prevent a flash of wrong theme.
+bootstrapTheme();
+
+const root = ReactDOM.createRoot(document.getElementById("root"));
 root.render(
   <React.StrictMode>
     <App />

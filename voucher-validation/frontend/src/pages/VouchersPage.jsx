@@ -1,15 +1,10 @@
 // src/pages/VouchersPage.jsx
+// The main inventory page. Dense table, filter rail, bulk actions, drawer modals.
+
 import React, { useEffect, useState, useCallback } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { voucherApi } from "../services/api";
-import { useAuth } from "../hooks/useAuth";
-import StatusBadge from "../components/shared/StatusBadge";
-import Pagination from "../components/shared/Pagination";
-import ConfirmDialog from "../components/shared/ConfirmDialog";
-import VoucherDetailModal from "../components/vouchers/VoucherDetailModal";
-import VoucherCreateForm from "../components/vouchers/VoucherCreateForm";
-import toast from "react-hot-toast";
 import { AnimatePresence, motion } from "framer-motion";
+import toast from "react-hot-toast";
 import {
   Search,
   Sparkles,
@@ -21,6 +16,15 @@ import {
   ChevronDown,
   X,
 } from "lucide-react";
+
+import { voucherApi } from "../services/api";
+import { useAuth } from "../hooks/useAuth";
+import StatusBadge from "../components/shared/StatusBadge";
+import Pagination from "../components/shared/Pagination";
+import ConfirmDialog from "../components/shared/ConfirmDialog";
+import VoucherDetailModal from "../components/vouchers/VoucherDetailModal";
+import VoucherCreateForm from "../components/vouchers/VoucherCreateForm";
+import { Button, Badge, EmptyState } from "../components/ui";
 
 export default function VouchersPage() {
   const { uuid: routeUuid } = useParams();
@@ -111,11 +115,8 @@ export default function VouchersPage() {
   };
 
   const toggleAll = () => {
-    if (selected.size === vouchers.length) {
-      setSelected(new Set());
-    } else {
-      setSelected(new Set(vouchers.map((v) => v.uuid)));
-    }
+    if (selected.size === vouchers.length) setSelected(new Set());
+    else setSelected(new Set(vouchers.map((v) => v.uuid)));
   };
 
   const handleBulk = (action) => {
@@ -123,6 +124,8 @@ export default function VouchersPage() {
     setConfirm({
       title: `${labels[action]} ${selected.size} voucher(s)?`,
       message: `This will ${labels[action]} the selected vouchers.`,
+      variant: action === "enable" ? "info" : "danger",
+      confirmLabel: labels[action].charAt(0).toUpperCase() + labels[action].slice(1),
       onConfirm: async () => {
         setConfirm(null);
         try {
@@ -151,275 +154,341 @@ export default function VouchersPage() {
   const hasFilters = statusFilter || packageFilter || searchInput;
 
   return (
-    <div className="flex flex-col h-full">
-      {/* Header */}
-      <div className="shrink-0 px-6 pt-6 pb-4">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="w-11 h-11 bg-gradient-to-br from-purple-500 to-pink-500 rounded-2xl flex items-center justify-center shadow-lg shadow-purple-200">
-              <Ticket className="w-5 h-5 text-white" />
-            </div>
-            <div>
-              <h1 className="text-2xl font-bold text-gray-900">Vouchers</h1>
-              <p className="text-xs text-gray-400 font-medium mt-0.5">
-                {total} total vouchers
-              </p>
-            </div>
+    <div className="page-shell">
+      {/* ----- Header ----- */}
+      <div className="page-header">
+        <div className="flex items-center gap-3 min-w-0">
+          <span className="brand-mark">
+            <Ticket size={15} />
+          </span>
+          <div className="flex flex-col min-w-0">
+            <span className="page-eyebrow">Inventory</span>
+            <h1 className="page-title">Vouchers</h1>
+            <p className="page-subtitle">
+              {total.toLocaleString()} total
+              {viewMode === "historical" && " · viewing archived"}
+            </p>
           </div>
-          {isAdmin && (
+        </div>
+
+        {isAdmin && (
+          <Button
+            variant="primary"
+            size="md"
+            onClick={() => setShowCreate(true)}
+            iconLeft={<Sparkles size={14} />}
+          >
+            Generate
+          </Button>
+        )}
+      </div>
+
+      {/* ----- Toolbar ----- */}
+      <div className="shrink-0 flex flex-wrap items-center gap-2 px-8 py-3 border-b border-[var(--border-subtle)] bg-[var(--surface-sunken)]">
+        {/* Search */}
+        <div className="relative flex-1 min-w-[240px] max-w-sm">
+          <Search
+            size={13}
+            className="absolute left-2.5 top-1/2 -translate-y-1/2 text-[var(--text-quaternary)] pointer-events-none"
+          />
+          <input
+            type="text"
+            placeholder="Search code, name, email…"
+            value={searchInput}
+            onChange={(e) => setSearchInput(e.target.value)}
+            className={
+              "w-full pl-8 pr-8 h-8 text-[13px] rounded-md " +
+              "bg-[var(--surface-raised)] border border-[var(--border-default)] " +
+              "text-[var(--text-primary)] placeholder:text-[var(--text-quaternary)] " +
+              "hover:border-[var(--input-border-hover)] focus-input"
+            }
+          />
+          {searchInput && (
             <button
-              onClick={() => setShowCreate(true)}
-              className="flex items-center gap-2 px-5 py-2.5 bg-gradient-to-r from-purple-600 to-pink-500 text-white rounded-xl text-sm font-semibold hover:from-purple-700 hover:to-pink-600 transition-all shadow-lg shadow-purple-200 active:scale-[0.97]"
+              onClick={() => setSearchInput("")}
+              className="absolute right-2 top-1/2 -translate-y-1/2 text-[var(--text-quaternary)] hover:text-[var(--text-secondary)]"
             >
-              <Sparkles size={16} />
-              Generate
+              <X size={12} />
             </button>
           )}
         </div>
 
-        {/* Toolbar */}
-        <div className="flex flex-wrap items-center gap-2.5 mt-4">
-          {/* Search */}
-          <div className="relative flex-1 min-w-[220px] max-w-sm">
-            <Search
-              size={15}
-              className="absolute left-3.5 top-1/2 -translate-y-1/2 text-gray-300"
-            />
-            <input
-              type="text"
-              placeholder="Search by code, name, email..."
-              value={searchInput}
-              onChange={(e) => setSearchInput(e.target.value)}
-              className="w-full pl-10 pr-9 py-2.5 bg-gray-50/80 border border-gray-100 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-purple-400 focus:border-transparent focus:bg-white transition-all placeholder:text-gray-300"
-            />
-            {searchInput && (
-              <button
-                onClick={() => setSearchInput("")}
-                className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-300 hover:text-gray-500 transition-colors"
-              >
-                <X size={14} />
-              </button>
-            )}
-          </div>
-
-          {/* View mode toggle */}
-          <div className="flex items-center bg-gray-100/80 rounded-xl p-1">
-            {["active", "historical"].map((mode) => (
+        {/* View mode tabs */}
+        <div
+          className={
+            "inline-flex items-center rounded-md p-0.5 " +
+            "bg-[var(--surface-raised)] border border-[var(--border-default)]"
+          }
+        >
+          {["active", "historical"].map((mode) => {
+            const active = viewMode === mode;
+            return (
               <button
                 key={mode}
                 onClick={() => {
                   setViewMode(mode);
                   setPage(1);
                 }}
-                className={`px-3.5 py-1.5 text-xs font-semibold rounded-lg capitalize transition-all ${
-                  viewMode === mode
-                    ? "bg-white text-gray-800 shadow-sm"
-                    : "text-gray-400 hover:text-gray-600"
-                }`}
+                className={
+                  "h-7 px-2.5 text-[12px] font-medium rounded capitalize transition-colors " +
+                  (active
+                    ? "bg-[var(--surface-hover)] text-[var(--text-primary)]"
+                    : "text-[var(--text-tertiary)] hover:text-[var(--text-primary)]")
+                }
               >
                 {mode}
               </button>
-            ))}
-          </div>
-
-          {/* Status filter */}
-          <div className="relative">
-            <Filter size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-300 pointer-events-none" />
-            <select
-              value={statusFilter}
-              onChange={(e) => {
-                setStatusFilter(e.target.value);
-                setPage(1);
-              }}
-              className="appearance-none pl-8 pr-8 py-2.5 bg-gray-50/80 border border-gray-100 rounded-xl text-xs font-medium text-gray-600 focus:outline-none focus:ring-2 focus:ring-purple-400 cursor-pointer"
-            >
-              <option value="">All Status</option>
-              <option value="1">Active</option>
-              <option value="0">Inactive</option>
-              <option value="2">Expired</option>
-              <option value="3">Disabled</option>
-            </select>
-            <ChevronDown size={13} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-300 pointer-events-none" />
-          </div>
-
-          {/* Package filter */}
-          {packages.length > 0 && (
-            <div className="relative">
-              <select
-                value={packageFilter}
-                onChange={(e) => {
-                  setPackageFilter(e.target.value);
-                  setPage(1);
-                }}
-                className="appearance-none pl-3.5 pr-8 py-2.5 bg-gray-50/80 border border-gray-100 rounded-xl text-xs font-medium text-gray-600 focus:outline-none focus:ring-2 focus:ring-purple-400 cursor-pointer"
-              >
-                <option value="">All Packages</option>
-                {packages.map((name) => (
-                  <option key={name} value={name}>
-                    {name}
-                  </option>
-                ))}
-              </select>
-              <ChevronDown size={13} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-300 pointer-events-none" />
-            </div>
-          )}
-
-          {/* Clear filters */}
-          {hasFilters && (
-            <button
-              onClick={() => {
-                setSearchInput("");
-                setStatusFilter("");
-                setPackageFilter("");
-                setPage(1);
-              }}
-              className="flex items-center gap-1 px-3 py-2 text-xs font-medium text-purple-600 hover:bg-purple-50 rounded-lg transition-colors"
-            >
-              <X size={13} />
-              Clear
-            </button>
-          )}
+            );
+          })}
         </div>
+
+        {/* Status filter */}
+        <ToolbarSelect
+          icon={<Filter size={12} />}
+          value={statusFilter}
+          onChange={(v) => {
+            setStatusFilter(v);
+            setPage(1);
+          }}
+        >
+          <option value="">All status</option>
+          <option value="1">Unused</option>
+          <option value="2">Active</option>
+          <option value="3">Expired</option>
+          <option value="0">Inactive</option>
+        </ToolbarSelect>
+
+        {packages.length > 0 && (
+          <ToolbarSelect
+            value={packageFilter}
+            onChange={(v) => {
+              setPackageFilter(v);
+              setPage(1);
+            }}
+          >
+            <option value="">All packages</option>
+            {packages.map((name) => (
+              <option key={name} value={name}>
+                {name}
+              </option>
+            ))}
+          </ToolbarSelect>
+        )}
+
+        {hasFilters && (
+          <Button
+            variant="ghost"
+            size="xs"
+            onClick={() => {
+              setSearchInput("");
+              setStatusFilter("");
+              setPackageFilter("");
+              setPage(1);
+            }}
+            iconLeft={<X size={11} />}
+          >
+            Clear
+          </Button>
+        )}
       </div>
 
-      {/* Bulk action bar (admin only) */}
+      {/* ----- Bulk action bar ----- */}
       <AnimatePresence>
         {isAdmin && selected.size > 0 && (
           <motion.div
             initial={{ height: 0, opacity: 0 }}
             animate={{ height: "auto", opacity: 1 }}
             exit={{ height: 0, opacity: 0 }}
-            className="shrink-0 overflow-hidden px-6"
+            className="shrink-0 overflow-hidden"
           >
-            <div className="flex items-center gap-3 bg-gradient-to-r from-purple-50 to-pink-50 border border-purple-100 rounded-xl px-4 py-2.5 mb-3">
-              <span className="text-sm font-semibold text-purple-700">
+            <div
+              className={
+                "flex items-center gap-3 px-8 py-2 " +
+                "bg-[var(--brand-soft)] border-b border-[var(--brand-soft-hover)]"
+              }
+            >
+              <span className="text-[12.5px] font-semibold text-[var(--brand-fg-on-soft)]">
                 {selected.size} selected
               </span>
-              <div className="flex items-center gap-2 ml-auto">
-                <BulkBtn onClick={() => handleBulk("enable")} icon={<CheckCircle size={13} />} label="Enable" color="green" />
-                <BulkBtn onClick={() => handleBulk("disable")} icon={<Ban size={13} />} label="Disable" color="orange" />
-                <BulkBtn onClick={() => handleBulk("delete")} icon={<Trash2 size={13} />} label="Delete" color="red" />
+              <div className="flex items-center gap-1.5 ml-auto">
+                <Button
+                  variant="secondary"
+                  size="xs"
+                  onClick={() => handleBulk("enable")}
+                  iconLeft={<CheckCircle size={12} />}
+                >
+                  Enable
+                </Button>
+                <Button
+                  variant="secondary"
+                  size="xs"
+                  onClick={() => handleBulk("disable")}
+                  iconLeft={<Ban size={12} />}
+                >
+                  Disable
+                </Button>
+                <Button
+                  variant="danger"
+                  size="xs"
+                  onClick={() => handleBulk("delete")}
+                  iconLeft={<Trash2 size={12} />}
+                >
+                  Delete
+                </Button>
               </div>
             </div>
           </motion.div>
         )}
       </AnimatePresence>
 
-      {/* Table */}
-      <div className="flex-1 min-h-0 px-6 pb-6">
-        <div className="bg-white border border-gray-100 rounded-2xl overflow-hidden shadow-sm h-full flex flex-col">
+      {/* ----- Table ----- */}
+      <div className="flex-1 min-h-0 px-8 py-4">
+        <div
+          className={
+            "h-full flex flex-col rounded-md " +
+            "bg-[var(--surface-raised)] border border-[var(--border-default)] " +
+            "shadow-[var(--elev-1)] overflow-hidden"
+          }
+        >
           {loading ? (
-            <div className="flex-1 flex items-center justify-center">
-              <div className="w-9 h-9 border-[3px] border-purple-100 border-t-purple-500 rounded-full animate-spin" />
-            </div>
+            <LoadingTable cols={isAdmin ? 8 : 7} />
           ) : vouchers.length === 0 ? (
-            <div className="flex-1 flex flex-col items-center justify-center text-gray-300">
-              <div className="w-16 h-16 bg-gray-50 rounded-2xl flex items-center justify-center mb-4">
-                <Ticket size={28} className="text-gray-200" />
-              </div>
-              <p className="text-sm font-medium text-gray-400">No vouchers found</p>
-              <p className="text-xs text-gray-300 mt-1">
-                {hasFilters ? "Try adjusting your filters" : "Generate some vouchers to get started"}
-              </p>
-            </div>
+            <EmptyState
+              icon={Ticket}
+              title="No vouchers found"
+              description={
+                hasFilters
+                  ? "Try adjusting filters or clearing search."
+                  : "Generate some vouchers to get started."
+              }
+            />
           ) : (
             <div className="flex-1 min-h-0 overflow-auto">
-              <table className="w-full text-sm">
+              <table className="w-full text-[13px]">
                 <thead className="sticky top-0 z-10">
-                  <tr className="bg-gray-50/90 backdrop-blur-sm text-left text-[11px] text-gray-400 uppercase tracking-wider font-semibold">
+                  <tr
+                    className={
+                      "bg-[var(--surface-sunken)] text-left " +
+                      "text-[10.5px] font-mono uppercase tracking-[0.1em] text-[var(--text-quaternary)]"
+                    }
+                  >
                     {isAdmin && (
-                      <th className="px-4 py-3 w-10">
+                      <th className="pl-4 pr-2 py-2.5 w-10">
                         <input
                           type="checkbox"
                           checked={vouchers.length > 0 && selected.size === vouchers.length}
                           onChange={toggleAll}
-                          className="rounded-md border-gray-200 text-purple-500 focus:ring-purple-400"
+                          className="accent-[var(--brand)] cursor-pointer"
                         />
                       </th>
                     )}
-                    <th className="px-4 py-3">Code</th>
-                    <th className="px-4 py-3">Package</th>
-                    <th className="px-4 py-3">Status</th>
-                    <th className="px-4 py-3">Clients</th>
-                    <th className="px-4 py-3">Time</th>
-                    <th className="px-4 py-3">Data</th>
-                    <th className="px-4 py-3">Created</th>
+                    <Th>Code</Th>
+                    <Th>Package</Th>
+                    <Th>Status</Th>
+                    <Th>Clients</Th>
+                    <Th>Time</Th>
+                    <Th>Data</Th>
+                    <Th>Created</Th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-gray-50">
-                  {vouchers.map((v) => (
-                    <tr
-                      key={v.uuid}
-                      className={`transition-colors cursor-pointer ${
-                        selected.has(v.uuid)
-                          ? "bg-purple-50/50"
-                          : "hover:bg-gray-50/60"
-                      }`}
-                      onClick={() => openDetail(v.uuid)}
-                    >
-                      {isAdmin && (
-                        <td className="px-4 py-3.5" onClick={(e) => e.stopPropagation()}>
-                          <input
-                            type="checkbox"
-                            checked={selected.has(v.uuid)}
-                            onChange={() => toggleSelect(v.uuid)}
-                            className="rounded-md border-gray-200 text-purple-500 focus:ring-purple-400"
-                          />
-                        </td>
-                      )}
-                      <td className="px-4 py-3.5">
-                        <span className="font-mono text-[13px] font-semibold text-purple-600 bg-purple-50/60 px-2 py-0.5 rounded-md">
-                          {v.voucher_code}
-                        </span>
-                      </td>
-                      <td className="px-4 py-3.5 text-gray-600 text-xs font-medium truncate max-w-[140px]">
-                        {v.package_name}
-                      </td>
-                      <td className="px-4 py-3.5">
-                        <StatusBadge status={v.status} />
-                      </td>
-                      <td className="px-4 py-3.5 text-gray-500 text-xs">
-                        <span className="font-semibold text-gray-700">{v.current_clients}</span>
-                        <span className="text-gray-300 mx-0.5">/</span>
-                        <span>{v.max_clients}</span>
-                      </td>
-                      <td className="px-4 py-3.5 text-gray-500 text-xs">
-                        <span className="font-semibold text-gray-700">{formatMin(v.used_time)}</span>
-                        <span className="text-gray-300 mx-0.5">/</span>
-                        <span>{formatMin(v.time_period)}</span>
-                      </td>
-                      <td className="px-4 py-3.5 text-gray-500 text-xs">
-                        <span className="font-semibold text-gray-700">{formatMB(v.used_quota)}</span>
-                        <span className="text-gray-300 mx-0.5">/</span>
-                        <span>{formatMB(v.quota)}</span>
-                      </td>
-                      <td className="px-4 py-3.5 text-gray-400 text-xs">
-                        {v.create_time
-                          ? new Date(Number(v.create_time)).toLocaleDateString()
-                          : "---"}
-                      </td>
-                    </tr>
-                  ))}
+                <tbody>
+                  {vouchers.map((v) => {
+                    const isSelected = selected.has(v.uuid);
+                    return (
+                      <tr
+                        key={v.uuid}
+                        onClick={() => openDetail(v.uuid)}
+                        className={
+                          "cursor-pointer border-t border-[var(--border-subtle)] transition-colors " +
+                          (isSelected
+                            ? "bg-[var(--brand-soft)]"
+                            : "hover:bg-[var(--surface-hover)]")
+                        }
+                      >
+                        {isAdmin && (
+                          <td
+                            className="pl-4 pr-2 py-2.5"
+                            onClick={(e) => e.stopPropagation()}
+                          >
+                            <input
+                              type="checkbox"
+                              checked={isSelected}
+                              onChange={() => toggleSelect(v.uuid)}
+                              className="accent-[var(--brand)] cursor-pointer"
+                            />
+                          </td>
+                        )}
+                        <Td>
+                          <span
+                            className={
+                              "inline-flex items-center px-1.5 py-0.5 rounded font-mono " +
+                              "text-[12.5px] font-medium " +
+                              "bg-[var(--brand-soft)] text-[var(--brand-fg-on-soft)]"
+                            }
+                          >
+                            {v.voucher_code}
+                          </span>
+                        </Td>
+                        <Td>
+                          <span className="text-[var(--text-secondary)] truncate max-w-[160px] block">
+                            {v.package_name || "—"}
+                          </span>
+                        </Td>
+                        <Td>
+                          <StatusBadge status={v.status} />
+                        </Td>
+                        <Td mono>
+                          <span className="text-[var(--text-primary)] font-medium">
+                            {v.current_clients}
+                          </span>
+                          <span className="text-[var(--text-quaternary)] mx-0.5">/</span>
+                          <span className="text-[var(--text-tertiary)]">{v.max_clients}</span>
+                        </Td>
+                        <Td mono>
+                          <span className="text-[var(--text-primary)] font-medium">
+                            {formatMin(v.used_time)}
+                          </span>
+                          <span className="text-[var(--text-quaternary)] mx-0.5">/</span>
+                          <span className="text-[var(--text-tertiary)]">
+                            {formatMin(v.time_period)}
+                          </span>
+                        </Td>
+                        <Td mono>
+                          <span className="text-[var(--text-primary)] font-medium">
+                            {formatMB(v.used_quota)}
+                          </span>
+                          <span className="text-[var(--text-quaternary)] mx-0.5">/</span>
+                          <span className="text-[var(--text-tertiary)]">
+                            {formatMB(v.quota)}
+                          </span>
+                        </Td>
+                        <Td mono>
+                          <span className="text-[var(--text-tertiary)]">
+                            {v.create_time
+                              ? new Date(Number(v.create_time)).toLocaleDateString()
+                              : "—"}
+                          </span>
+                        </Td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
           )}
 
-          {/* Pagination */}
           {!loading && vouchers.length > 0 && (
-            <div className="shrink-0 border-t border-gray-50">
-              <Pagination
-                page={page}
-                totalPages={totalPages}
-                total={total}
-                onPageChange={setPage}
-              />
-            </div>
+            <Pagination
+              page={page}
+              totalPages={totalPages}
+              total={total}
+              onPageChange={setPage}
+            />
           )}
         </div>
       </div>
 
-      {/* Modals */}
+      {/* ----- Modals ----- */}
       <AnimatePresence>
         {detailUuid && (
           <VoucherDetailModal
@@ -431,23 +500,23 @@ export default function VouchersPage() {
         )}
       </AnimatePresence>
 
-      <AnimatePresence>
-        {showCreate && (
-          <VoucherCreateForm
-            onClose={() => setShowCreate(false)}
-            onCreated={() => {
-              setShowCreate(false);
-              fetchVouchers();
-            }}
-          />
-        )}
-      </AnimatePresence>
+      {showCreate && (
+        <VoucherCreateForm
+          onClose={() => setShowCreate(false)}
+          onCreated={() => {
+            setShowCreate(false);
+            fetchVouchers();
+          }}
+        />
+      )}
 
       {confirm && (
         <ConfirmDialog
           open
           title={confirm.title}
           message={confirm.message}
+          confirmLabel={confirm.confirmLabel}
+          variant={confirm.variant}
           onConfirm={confirm.onConfirm}
           onCancel={() => setConfirm(null)}
         />
@@ -456,21 +525,56 @@ export default function VouchersPage() {
   );
 }
 
-// --- Sub-components ---
+/* ------------ Local helpers ------------------------------------------------ */
 
-function BulkBtn({ onClick, icon, label, color }) {
-  const styles = {
-    green: "text-green-700 bg-green-50 hover:bg-green-100",
-    orange: "text-orange-700 bg-orange-50 hover:bg-orange-100",
-    red: "text-red-700 bg-red-50 hover:bg-red-100",
-  };
+function Th({ children }) {
+  return <th className="px-3 py-2.5 font-mono font-medium">{children}</th>;
+}
+
+function Td({ children, mono = false }) {
   return (
-    <button
-      onClick={onClick}
-      className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg transition-all active:scale-95 ${styles[color]}`}
-    >
-      {icon} {label}
-    </button>
+    <td className={`px-3 py-2.5 align-middle ${mono ? "font-mono text-[12.5px]" : ""}`}>
+      {children}
+    </td>
+  );
+}
+
+function ToolbarSelect({ icon, value, onChange, children }) {
+  return (
+    <div className="relative">
+      {icon && (
+        <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-[var(--text-quaternary)] pointer-events-none">
+          {icon}
+        </span>
+      )}
+      <select
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        className={
+          "h-8 pr-7 text-[12.5px] font-medium rounded-md appearance-none cursor-pointer " +
+          (icon ? "pl-7 " : "pl-2.5 ") +
+          "bg-[var(--surface-raised)] border border-[var(--border-default)] " +
+          "text-[var(--text-secondary)] hover:border-[var(--input-border-hover)] focus-input"
+        }
+      >
+        {children}
+      </select>
+      <ChevronDown
+        size={11}
+        className="absolute right-2 top-1/2 -translate-y-1/2 text-[var(--text-quaternary)] pointer-events-none"
+      />
+    </div>
+  );
+}
+
+function LoadingTable({ cols }) {
+  return (
+    <div className="flex-1 p-4 space-y-2">
+      <div className="h-7 rounded skeleton" />
+      {Array.from({ length: 8 }).map((_, i) => (
+        <div key={i} className="h-9 rounded skeleton" />
+      ))}
+    </div>
   );
 }
 

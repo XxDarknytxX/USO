@@ -1,24 +1,42 @@
 // src/components/shared/StatusBadge.jsx
+// Pill badge for Ruijie voucher status codes.
+//   '1' = Unused (not yet activated)  — info
+//   '2' = In-use (active / connected) — success
+//   '3' = Expired                     — danger
+//   '0' = Inactive (fallback)         — neutral
+//
+// Built on the design-system Badge primitive so it picks up theme tokens
+// (light/dark mode) and matches the rest of the admin chrome.
 
-// Ruijie Cloud status codes:
-//   '1' = Unused (not yet activated)
-//   '2' = In-use  (active / connected)
-//   '3' = Expired
-const statusConfig = {
-  "1": { label: "Unused", bg: "bg-blue-50", text: "text-blue-700", dot: "bg-blue-500" },
-  "0": { label: "Inactive", bg: "bg-gray-50", text: "text-gray-600", dot: "bg-gray-400" },
-  "2": { label: "Active", bg: "bg-green-50", text: "text-green-700", dot: "bg-green-500" },
-  "3": { label: "Expired", bg: "bg-red-50", text: "text-red-700", dot: "bg-red-500" },
+import { Badge } from "../ui";
+
+const STATUS = {
+  "1": { label: "Unused", tone: "info" },
+  "2": { label: "Active", tone: "success" },
+  "3": { label: "Expired", tone: "danger" },
+  "0": { label: "Inactive", tone: "neutral" },
+};
+
+const DOT_BG = {
+  info: "bg-[var(--info-fg)]",
+  success: "bg-[var(--success-fg)]",
+  danger: "bg-[var(--danger-fg)]",
+  neutral: "bg-[var(--text-quaternary)]",
 };
 
 export default function StatusBadge({ status, className = "" }) {
-  const config = statusConfig[String(status)] || statusConfig["0"];
+  const cfg = STATUS[String(status)] || STATUS["0"];
   return (
-    <span
-      className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs font-medium ${config.bg} ${config.text} ${className}`}
+    <Badge
+      tone={cfg.tone}
+      className={className}
+      icon={
+        <span
+          className={`inline-block w-1.5 h-1.5 rounded-full ${DOT_BG[cfg.tone]}`}
+        />
+      }
     >
-      <span className={`w-1.5 h-1.5 rounded-full ${config.dot}`} />
-      {config.label}
-    </span>
+      {cfg.label}
+    </Badge>
   );
 }

@@ -1,9 +1,27 @@
 // src/components/vouchers/VoucherCreateForm.jsx
-import { useState, useEffect } from "react";
-import { motion, AnimatePresence } from "framer-motion";
-import { voucherApi } from "../../services/api";
+// "Generate Vouchers" modal — pick a profile, pick a quantity, fire.
+// Rebuilt on the design system: Modal + Field + Input + Button + Badge.
+
+import { useEffect, useMemo, useState } from "react";
+import { motion } from "framer-motion";
 import toast from "react-hot-toast";
-import { X, Loader2, Ticket, Sparkles, Clock, HardDrive, Users } from "lucide-react";
+import {
+  Ticket,
+  Sparkles,
+  Clock,
+  HardDrive,
+  Users,
+  Minus,
+  Plus,
+  Loader2,
+  Check,
+  Inbox,
+} from "lucide-react";
+
+import { voucherApi } from "../../services/api";
+import { Modal, Field, Input, Button, Badge, EmptyState } from "../ui";
+
+const QUICK_QTYS = [1, 5, 10, 25, 50];
 
 export default function VoucherCreateForm({ onClose, onCreated }) {
   const [userGroups, setUserGroups] = useState([]);
@@ -37,19 +55,22 @@ export default function VoucherCreateForm({ onClose, onCreated }) {
       toast.error("Quantity must be between 1 and 100");
       return;
     }
-
     setSubmitting(true);
     try {
+      const gid = String(selectedGroup.id || selectedGroup.userGroupId);
+      const gname = selectedGroup.name || selectedGroup.userGroupName || "";
       const payload = {
-        user_group_id: String(selectedGroup.id || selectedGroup.userGroupId),
-        user_group_name: selectedGroup.name || selectedGroup.userGroupName || "",
-        profile: selectedGroup.authProfileId || String(selectedGroup.id || selectedGroup.userGroupId),
-        package_name: selectedGroup.name || selectedGroup.userGroupName || "",
+        user_group_id: gid,
+        user_group_name: gname,
+        profile: selectedGroup.authProfileId || gid,
+        package_name: gname,
         quantity,
       };
       const result = await voucherApi.create(payload);
       const count = result.count || 1;
-      toast.success(`${count} voucher${count > 1 ? "s" : ""} created successfully`);
+      toast.success(
+        `${count} voucher${count > 1 ? "s" : ""} created successfully`
+      );
       onCreated();
     } catch (err) {
       toast.error(err.message);
@@ -58,221 +79,270 @@ export default function VoucherCreateForm({ onClose, onCreated }) {
     }
   }
 
-  function formatTime(minutes) {
-    const m = Number(minutes || 0);
-    if (m < 60) return `${m} min`;
-    if (m < 1440) return `${Math.round(m / 60)} hours`;
-    return `${Math.round(m / 1440)} days`;
-  }
-
-  function formatQuota(mb) {
-    const val = Number(mb || 0);
-    if (val < 1024) return `${val} MB`;
-    return `${(val / 1024).toFixed(1)} GB`;
-  }
+  const selectedId = useMemo(
+    () =>
+      selectedGroup
+        ? String(selectedGroup.id || selectedGroup.userGroupId)
+        : null,
+    [selectedGroup]
+  );
 
   return (
-    <AnimatePresence>
-      <motion.div
-        className="fixed inset-0 z-50 flex items-center justify-center p-4"
-        initial={{ opacity: 0 }}
-        animate={{ opacity: 1 }}
-        exit={{ opacity: 0 }}
-      >
-        {/* Backdrop */}
-        <motion.div
-          className="absolute inset-0 bg-black/60 backdrop-blur-sm"
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          exit={{ opacity: 0 }}
-          onClick={onClose}
-        />
+    <Modal open onClose={onClose} width="lg">
+      <Modal.Header
+        eyebrow="Vouchers"
+        title="Generate vouchers"
+        subtitle="Pick a profile and how many codes to mint. They appear in the Vouchers list immediately."
+        icon={Ticket}
+        onClose={onClose}
+      />
 
-        {/* Modal */}
-        <motion.div
-          className="relative bg-white rounded-3xl shadow-2xl w-full max-w-md overflow-hidden"
-          initial={{ scale: 0.9, opacity: 0, y: 20 }}
-          animate={{ scale: 1, opacity: 1, y: 0 }}
-          exit={{ scale: 0.9, opacity: 0, y: 20 }}
-          transition={{ type: "spring", damping: 25, stiffness: 300 }}
-        >
-          {/* Accent bar */}
-          <div className="h-1 bg-gradient-to-r from-purple-500 via-pink-500 to-orange-400" />
-
-          {/* Header */}
-          <div className="px-6 pt-5 pb-3">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 bg-gradient-to-br from-purple-500 to-pink-500 rounded-xl flex items-center justify-center shadow-lg shadow-purple-200">
-                  <Ticket className="w-5 h-5 text-white" />
-                </div>
-                <div>
-                  <h2 className="text-lg font-bold text-gray-900">Generate Vouchers</h2>
-                  <p className="text-xs text-gray-500">Select a profile and quantity</p>
-                </div>
-              </div>
-              <button
-                onClick={onClose}
-                className="w-8 h-8 flex items-center justify-center rounded-lg text-gray-400 hover:bg-gray-100 hover:text-gray-600 transition-all"
-              >
-                <X size={18} />
-              </button>
-            </div>
-          </div>
-
-          {/* Content */}
-          <div className="px-6 pb-6 space-y-5">
-            {/* Profile cards */}
-            <div>
-              <label className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3 block">
-                Select Profile
-              </label>
-
-              {loadingGroups ? (
-                <div className="flex flex-col items-center justify-center py-8 text-gray-400">
-                  <Loader2 size={24} className="animate-spin mb-2" />
-                  <span className="text-sm">Loading profiles...</span>
-                </div>
-              ) : userGroups.length === 0 ? (
-                <div className="text-center py-8 bg-red-50 rounded-2xl">
-                  <p className="text-sm text-red-600 font-medium">No profiles found</p>
-                  <p className="text-xs text-red-400 mt-1">Check your API connection</p>
-                </div>
-              ) : (
-                <div className="space-y-2 max-h-[260px] overflow-y-auto pr-1">
-                  {userGroups.map((g) => {
-                    const gid = String(g.id || g.userGroupId);
-                    const isSelected = selectedGroup && String(selectedGroup.id || selectedGroup.userGroupId) === gid;
-                    return (
-                      <motion.button
-                        key={gid}
-                        type="button"
-                        onClick={() => setSelectedGroup(g)}
-                        whileTap={{ scale: 0.98 }}
-                        className={`w-full text-left p-4 rounded-2xl border-2 transition-all duration-200 ${
-                          isSelected
-                            ? "border-purple-500 bg-purple-50/80 shadow-md shadow-purple-100"
-                            : "border-gray-100 bg-gray-50/50 hover:border-gray-200 hover:bg-gray-50"
-                        }`}
-                      >
-                        <div className="flex items-center justify-between mb-2">
-                          <span className={`text-sm font-semibold ${isSelected ? "text-purple-700" : "text-gray-800"}`}>
-                            {g.name || g.userGroupName}
-                          </span>
-                          <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center transition-all ${
-                            isSelected ? "border-purple-500 bg-purple-500" : "border-gray-300"
-                          }`}>
-                            {isSelected && (
-                              <motion.div
-                                initial={{ scale: 0 }}
-                                animate={{ scale: 1 }}
-                                className="w-2 h-2 bg-white rounded-full"
-                              />
-                            )}
-                          </div>
-                        </div>
-                        <div className="flex flex-wrap items-center gap-3 text-xs text-gray-500">
-                          {g.timePeriod != null && (
-                            <span className="flex items-center gap-1">
-                              <Clock size={10} /> {formatTime(g.timePeriod)}
-                            </span>
-                          )}
-                          {g.quota != null && (
-                            <span className="flex items-center gap-1">
-                              <HardDrive size={10} /> {formatQuota(g.quota)}
-                            </span>
-                          )}
-                          {g.noOfDevice != null && (
-                            <span className="flex items-center gap-1">
-                              <Users size={10} /> {g.noOfDevice} device{g.noOfDevice > 1 ? "s" : ""}
-                            </span>
-                          )}
-                          {g.voucherCount > 0 && (
-                            <span className="flex items-center gap-1 text-purple-500">
-                              <Ticket size={10} /> {g.voucherCount} active
-                            </span>
-                          )}
-                        </div>
-                      </motion.button>
-                    );
-                  })}
-                </div>
-              )}
-            </div>
-
-            {/* Quantity stepper */}
-            <div>
-              <label className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2 block">
-                Quantity
-              </label>
-              <div className="flex items-center gap-3">
-                <button
-                  type="button"
-                  onClick={() => setQuantity(Math.max(1, quantity - 1))}
-                  className="w-10 h-10 rounded-xl bg-gray-100 hover:bg-gray-200 text-gray-600 font-bold text-lg transition-colors flex items-center justify-center"
-                >
-                  -
-                </button>
-                <input
-                  type="number"
-                  min={1}
-                  max={100}
-                  value={quantity}
-                  onChange={(e) => setQuantity(Math.max(1, Math.min(100, Number(e.target.value) || 1)))}
-                  className="flex-1 h-10 text-center text-lg font-bold text-gray-800 border-2 border-gray-100 rounded-xl focus:outline-none focus:border-purple-400 transition-colors [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+      <Modal.Body>
+        <div className="flex flex-col gap-6">
+          {/* Profile picker */}
+          <Field
+            label="Profile"
+            required
+            hint="The plan defines time period, data quota, and concurrent client limit."
+          >
+            {loadingGroups ? (
+              <ProfileSkeleton />
+            ) : userGroups.length === 0 ? (
+              <div className="border border-[var(--border-subtle)] rounded-md bg-[var(--surface-sunken)]">
+                <EmptyState
+                  icon={Inbox}
+                  title="No profiles found"
+                  description="Check your Ruijie API connection and try again."
                 />
-                <button
-                  type="button"
-                  onClick={() => setQuantity(Math.min(100, quantity + 1))}
-                  className="w-10 h-10 rounded-xl bg-gray-100 hover:bg-gray-200 text-gray-600 font-bold text-lg transition-colors flex items-center justify-center"
-                >
-                  +
-                </button>
               </div>
-              <div className="flex items-center gap-2 mt-2">
-                {[1, 5, 10, 25, 50].map((n) => (
-                  <button
-                    key={n}
-                    type="button"
-                    onClick={() => setQuantity(n)}
-                    className={`px-3 py-1 text-xs font-medium rounded-lg transition-all ${
-                      quantity === n
-                        ? "bg-purple-100 text-purple-700"
-                        : "bg-gray-50 text-gray-500 hover:bg-gray-100"
-                    }`}
-                  >
-                    {n}
-                  </button>
-                ))}
+            ) : (
+              <div
+                role="radiogroup"
+                aria-label="Voucher profile"
+                className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-[280px] overflow-y-auto pr-1"
+              >
+                {userGroups.map((g) => {
+                  const gid = String(g.id || g.userGroupId);
+                  const isSelected = selectedId === gid;
+                  return (
+                    <ProfileCard
+                      key={gid}
+                      group={g}
+                      selected={isSelected}
+                      onSelect={() => setSelectedGroup(g)}
+                    />
+                  );
+                })}
               </div>
-            </div>
+            )}
+          </Field>
 
-            {/* Actions */}
-            <div className="flex gap-3 pt-2">
-              <button
-                type="button"
-                onClick={onClose}
-                className="flex-1 h-11 text-sm font-semibold text-gray-600 bg-gray-100 rounded-xl hover:bg-gray-200 transition-all"
+          {/* Quantity */}
+          <Field
+            label="Quantity"
+            required
+            hint="Between 1 and 100. Each voucher gets a unique code."
+          >
+            <div className="flex items-center gap-2">
+              <QtyStepButton
+                onClick={() => setQuantity(Math.max(1, quantity - 1))}
+                aria-label="Decrease quantity"
               >
-                Cancel
-              </button>
-              <button
-                type="button"
-                onClick={handleSubmit}
-                disabled={submitting || loadingGroups || !selectedGroup}
-                className="flex-[1.5] h-11 text-sm font-semibold text-white bg-gradient-to-r from-purple-600 to-pink-500 rounded-xl hover:from-purple-700 hover:to-pink-600 transition-all disabled:opacity-40 disabled:cursor-not-allowed shadow-lg shadow-purple-200 flex items-center justify-center gap-2"
+                <Minus size={14} />
+              </QtyStepButton>
+
+              <Input
+                mono
+                type="number"
+                min={1}
+                max={100}
+                value={quantity}
+                onChange={(e) =>
+                  setQuantity(
+                    Math.max(1, Math.min(100, Number(e.target.value) || 1))
+                  )
+                }
+                className="text-center w-20 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+              />
+
+              <QtyStepButton
+                onClick={() => setQuantity(Math.min(100, quantity + 1))}
+                aria-label="Increase quantity"
               >
-                {submitting ? (
-                  <Loader2 size={16} className="animate-spin" />
-                ) : (
-                  <Sparkles size={16} />
-                )}
-                {submitting ? "Generating..." : `Generate ${quantity > 1 ? quantity + " " : ""}Voucher${quantity > 1 ? "s" : ""}`}
-              </button>
+                <Plus size={14} />
+              </QtyStepButton>
+
+              <span className="flex-1" />
+
+              <div className="flex items-center gap-1">
+                {QUICK_QTYS.map((n) => {
+                  const active = quantity === n;
+                  return (
+                    <button
+                      key={n}
+                      type="button"
+                      onClick={() => setQuantity(n)}
+                      className={
+                        "px-2 h-7 text-[12px] font-mono rounded transition-colors " +
+                        (active
+                          ? "bg-[var(--brand-soft)] text-[var(--brand-fg-on-soft)] border border-[var(--brand-soft-hover)]"
+                          : "bg-transparent text-[var(--text-tertiary)] border border-transparent hover:bg-[var(--surface-hover)] hover:text-[var(--text-primary)]")
+                      }
+                    >
+                      {n}
+                    </button>
+                  );
+                })}
+              </div>
             </div>
-          </div>
-        </motion.div>
-      </motion.div>
-    </AnimatePresence>
+          </Field>
+        </div>
+      </Modal.Body>
+
+      <Modal.Footer>
+        <span className="mr-auto text-[12px] text-[var(--text-tertiary)] font-mono">
+          {selectedGroup ? (
+            <>
+              {(selectedGroup.name || selectedGroup.userGroupName) + " · "}
+              <span className="text-[var(--text-secondary)]">
+                {quantity} code{quantity > 1 ? "s" : ""}
+              </span>
+            </>
+          ) : (
+            "No profile selected"
+          )}
+        </span>
+        <Button variant="secondary" size="sm" onClick={onClose} disabled={submitting}>
+          Cancel
+        </Button>
+        <Button
+          variant="primary"
+          size="sm"
+          onClick={handleSubmit}
+          loading={submitting}
+          disabled={loadingGroups || !selectedGroup}
+          iconLeft={!submitting && <Sparkles size={14} />}
+        >
+          {submitting
+            ? "Generating…"
+            : `Generate ${quantity > 1 ? quantity + " " : ""}voucher${
+                quantity > 1 ? "s" : ""
+              }`}
+        </Button>
+      </Modal.Footer>
+    </Modal>
   );
+}
+
+/* ------------ Profile card (radio-as-card) ------------------------------- */
+function ProfileCard({ group, selected, onSelect }) {
+  return (
+    <motion.button
+      type="button"
+      role="radio"
+      aria-checked={selected}
+      onClick={onSelect}
+      whileTap={{ scale: 0.99 }}
+      className={
+        "group text-left p-3 rounded-md border transition-[border-color,background-color,box-shadow] duration-150 " +
+        (selected
+          ? "border-[var(--brand)] bg-[var(--brand-soft)] shadow-[0_0_0_3px_var(--brand-soft)]"
+          : "border-[var(--border-default)] bg-[var(--surface-raised)] hover:border-[var(--border-strong)] hover:bg-[var(--surface-hover)]")
+      }
+    >
+      <div className="flex items-start justify-between gap-3 mb-2">
+        <span
+          className={
+            "text-[13px] font-semibold tracking-tight truncate " +
+            (selected
+              ? "text-[var(--brand-fg-on-soft)]"
+              : "text-[var(--text-primary)]")
+          }
+        >
+          {group.name || group.userGroupName}
+        </span>
+        <span
+          className={
+            "shrink-0 w-4 h-4 rounded-full border flex items-center justify-center transition-colors " +
+            (selected
+              ? "border-[var(--brand)] bg-[var(--brand)] text-[var(--text-on-brand)]"
+              : "border-[var(--border-strong)] bg-transparent text-transparent group-hover:border-[var(--text-tertiary)]")
+          }
+        >
+          <Check size={10} strokeWidth={3} />
+        </span>
+      </div>
+
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11.5px] text-[var(--text-tertiary)] font-mono">
+        {group.timePeriod != null && (
+          <span className="flex items-center gap-1">
+            <Clock size={11} /> {formatTime(group.timePeriod)}
+          </span>
+        )}
+        {group.quota != null && (
+          <span className="flex items-center gap-1">
+            <HardDrive size={11} /> {formatQuota(group.quota)}
+          </span>
+        )}
+        {group.noOfDevice != null && (
+          <span className="flex items-center gap-1">
+            <Users size={11} /> {group.noOfDevice} dev
+          </span>
+        )}
+        {group.voucherCount > 0 && (
+          <Badge tone="brand" size="sm">
+            {group.voucherCount} active
+          </Badge>
+        )}
+      </div>
+    </motion.button>
+  );
+}
+
+/* ------------ Quantity stepper button ------------------------------------ */
+function QtyStepButton({ children, ...props }) {
+  return (
+    <button
+      type="button"
+      {...props}
+      className={
+        "h-9 w-9 flex items-center justify-center rounded-md " +
+        "bg-[var(--surface-raised)] border border-[var(--border-default)] " +
+        "text-[var(--text-secondary)] " +
+        "hover:bg-[var(--surface-hover)] hover:text-[var(--text-primary)] " +
+        "active:bg-[var(--surface-pressed)] focus-ring transition-colors"
+      }
+    />
+  );
+}
+
+/* ------------ Loading skeleton for the profile grid ---------------------- */
+function ProfileSkeleton() {
+  return (
+    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+      {Array.from({ length: 4 }).map((_, i) => (
+        <div
+          key={i}
+          className="h-[78px] rounded-md border border-[var(--border-subtle)] bg-[var(--surface-sunken)] skeleton"
+        />
+      ))}
+      <div className="col-span-full flex items-center justify-center gap-2 text-[12px] text-[var(--text-tertiary)] py-1">
+        <Loader2 size={12} className="animate-spin" /> Loading profiles…
+      </div>
+    </div>
+  );
+}
+
+/* ------------ Formatters -------------------------------------------------- */
+function formatTime(minutes) {
+  const m = Number(minutes || 0);
+  if (m < 60) return `${m} min`;
+  if (m < 1440) return `${Math.round(m / 60)} h`;
+  return `${Math.round(m / 1440)} d`;
+}
+
+function formatQuota(mb) {
+  const val = Number(mb || 0);
+  if (val < 1024) return `${val} MB`;
+  return `${(val / 1024).toFixed(1)} GB`;
 }

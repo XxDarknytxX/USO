@@ -1,10 +1,14 @@
 // src/pages/PortalConfigPage.jsx
-import React, { useEffect, useState, useCallback, useRef } from "react";
+//
+// Portal Plans management page.
+// Rebuilt on the "Operations Console" design system — IBM Plex typography,
+// Vodafone red as the only chromatic punctuation, hairline borders, dense
+// table with breathable modal forms.
+
+import { useEffect, useState, useCallback } from "react";
 import { portalConfigApi, voucherApi } from "../services/api";
 import { useAuth } from "../hooks/useAuth";
-import ConfirmDialog from "../components/shared/ConfirmDialog";
 import toast from "react-hot-toast";
-import { AnimatePresence, motion } from "framer-motion";
 import {
   Globe,
   Plus,
@@ -13,24 +17,40 @@ import {
   Check,
   X,
   Filter,
-  ChevronDown,
-  ToggleLeft,
-  ToggleRight,
-  Tag,
   Star,
   Layers,
+  Tag,
+  Sparkles,
 } from "lucide-react";
+
+import Button, { IconButton } from "../components/ui/Button";
+import Modal from "../components/ui/Modal";
+import ConfirmDialog from "../components/ui/ConfirmDialog";
+import {
+  Field,
+  Input,
+  Select,
+  Textarea,
+  Toggle,
+  TagInput,
+} from "../components/ui/Field";
+import {
+  Card,
+  Badge,
+  Section,
+  EmptyState,
+} from "../components/ui/Surface";
 
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
 const CATEGORIES = ["daily", "weekly", "monthly", "custom"];
 
-const CATEGORY_COLORS = {
-  daily: "bg-blue-50 text-blue-700 ring-blue-200",
-  weekly: "bg-amber-50 text-amber-700 ring-amber-200",
-  monthly: "bg-emerald-50 text-emerald-700 ring-emerald-200",
-  custom: "bg-purple-50 text-purple-700 ring-purple-200",
+const CATEGORY_TONES = {
+  daily: "info",
+  weekly: "warning",
+  monthly: "success",
+  custom: "brand",
 };
 
 const ICON_OPTIONS = [
@@ -50,9 +70,6 @@ const ICON_OPTIONS = [
   { value: "fa-database", label: "Database" },
   { value: "fa-server", label: "Server" },
 ];
-
-const INPUT_CLASS =
-  "w-full px-3.5 py-2.5 bg-gray-50/80 border border-gray-200 rounded-xl text-sm text-gray-800 focus:outline-none focus:ring-2 focus:ring-purple-400 focus:border-transparent focus:bg-white transition-all placeholder:text-gray-300";
 
 const EMPTY_FORM = {
   planKey: "",
@@ -77,20 +94,16 @@ const EMPTY_FORM = {
 export default function PortalConfigPage() {
   const { isAdmin } = useAuth();
 
-  // Data
   const [plans, setPlans] = useState([]);
   const [loading, setLoading] = useState(true);
   const [userGroups, setUserGroups] = useState([]);
 
-  // Filters
   const [categoryFilter, setCategoryFilter] = useState("");
 
-  // Modals
   const [showModal, setShowModal] = useState(false);
   const [editingPlan, setEditingPlan] = useState(null);
   const [confirm, setConfirm] = useState(null);
 
-  // ------- Fetch plans -------
   const fetchPlans = useCallback(async () => {
     setLoading(true);
     try {
@@ -109,7 +122,6 @@ export default function PortalConfigPage() {
     fetchPlans();
   }, [fetchPlans]);
 
-  // ------- Fetch user groups once -------
   useEffect(() => {
     voucherApi
       .userGroups()
@@ -117,7 +129,6 @@ export default function PortalConfigPage() {
       .catch(() => {});
   }, []);
 
-  // ------- Handlers -------
   const handleCreate = () => {
     setEditingPlan(null);
     setShowModal(true);
@@ -130,6 +141,7 @@ export default function PortalConfigPage() {
 
   const handleDelete = (plan) => {
     setConfirm({
+      plan,
       title: `Delete "${plan.name}"?`,
       message:
         "This will permanently remove this plan configuration. This action cannot be undone.",
@@ -152,9 +164,7 @@ export default function PortalConfigPage() {
         ...plan,
         isActive: !plan.isActive,
       });
-      toast.success(
-        `Plan ${!plan.isActive ? "activated" : "deactivated"}`
-      );
+      toast.success(`Plan ${!plan.isActive ? "activated" : "deactivated"}`);
       fetchPlans();
     } catch (err) {
       toast.error("Toggle failed: " + err.message);
@@ -183,194 +193,185 @@ export default function PortalConfigPage() {
   const hasFilters = !!categoryFilter;
 
   return (
-    <div className="flex flex-col h-full">
+    <div className="page-shell">
       {/* Header */}
-      <div className="shrink-0 px-6 pt-6 pb-4">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="w-11 h-11 bg-gradient-to-br from-purple-500 to-pink-500 rounded-2xl flex items-center justify-center shadow-lg shadow-purple-200">
-              <Globe className="w-5 h-5 text-white" />
-            </div>
-            <div>
-              <h1 className="text-2xl font-bold text-gray-900">
-                Portal Plans
-              </h1>
-              <p className="text-xs text-gray-400 font-medium mt-0.5">
-                {plans.length} plan configuration{plans.length !== 1 && "s"}
-              </p>
-            </div>
+      <header className="page-header">
+        <div className="flex items-start gap-3 min-w-0">
+          <span className="brand-mark mt-0.5">
+            <Globe size={16} strokeWidth={2} />
+          </span>
+          <div className="min-w-0">
+            <div className="page-eyebrow">Portal · Configuration</div>
+            <h1 className="page-title">Portal Plans</h1>
+            <p className="page-subtitle">
+              {plans.length} plan{plans.length !== 1 && "s"} configured
+            </p>
           </div>
-          {isAdmin && (
-            <button
-              onClick={handleCreate}
-              className="flex items-center gap-2 px-5 py-2.5 bg-gradient-to-r from-purple-600 to-pink-500 text-white rounded-xl text-sm font-semibold hover:from-purple-700 hover:to-pink-600 transition-all shadow-lg shadow-purple-200 active:scale-[0.97]"
-            >
-              <Plus size={16} />
-              Add Plan
-            </button>
-          )}
         </div>
 
-        {/* Toolbar */}
-        <div className="flex flex-wrap items-center gap-2.5 mt-4">
-          {/* Category filter */}
-          <div className="relative">
-            <Filter
-              size={13}
-              className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-300 pointer-events-none"
-            />
-            <select
-              value={categoryFilter}
-              onChange={(e) => setCategoryFilter(e.target.value)}
-              className="appearance-none pl-8 pr-8 py-2.5 bg-gray-50/80 border border-gray-100 rounded-xl text-xs font-medium text-gray-600 focus:outline-none focus:ring-2 focus:ring-purple-400 cursor-pointer"
-            >
-              <option value="">All Categories</option>
-              {CATEGORIES.map((cat) => (
-                <option key={cat} value={cat}>
-                  {cat.charAt(0).toUpperCase() + cat.slice(1)}
-                </option>
-              ))}
-            </select>
-            <ChevronDown
-              size={13}
-              className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-300 pointer-events-none"
-            />
-          </div>
-
-          {/* Clear filters */}
+        <div className="flex items-center gap-2.5">
+          <FilterPicker value={categoryFilter} onChange={setCategoryFilter} />
           {hasFilters && (
-            <button
+            <Button
+              variant="ghost"
+              size="sm"
+              iconLeft={<X size={13} />}
               onClick={() => setCategoryFilter("")}
-              className="flex items-center gap-1 px-3 py-2 text-xs font-medium text-purple-600 hover:bg-purple-50 rounded-lg transition-colors"
             >
-              <X size={13} />
               Clear
-            </button>
+            </Button>
+          )}
+          {isAdmin && (
+            <Button
+              variant="primary"
+              size="md"
+              iconLeft={<Plus size={14} />}
+              onClick={handleCreate}
+            >
+              New Plan
+            </Button>
           )}
         </div>
-      </div>
+      </header>
 
       {/* Table */}
-      <div className="flex-1 min-h-0 px-6 pb-6">
-        <div className="bg-white border border-gray-100 rounded-2xl overflow-hidden shadow-sm h-full flex flex-col">
+      <div className="flex-1 min-h-0 px-8 pb-8 pt-5">
+        <Card className="h-full flex flex-col overflow-hidden">
           {loading ? (
-            <div className="flex-1 flex items-center justify-center">
-              <div className="w-9 h-9 border-[3px] border-purple-100 border-t-purple-500 rounded-full animate-spin" />
-            </div>
+            <LoadingTable />
           ) : plans.length === 0 ? (
-            <div className="flex-1 flex flex-col items-center justify-center text-gray-300">
-              <div className="w-16 h-16 bg-gray-50 rounded-2xl flex items-center justify-center mb-4">
-                <Layers size={28} className="text-gray-200" />
-              </div>
-              <p className="text-sm font-medium text-gray-400">
-                No plans found
-              </p>
-              <p className="text-xs text-gray-300 mt-1">
-                {hasFilters
-                  ? "Try adjusting your filters"
-                  : "Add a plan to get started"}
-              </p>
-            </div>
+            <EmptyState
+              icon={Layers}
+              title="No plans configured yet"
+              description={
+                hasFilters
+                  ? "Try clearing the filter, or add a new plan in the selected category."
+                  : "Plans appear here once you create them. Each plan maps a price to a Ruijie user group."
+              }
+              action={
+                isAdmin && (
+                  <Button
+                    variant="primary"
+                    size="sm"
+                    iconLeft={<Plus size={13} />}
+                    onClick={handleCreate}
+                  >
+                    Create first plan
+                  </Button>
+                )
+              }
+            />
           ) : (
             <div className="flex-1 min-h-0 overflow-auto">
-              <table className="w-full text-sm">
-                <thead className="sticky top-0 z-10">
-                  <tr className="bg-gray-50/90 backdrop-blur-sm text-left text-[11px] text-gray-400 uppercase tracking-wider font-semibold">
-                    <th className="px-4 py-3">Plan Key</th>
-                    <th className="px-4 py-3">Name</th>
-                    <th className="px-4 py-3">Category</th>
-                    <th className="px-4 py-3">Price</th>
-                    <th className="px-4 py-3">User Group</th>
-                    <th className="px-4 py-3">Vouchers</th>
-                    <th className="px-4 py-3">Active</th>
-                    {isAdmin && (
-                      <th className="px-4 py-3 text-right">Actions</th>
-                    )}
+              <table className="w-full text-[13px]">
+                <thead className="sticky top-0 z-10 bg-[var(--surface-sunken)]/95 backdrop-blur">
+                  <tr className="text-left text-[10.5px] font-mono uppercase tracking-[0.1em] text-[var(--text-quaternary)]">
+                    <Th>Key</Th>
+                    <Th>Name</Th>
+                    <Th>Category</Th>
+                    <Th className="text-right">Price</Th>
+                    <Th>User group</Th>
+                    <Th className="text-right">Available</Th>
+                    <Th className="text-center">Active</Th>
+                    {isAdmin && <Th className="text-right pr-5">·</Th>}
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-gray-50">
-                  {plans.map((plan) => (
+                <tbody>
+                  {plans.map((plan, i) => (
                     <tr
                       key={plan._id || plan.id}
-                      className="transition-colors hover:bg-gray-50/60"
+                      className={
+                        "transition-colors hover:bg-[var(--surface-hover)] " +
+                        (i !== 0
+                          ? "border-t border-[var(--border-subtle)]"
+                          : "")
+                      }
                     >
-                      <td className="px-4 py-3.5">
-                        <span className="font-mono text-[13px] font-semibold text-purple-600 bg-purple-50/60 px-2 py-0.5 rounded-md">
+                      <Td>
+                        <span className="font-mono text-[12.5px] text-[var(--text-secondary)] tabular">
                           {plan.planKey}
                         </span>
-                      </td>
-                      <td className="px-4 py-3.5">
-                        <div className="flex items-center gap-2">
-                          <span className="text-gray-800 font-medium text-sm">
+                      </Td>
+                      <Td>
+                        <div className="flex items-center gap-2 min-w-0">
+                          <span className="font-medium text-[var(--text-primary)] truncate">
                             {plan.name}
                           </span>
                           {plan.popular && (
-                            <Star
-                              size={13}
-                              className="text-amber-400 fill-amber-400"
-                            />
+                            <span
+                              title="Popular"
+                              className="text-[var(--warning-fg)]"
+                            >
+                              <Star
+                                size={12}
+                                className="fill-current"
+                                strokeWidth={1.5}
+                              />
+                            </span>
                           )}
                         </div>
-                      </td>
-                      <td className="px-4 py-3.5">
-                        <CategoryBadge category={plan.category} />
-                      </td>
-                      <td className="px-4 py-3.5 text-gray-700 text-sm font-semibold">
-                        {plan.currency || "FJD"}{" "}
-                        {Number(plan.price || 0).toFixed(2)}
-                      </td>
-                      <td className="px-4 py-3.5 text-gray-600 text-xs font-medium truncate max-w-[140px]">
-                        {plan.userGroupName || plan.userGroup || "---"}
-                      </td>
-                      <td className="px-4 py-3.5">
-                        <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-gray-50 text-gray-600 text-xs font-semibold rounded-md">
-                          <Tag size={11} />
-                          {plan.availableVouchers ?? "---"}
+                      </Td>
+                      <Td>
+                        <Badge tone={CATEGORY_TONES[plan.category]}>
+                          {plan.category}
+                        </Badge>
+                      </Td>
+                      <Td className="text-right">
+                        <span className="font-mono text-[var(--text-primary)] tabular">
+                          {plan.currency || "FJD"}{" "}
+                          <span className="font-semibold">
+                            {Number(plan.price || 0).toFixed(2)}
+                          </span>
                         </span>
-                      </td>
-                      <td className="px-4 py-3.5">
-                        <button
-                          onClick={() => isAdmin && handleToggleActive(plan)}
-                          disabled={!isAdmin}
-                          className="focus:outline-none disabled:cursor-default"
-                          title={
-                            plan.isActive
-                              ? "Click to deactivate"
-                              : "Click to activate"
-                          }
-                        >
-                          {plan.isActive ? (
-                            <ToggleRight
-                              size={24}
-                              className="text-green-500"
-                            />
-                          ) : (
-                            <ToggleLeft
-                              size={24}
-                              className="text-gray-300"
-                            />
+                      </Td>
+                      <Td>
+                        <span className="text-[var(--text-tertiary)] truncate inline-block max-w-[180px]">
+                          {plan.userGroupName || plan.userGroup || (
+                            <span className="text-[var(--text-quaternary)]">
+                              —
+                            </span>
                           )}
-                        </button>
-                      </td>
+                        </span>
+                      </Td>
+                      <Td className="text-right">
+                        <Badge
+                          tone="neutral"
+                          icon={<Tag size={10} strokeWidth={2} />}
+                        >
+                          {plan.availableVouchers ?? "—"}
+                        </Badge>
+                      </Td>
+                      <Td className="text-center">
+                        <div className="flex justify-center">
+                          <Toggle
+                            checked={!!plan.isActive}
+                            onChange={() => isAdmin && handleToggleActive(plan)}
+                            disabled={!isAdmin}
+                          />
+                        </div>
+                      </Td>
                       {isAdmin && (
-                        <td className="px-4 py-3.5">
-                          <div className="flex items-center justify-end gap-1">
-                            <button
+                        <Td className="text-right pr-3">
+                          <div className="flex items-center justify-end gap-0.5">
+                            <IconButton
+                              size="sm"
                               onClick={() => handleEdit(plan)}
-                              className="p-2 text-gray-400 hover:text-purple-600 hover:bg-purple-50 rounded-lg transition-all"
+                              aria-label="Edit"
                               title="Edit plan"
                             >
-                              <Pencil size={15} />
-                            </button>
-                            <button
+                              <Pencil size={14} />
+                            </IconButton>
+                            <IconButton
+                              size="sm"
                               onClick={() => handleDelete(plan)}
-                              className="p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-all"
+                              aria-label="Delete"
                               title="Delete plan"
+                              className="hover:text-[var(--brand)]"
                             >
-                              <Trash2 size={15} />
-                            </button>
+                              <Trash2 size={14} />
+                            </IconButton>
                           </div>
-                        </td>
+                        </Td>
                       )}
                     </tr>
                   ))}
@@ -378,59 +379,45 @@ export default function PortalConfigPage() {
               </table>
             </div>
           )}
-        </div>
+        </Card>
       </div>
 
       {/* Create / Edit Modal */}
-      <AnimatePresence>
-        {showModal && (
-          <PlanFormModal
-            plan={editingPlan}
-            userGroups={userGroups}
-            onSave={handleSave}
-            onClose={() => setShowModal(false)}
-          />
-        )}
-      </AnimatePresence>
+      <PlanFormModal
+        open={showModal}
+        plan={editingPlan}
+        userGroups={userGroups}
+        onSave={handleSave}
+        onClose={() => setShowModal(false)}
+      />
 
       {/* Confirm Dialog */}
-      {confirm && (
-        <ConfirmDialog
-          open
-          title={confirm.title}
-          message={confirm.message}
-          confirmLabel="Delete"
-          onConfirm={confirm.onConfirm}
-          onCancel={() => setConfirm(null)}
-        />
-      )}
+      <ConfirmDialog
+        open={!!confirm}
+        title={confirm?.title}
+        message={confirm?.message}
+        confirmLabel="Delete plan"
+        variant="danger"
+        onConfirm={confirm?.onConfirm}
+        onCancel={() => setConfirm(null)}
+      />
     </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Category Badge
-// ---------------------------------------------------------------------------
-function CategoryBadge({ category }) {
-  const color =
-    CATEGORY_COLORS[category] || "bg-gray-50 text-gray-600 ring-gray-200";
-  return (
-    <span
-      className={`inline-flex items-center px-2.5 py-0.5 text-[11px] font-semibold capitalize rounded-full ring-1 ring-inset ${color}`}
-    >
-      {category}
-    </span>
   );
 }
 
 // ---------------------------------------------------------------------------
 // Plan Form Modal
 // ---------------------------------------------------------------------------
-function PlanFormModal({ plan, userGroups, onSave, onClose }) {
+function PlanFormModal({ open, plan, userGroups, onSave, onClose }) {
   const isEditing = !!plan;
-  const [form, setForm] = useState(() => {
+  const [form, setForm] = useState(EMPTY_FORM);
+  const [saving, setSaving] = useState(false);
+
+  // Reset form when modal opens or plan changes
+  useEffect(() => {
+    if (!open) return;
     if (plan) {
-      return {
+      setForm({
         planKey: plan.planKey || "",
         name: plan.name || "",
         category: plan.category || "daily",
@@ -445,17 +432,13 @@ function PlanFormModal({ plan, userGroups, onSave, onClose }) {
         isActive: plan.isActive !== false,
         userGroup: plan.userGroup || "",
         userGroupName: plan.userGroupName || "",
-      };
+      });
+    } else {
+      setForm({ ...EMPTY_FORM });
     }
-    return { ...EMPTY_FORM };
-  });
+  }, [open, plan]);
 
-  const [saving, setSaving] = useState(false);
-  const [featureInput, setFeatureInput] = useState("");
-  const featureRef = useRef(null);
-
-  const set = (key, value) =>
-    setForm((prev) => ({ ...prev, [key]: value }));
+  const set = (key, value) => setForm((prev) => ({ ...prev, [key]: value }));
 
   const handleUserGroupChange = (value) => {
     const group = userGroups.find(
@@ -470,43 +453,18 @@ function PlanFormModal({ plan, userGroups, onSave, onClose }) {
       if (group.quota) parts.push(group.quota);
       if (group.timePeriod) parts.push(`${group.timePeriod}s`);
       if (group.downloadRateLimit) parts.push(`↓${group.downloadRateLimit}`);
-      const autoAllowance = parts.length > 0
-        ? parts.join(" / ")
-        : group.name || group.groupName || "";
+      const autoAllowance =
+        parts.length > 0
+          ? parts.join(" / ")
+          : group.name || group.groupName || "";
       if (!form.dataAllowance || form.dataAllowance === "") {
         set("dataAllowance", autoAllowance);
       }
     }
   };
 
-  const addFeature = () => {
-    const tag = featureInput.trim();
-    if (tag && !form.features.includes(tag)) {
-      set("features", [...form.features, tag]);
-    }
-    setFeatureInput("");
-    featureRef.current?.focus();
-  };
-
-  const removeFeature = (tag) => {
-    set(
-      "features",
-      form.features.filter((f) => f !== tag)
-    );
-  };
-
-  const handleFeatureKeyDown = (e) => {
-    if (e.key === "Enter") {
-      e.preventDefault();
-      addFeature();
-    }
-    if (e.key === "Backspace" && !featureInput && form.features.length) {
-      removeFeature(form.features[form.features.length - 1]);
-    }
-  };
-
   const handleSubmit = async (e) => {
-    e.preventDefault();
+    e?.preventDefault?.();
     if (!form.planKey.trim()) {
       toast.error("Plan key is required");
       return;
@@ -528,289 +486,302 @@ function PlanFormModal({ plan, userGroups, onSave, onClose }) {
   };
 
   return (
-    <motion.div
-      className="fixed inset-0 z-50 flex items-center justify-center p-4"
-      initial={{ opacity: 0 }}
-      animate={{ opacity: 1 }}
-      exit={{ opacity: 0 }}
-    >
-      {/* Backdrop */}
-      <motion.div
-        className="absolute inset-0 bg-black/50 backdrop-blur-sm"
-        initial={{ opacity: 0 }}
-        animate={{ opacity: 1 }}
-        exit={{ opacity: 0 }}
-        onClick={onClose}
+    <Modal open={open} onClose={onClose} width="xl">
+      <Modal.Header
+        icon={Globe}
+        eyebrow={isEditing ? "Editing plan" : "New plan"}
+        title={isEditing ? form.name || "Edit plan" : "Create a portal plan"}
+        subtitle={
+          isEditing
+            ? "Update pricing, capacity, and copy. Changes apply immediately."
+            : "Map a price to a Ruijie user group. Customers will see this on the portal."
+        }
+        onClose={onClose}
       />
 
-      {/* Panel */}
-      <motion.div
-        className="relative bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] flex flex-col overflow-hidden"
-        initial={{ scale: 0.95, opacity: 0, y: 20 }}
-        animate={{ scale: 1, opacity: 1, y: 0 }}
-        exit={{ scale: 0.95, opacity: 0, y: 20 }}
-        transition={{ type: "spring", damping: 25, stiffness: 300 }}
-        onClick={(e) => e.stopPropagation()}
-      >
-        {/* Gradient bar */}
-        <div className="h-1 bg-gradient-to-r from-purple-500 to-pink-500" />
-
-        {/* Header */}
-        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
-          <h2 className="text-lg font-bold text-gray-900">
-            {isEditing ? "Edit Plan" : "New Plan"}
-          </h2>
-          <button
-            onClick={onClose}
-            className="p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-xl transition-all"
-          >
-            <X size={18} />
-          </button>
-        </div>
-
-        {/* Form */}
-        <form
-          onSubmit={handleSubmit}
-          className="flex-1 overflow-y-auto px-6 py-5 space-y-5"
-        >
-          {/* Row: Plan Key + Name */}
-          <div className="grid grid-cols-2 gap-4">
-            <FieldGroup label="Plan Key" required>
-              <input
-                type="text"
-                value={form.planKey}
-                onChange={(e) =>
-                  set(
-                    "planKey",
-                    e.target.value
-                      .toLowerCase()
-                      .replace(/[^a-z0-9-]/g, "-")
-                  )
-                }
-                placeholder="daily-basic"
-                className={INPUT_CLASS}
-              />
-            </FieldGroup>
-            <FieldGroup label="Name" required>
-              <input
-                type="text"
-                value={form.name}
-                onChange={(e) => set("name", e.target.value)}
-                placeholder="Daily Light"
-                className={INPUT_CLASS}
-              />
-            </FieldGroup>
-          </div>
-
-          {/* Row: Category + Price + Currency */}
-          <div className="grid grid-cols-3 gap-4">
-            <FieldGroup label="Category">
-              <select
-                value={form.category}
-                onChange={(e) => set("category", e.target.value)}
-                className={INPUT_CLASS}
+      <Modal.Body className="space-y-8">
+        <form onSubmit={handleSubmit} className="space-y-8">
+          {/* -- Identity -------------------------------------------------- */}
+          <Section label="Identity">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+              <Field
+                label="Plan key"
+                required
+                hint="Lowercase, hyphens only. Used in URLs and audit logs."
               >
-                {CATEGORIES.map((cat) => (
-                  <option key={cat} value={cat}>
-                    {cat.charAt(0).toUpperCase() + cat.slice(1)}
-                  </option>
-                ))}
-              </select>
-            </FieldGroup>
-            <FieldGroup label="Price">
-              <input
-                type="number"
-                step="0.01"
-                min="0"
-                value={form.price}
-                onChange={(e) => set("price", e.target.value)}
-                className={INPUT_CLASS}
-              />
-            </FieldGroup>
-            <FieldGroup label="Currency">
-              <input
-                type="text"
-                value={form.currency}
-                onChange={(e) => set("currency", e.target.value.toUpperCase())}
-                placeholder="FJD"
-                className={INPUT_CLASS}
-              />
-            </FieldGroup>
-          </div>
-
-          {/* Row: Data Allowance + Icon + Sort Order */}
-          <div className="grid grid-cols-3 gap-4">
-            <FieldGroup label="Data Allowance (optional)">
-              <input
-                type="text"
-                value={form.dataAllowance}
-                onChange={(e) => set("dataAllowance", e.target.value)}
-                placeholder="Auto-filled from user group"
-                className={INPUT_CLASS}
-              />
-            </FieldGroup>
-            <FieldGroup label="Icon">
-              <select
-                value={form.icon}
-                onChange={(e) => set("icon", e.target.value)}
-                className={INPUT_CLASS}
+                <Input
+                  mono
+                  value={form.planKey}
+                  onChange={(e) =>
+                    set(
+                      "planKey",
+                      e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, "-")
+                    )
+                  }
+                  placeholder="daily-basic"
+                  disabled={isEditing}
+                />
+              </Field>
+              <Field
+                label="Display name"
+                required
+                hint="Customer-facing name on the portal."
               >
-                {ICON_OPTIONS.map((ico) => (
-                  <option key={ico.value} value={ico.value}>
-                    {ico.label}
-                  </option>
-                ))}
-              </select>
-            </FieldGroup>
-            <FieldGroup label="Sort Order">
-              <input
-                type="number"
-                min="0"
-                value={form.sortOrder}
-                onChange={(e) => set("sortOrder", e.target.value)}
-                className={INPUT_CLASS}
-              />
-            </FieldGroup>
-          </div>
+                <Input
+                  value={form.name}
+                  onChange={(e) => set("name", e.target.value)}
+                  placeholder="Daily Light"
+                />
+              </Field>
+            </div>
+          </Section>
 
-          {/* Row: User Group */}
-          <div className="grid grid-cols-2 gap-4">
-            <FieldGroup label="User Group">
-              <select
-                value={form.userGroup}
-                onChange={(e) => handleUserGroupChange(e.target.value)}
-                className={INPUT_CLASS}
-              >
-                <option value="">Select group...</option>
-                {userGroups.map((g) => {
-                  const id = String(g.id ?? g._id ?? g.name);
-                  return (
-                    <option key={id} value={id}>
-                      {g.name || g.groupName || id}
-                    </option>
-                  );
-                })}
-              </select>
-            </FieldGroup>
-            <FieldGroup label="User Group Name">
-              <input
-                type="text"
-                value={form.userGroupName}
-                readOnly
-                className={`${INPUT_CLASS} bg-gray-50 cursor-not-allowed`}
-                placeholder="Auto-filled from selection"
-              />
-            </FieldGroup>
-          </div>
-
-          {/* Description */}
-          <FieldGroup label="Description">
-            <textarea
-              value={form.description}
-              onChange={(e) => set("description", e.target.value)}
-              rows={3}
-              placeholder="Brief description of this plan..."
-              className={`${INPUT_CLASS} resize-none`}
-            />
-          </FieldGroup>
-
-          {/* Features (multi-tag) */}
-          <FieldGroup label="Features">
-            <div className="min-h-[42px] flex flex-wrap items-center gap-1.5 p-2 bg-gray-50/80 border border-gray-200 rounded-xl focus-within:ring-2 focus-within:ring-purple-400 focus-within:border-transparent focus-within:bg-white transition-all">
-              {form.features.map((tag) => (
-                <span
-                  key={tag}
-                  className="inline-flex items-center gap-1 px-2.5 py-1 bg-purple-50 text-purple-700 text-xs font-semibold rounded-lg"
+          {/* -- Pricing --------------------------------------------------- */}
+          <Section label="Pricing">
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-5">
+              <Field label="Category">
+                <Select
+                  value={form.category}
+                  onChange={(e) => set("category", e.target.value)}
                 >
-                  {tag}
-                  <button
-                    type="button"
-                    onClick={() => removeFeature(tag)}
-                    className="text-purple-400 hover:text-purple-700 transition-colors"
-                  >
-                    <X size={12} />
-                  </button>
-                </span>
-              ))}
-              <input
-                ref={featureRef}
-                type="text"
-                value={featureInput}
-                onChange={(e) => setFeatureInput(e.target.value)}
-                onKeyDown={handleFeatureKeyDown}
-                placeholder={
-                  form.features.length === 0 ? "Type and press Enter..." : ""
-                }
-                className="flex-1 min-w-[120px] bg-transparent text-sm outline-none placeholder:text-gray-300 py-0.5"
+                  {CATEGORIES.map((cat) => (
+                    <option key={cat} value={cat}>
+                      {cat.charAt(0).toUpperCase() + cat.slice(1)}
+                    </option>
+                  ))}
+                </Select>
+              </Field>
+              <Field label="Price">
+                <Input
+                  mono
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  value={form.price}
+                  onChange={(e) => set("price", e.target.value)}
+                />
+              </Field>
+              <Field label="Currency">
+                <Input
+                  mono
+                  value={form.currency}
+                  onChange={(e) =>
+                    set("currency", e.target.value.toUpperCase())
+                  }
+                  placeholder="FJD"
+                  maxLength={4}
+                />
+              </Field>
+              <Field label="Sort order" hint="Lower = shown first.">
+                <Input
+                  mono
+                  type="number"
+                  min="0"
+                  value={form.sortOrder}
+                  onChange={(e) => set("sortOrder", e.target.value)}
+                />
+              </Field>
+            </div>
+          </Section>
+
+          {/* -- Capacity / Ruijie mapping --------------------------------- */}
+          <Section label="Capacity">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+              <Field
+                label="Ruijie user group"
+                hint="Vouchers are claimed from this group on purchase."
+              >
+                <Select
+                  value={form.userGroup}
+                  onChange={(e) => handleUserGroupChange(e.target.value)}
+                >
+                  <option value="">Select user group…</option>
+                  {userGroups.map((g) => {
+                    const id = String(g.id ?? g._id ?? g.name);
+                    return (
+                      <option key={id} value={id}>
+                        {g.name || g.groupName || id}
+                      </option>
+                    );
+                  })}
+                </Select>
+              </Field>
+              <Field
+                label="User group name"
+                hint="Auto-filled from selection."
+              >
+                <Input
+                  value={form.userGroupName}
+                  readOnly
+                  className="bg-[var(--surface-sunken)] cursor-not-allowed"
+                  placeholder="Select a user group above"
+                />
+              </Field>
+              <Field
+                label="Data allowance"
+                hint="Auto-filled if the user group exposes a quota."
+                className="md:col-span-2"
+              >
+                <Input
+                  value={form.dataAllowance}
+                  onChange={(e) => set("dataAllowance", e.target.value)}
+                  placeholder="e.g. 1GB / 24h / ↓5Mbps"
+                />
+              </Field>
+            </div>
+          </Section>
+
+          {/* -- Presentation ---------------------------------------------- */}
+          <Section label="Presentation">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+              <Field label="Icon">
+                <Select
+                  value={form.icon}
+                  onChange={(e) => set("icon", e.target.value)}
+                >
+                  {ICON_OPTIONS.map((ico) => (
+                    <option key={ico.value} value={ico.value}>
+                      {ico.label}
+                    </option>
+                  ))}
+                </Select>
+              </Field>
+              <Field label="Description">
+                <Textarea
+                  rows={2}
+                  value={form.description}
+                  onChange={(e) => set("description", e.target.value)}
+                  placeholder="Short tagline shown under the price…"
+                />
+              </Field>
+              <Field
+                label="Features"
+                hint="Press Enter to add a feature. Backspace to remove the last."
+                className="md:col-span-2"
+              >
+                <TagInput
+                  value={form.features}
+                  onChange={(features) => set("features", features)}
+                  placeholder="Unlimited streaming…"
+                />
+              </Field>
+            </div>
+          </Section>
+
+          {/* -- Flags ----------------------------------------------------- */}
+          <Section label="Visibility">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+              <Toggle
+                checked={form.popular}
+                onChange={(v) => set("popular", v)}
+                label="Mark as popular"
+                hint="Adds a star badge on the portal card."
+              />
+              <Toggle
+                checked={form.isActive}
+                onChange={(v) => set("isActive", v)}
+                label="Active"
+                hint="Inactive plans are hidden from the portal but kept in the DB."
               />
             </div>
-          </FieldGroup>
-
-          {/* Checkboxes */}
-          <div className="flex items-center gap-6">
-            <label className="flex items-center gap-2 cursor-pointer select-none">
-              <input
-                type="checkbox"
-                checked={form.popular}
-                onChange={(e) => set("popular", e.target.checked)}
-                className="rounded-md border-gray-300 text-purple-500 focus:ring-purple-400"
-              />
-              <span className="text-sm font-medium text-gray-700">
-                Popular
-              </span>
-            </label>
-            <label className="flex items-center gap-2 cursor-pointer select-none">
-              <input
-                type="checkbox"
-                checked={form.isActive}
-                onChange={(e) => set("isActive", e.target.checked)}
-                className="rounded-md border-gray-300 text-purple-500 focus:ring-purple-400"
-              />
-              <span className="text-sm font-medium text-gray-700">
-                Active
-              </span>
-            </label>
-          </div>
+          </Section>
         </form>
+      </Modal.Body>
 
-        {/* Footer */}
-        <div className="shrink-0 flex items-center justify-end gap-3 px-6 py-4 border-t border-gray-100 bg-gray-50/50">
-          <button
-            type="button"
-            onClick={onClose}
-            className="px-5 py-2.5 text-sm font-semibold text-gray-600 bg-gray-100 rounded-xl hover:bg-gray-200 transition-all"
-          >
-            Cancel
-          </button>
-          <button
-            onClick={handleSubmit}
-            disabled={saving}
-            className="flex items-center gap-2 px-5 py-2.5 bg-gradient-to-r from-purple-600 to-pink-500 text-white rounded-xl text-sm font-semibold hover:from-purple-700 hover:to-pink-600 transition-all shadow-lg shadow-purple-200 active:scale-[0.97] disabled:opacity-50 disabled:pointer-events-none"
-          >
-            {saving ? (
-              <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-            ) : (
-              <Check size={16} />
-            )}
-            {isEditing ? "Save Changes" : "Create Plan"}
-          </button>
+      <Modal.Footer>
+        <div className="flex-1 text-[11.5px] text-[var(--text-quaternary)] flex items-center gap-2">
+          <Sparkles size={11} className="opacity-70" />
+          <span className="font-mono">
+            {form.planKey || "—"} · {form.currency} {Number(form.price || 0).toFixed(2)}
+          </span>
         </div>
-      </motion.div>
-    </motion.div>
+        <Button variant="secondary" size="sm" onClick={onClose} disabled={saving}>
+          Cancel
+        </Button>
+        <Button
+          variant="primary"
+          size="sm"
+          onClick={handleSubmit}
+          loading={saving}
+          iconLeft={!saving ? <Check size={14} /> : null}
+        >
+          {isEditing ? "Save changes" : "Create plan"}
+        </Button>
+      </Modal.Footer>
+    </Modal>
   );
 }
 
 // ---------------------------------------------------------------------------
-// Field Group Helper
+// Small bits
 // ---------------------------------------------------------------------------
-function FieldGroup({ label, required, children }) {
+function FilterPicker({ value, onChange }) {
   return (
-    <div>
-      <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1.5">
-        {label}
-        {required && <span className="text-red-400 ml-0.5">*</span>}
-      </label>
+    <div className="relative">
+      <Filter
+        size={13}
+        className="absolute left-2.5 top-1/2 -translate-y-1/2 text-[var(--text-quaternary)] pointer-events-none"
+      />
+      <select
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        className={
+          "appearance-none h-9 pl-8 pr-7 text-[12.5px] " +
+          "bg-[var(--surface-raised)] text-[var(--text-secondary)] " +
+          "border border-[var(--border-default)] rounded-md cursor-pointer " +
+          "hover:border-[var(--border-strong)] focus-input"
+        }
+      >
+        <option value="">All categories</option>
+        {CATEGORIES.map((cat) => (
+          <option key={cat} value={cat}>
+            {cat.charAt(0).toUpperCase() + cat.slice(1)}
+          </option>
+        ))}
+      </select>
+    </div>
+  );
+}
+
+function Th({ children, className = "" }) {
+  return (
+    <th
+      className={
+        "px-4 py-2.5 font-medium border-b border-[var(--border-subtle)] " +
+        className
+      }
+    >
       {children}
+    </th>
+  );
+}
+
+function Td({ children, className = "" }) {
+  return (
+    <td className={`px-4 py-3 align-middle ${className}`}>
+      {children}
+    </td>
+  );
+}
+
+function LoadingTable() {
+  return (
+    <div className="flex-1 min-h-0 overflow-hidden p-5">
+      <div className="space-y-2.5">
+        {Array.from({ length: 6 }).map((_, i) => (
+          <div
+            key={i}
+            className="flex items-center gap-4"
+            style={{ opacity: 1 - i * 0.12 }}
+          >
+            <div className="skeleton h-4 w-24" />
+            <div className="skeleton h-4 w-40" />
+            <div className="skeleton h-4 w-16" />
+            <div className="skeleton h-4 w-20" />
+            <div className="skeleton h-4 flex-1" />
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
