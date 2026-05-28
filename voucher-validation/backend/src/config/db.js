@@ -42,7 +42,9 @@ export async function getPool() {
   await pool.query(`UPDATE users SET role = 'admin' WHERE role = 'viewer' AND id = (SELECT min_id FROM (SELECT MIN(id) AS min_id FROM users) t)`).catch(() => {});
 
   // Create portal integration tables
-  // Use utf8mb4_0900_ai_ci to match the existing vouchers table collation (MySQL 8 default)
+  // Use utf8mb4_unicode_ci to match the existing vouchers table collation
+  // (set by schema.sql). Mixing with the MySQL 8 default 0900_ai_ci breaks
+  // JOINs with ER_CANT_AGGREGATE_2COLLATIONS.
   const tableCreations = [
     `CREATE TABLE IF NOT EXISTS portal_plan_configs (
       id INT AUTO_INCREMENT PRIMARY KEY,
@@ -68,7 +70,7 @@ export async function getPool() {
       INDEX idx_is_active (is_active),
       INDEX idx_user_group_id (user_group_id),
       INDEX idx_sort_order (sort_order)
-    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci`,
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
 
     `CREATE TABLE IF NOT EXISTS voucher_claims (
       id INT AUTO_INCREMENT PRIMARY KEY,
@@ -92,7 +94,7 @@ export async function getPool() {
       INDEX idx_status (status),
       INDEX idx_expires_at (expires_at),
       INDEX idx_client_mac (client_mac)
-    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci`,
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
 
     `CREATE TABLE IF NOT EXISTS portal_audit_logs (
       id BIGINT AUTO_INCREMENT PRIMARY KEY,
@@ -114,7 +116,7 @@ export async function getPool() {
       INDEX idx_session_id (session_id),
       INDEX idx_event_timestamp (event_timestamp),
       INDEX idx_plan_key (plan_key)
-    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci`,
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
   ];
 
   for (const sql of tableCreations) {
@@ -138,11 +140,13 @@ export async function getPool() {
     catch (e) { if (e.code !== 'ER_DUP_FIELDNAME' && e.code !== 'ER_DUP_KEYNAME') { /* ignore */ } }
   }
 
-  // Fix collation on existing tables if they were created with the wrong collation
+  // Fix collation on existing tables if they were created with the wrong collation.
+  // Must match the vouchers/schema.sql collation (utf8mb4_unicode_ci), otherwise
+  // JOINs across the portal tables and vouchers fail with ER_CANT_AGGREGATE_2COLLATIONS.
   const collationFixes = [
-    `ALTER TABLE portal_plan_configs CONVERT TO CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci`,
-    `ALTER TABLE voucher_claims CONVERT TO CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci`,
-    `ALTER TABLE portal_audit_logs CONVERT TO CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci`,
+    `ALTER TABLE portal_plan_configs CONVERT TO CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci`,
+    `ALTER TABLE voucher_claims CONVERT TO CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci`,
+    `ALTER TABLE portal_audit_logs CONVERT TO CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci`,
   ];
 
   for (const sql of collationFixes) {
