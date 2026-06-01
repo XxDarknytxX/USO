@@ -195,16 +195,17 @@ class RuijieService {
 
   /**
    * Device list + status for network-health monitoring.
+   * Ruijie Cloud API §2.6.1.1 "AP / Switch List":
+   *   GET /service/api/maint/devices
+   *   QueryParams: access_token, group_id, common_type (AP|Switch|Gateway),
+   *                page (record offset, 0-based), per_page
+   *   Response: { code, msg, deviceList:[...], totalCount }
    *
-   * The exact device endpoint isn't in Ruijie's public API docs and this
-   * account's APIs put groupId in the URL PATH (e.g.
-   * /open/auth/voucher/getList/{groupId}), so we try a few likely shapes,
-   * PIN whichever returns a device array, and log each attempt with
-   * Ruijie's exact message. Pin it permanently via the RUIJIE_DEVICES_PATH
-   * env (use {groupId} as a placeholder) to skip discovery.
-   *
-   * Returns { cloudSync, devices, reason?, attempts? } and never throws, so
-   * the dashboard degrades gracefully.
+   * IMPORTANT: params are snake_case (group_id, common_type) — passing
+   * camelCase groupId is what produced "Parameter groupId is null".
+   * common_type is mandatory and selects ONE class, so we loop AP/Switch/
+   * Gateway and merge, paginating by record offset. Never throws — returns
+   * { cloudSync, devices, reason? } so the dashboard degrades gracefully.
    *
    * @param {{ groupId?: string|number, tenantId?: string }} [opts]
    */
@@ -214,100 +215,110 @@ class RuijieService {
     const gid = groupId || this.groupId;
     const tid = tenantId || process.env.RUIJIE_TENANT_ID;
     if (!gid) {
-      console.warn('getDevices: no groupId available (project + RUIJIE_GROUP_ID both empty)');
+      console.warn('getDevices: no group_id available (project + RUIJIE_GROUP_ID both empty)');
       return { cloudSync: false, devices: [], reason: 'No Ruijie group ID configured' };
     }
 
-    // Candidate endpoint templates, tried in order. {groupId} is substituted.
-    // Path forms first (mirroring the working voucher endpoints for this
-    // account), then query forms. RUIJIE_DEVICES_PATH overrides discovery.
-    const candidates = process.env.RUIJIE_DEVICES_PATH
-      ? [process.env.RUIJIE_DEVICES_PATH]
-      : this._devicesPathTemplate
-        ? [this._devicesPathTemplate]
-        : [
-            // /maint/devices already responds (it returned "groupId is null"
-            // for the query form), so adding groupId to ITS path is the
-            // highest-confidence fix — try it first.
-            '/maint/devices/{groupId}',
-            '/maint/device/list/{groupId}',
-            '/open/device/list/{groupId}',
-            '/open/device/getList/{groupId}',
-            '/intl/device/list/{groupId}',
-            '/maint/devices?groupId={groupId}',
-          ];
-
+    const PER_PAGE = 100;
     try {
       const accessToken = await this.getAccessToken();
-      const attempts = [];
+      const merged = [];
+      let anyOk = false;
+      let lastMsg = null;
 
-      for (const tmpl of candidates) {
-        const filled = tmpl.replace('{groupId}', encodeURIComponent(gid));
-        const [pathPart, queryPart] = filled.split('?');
-        const url = new URL(this.buildUrl(pathPart));
-        if (queryPart) {
-          for (const [k, v] of new URLSearchParams(queryPart)) url.searchParams.append(k, v);
-        }
-        url.searchParams.append('access_token', accessToken);
-        if (tid) url.searchParams.append('tenantId', String(tid));
+      for (const commonType of ['AP', 'Switch', 'Gateway']) {
+        let offset = 0;
+        for (let guard = 0; guard < 50; guard++) {
+          const url = new URL(this.buildUrl('/maint/devices'));
+          url.searchParams.append('access_token', accessToken);
+          url.searchParams.append('group_id', String(gid));
+          url.searchParams.append('common_type', commonType);
+          url.searchParams.append('page', String(offset));      // record offset, 0-based
+          url.searchParams.append('per_page', String(PER_PAGE));
+          if (tid) url.searchParams.append('tenantId', String(tid));
 
-        const redacted = url.toString().replace(/access_token=[^&]+/, 'access_token=***');
-
-        let response, data;
-        try {
-          response = await fetch(url.toString(), {
+          const response = await fetch(url.toString(), {
             method: 'GET',
             headers: { 'Content-Type': 'application/json' },
           });
-          data = await response.json().catch(() => ({}));
-        } catch (e) {
-          attempts.push({ endpoint: tmpl, error: e.message });
-          continue;
+          const data = await response.json().catch(() => ({}));
+
+          if (this.isTokenExpired(data) && !_retried) {
+            this.invalidateToken();
+            return this.getDevices({ groupId, tenantId }, true);
+          }
+
+          const okCode = data?.code === 0 || data?.code === 200 || data?.code === undefined;
+          if (!response.ok || !okCode) {
+            lastMsg = data?.msg || `HTTP ${response.status}`;
+            console.warn(`getDevices ${commonType}: code=${data?.code} msg=${data?.msg} status=${response.status}`);
+            break; // skip this device class, continue with the next
+          }
+
+          anyOk = true;
+          const list = data?.deviceList || data?.data?.deviceList || [];
+          for (const d of list) merged.push({ ...d, commonType: d.commonType || commonType });
+          const total = Number(data?.totalCount ?? list.length);
+          offset += PER_PAGE;
+          if (offset >= total || list.length === 0) break;
         }
-
-        // Token expiry → refresh once and restart discovery
-        if (this.isTokenExpired(data) && !_retried) {
-          this.invalidateToken();
-          return this.getDevices({ groupId, tenantId }, true);
-        }
-
-        const okCode = data?.code === 0 || data?.code === 200 || data?.code === undefined;
-        const rawList =
-          (Array.isArray(data?.data) ? data.data : null) ||
-          data?.data?.list ||
-          data?.list ||
-          data?.devices ||
-          data?.deviceData?.list ||
-          null;
-
-        if (response.ok && okCode && Array.isArray(rawList)) {
-          this._devicesPathTemplate = tmpl; // pin the winner for this process
-          console.log(`getDevices: endpoint ${tmpl} returned ${rawList.length} devices`);
-          return {
-            cloudSync: true,
-            endpoint: tmpl,
-            devices: rawList.map((d) => this._normalizeDevice(d)),
-          };
-        }
-
-        attempts.push({ endpoint: redacted, status: response.status, code: data?.code, msg: data?.msg });
       }
 
-      console.warn('getDevices: no endpoint returned device data. Attempts:', JSON.stringify(attempts, null, 2));
-      const lastMsg = attempts.map((a) => a.msg).filter(Boolean).pop();
-      return {
-        cloudSync: false,
-        devices: [],
-        reason: lastMsg || 'Device API endpoint not found — set RUIJIE_DEVICES_PATH',
-        attempts,
-      };
+      if (!anyOk) {
+        return { cloudSync: false, devices: [], reason: lastMsg || 'Device API returned no data' };
+      }
+      return { cloudSync: true, devices: merged.map((d) => this._normalizeDevice(d)) };
     } catch (error) {
       console.error('Failed to fetch devices:', error.message);
       return { cloudSync: false, devices: [], error: error.message };
     }
   }
 
-  /** Normalize a raw Ruijie device record into a stable shape. */
+  /**
+   * Current online clients (Ruijie Cloud API §3.0):
+   *   GET /service/api/open/v1/dev/user/current-user
+   *   QueryParams: access_token, group_id, page_index, page_size
+   *   Response: { code, list:[{ mac, linkedDevice(SN), deviceName }], totalCount }
+   * Returns { total, byDeviceSn } so APs get per-device client counts.
+   */
+  async getClients({ groupId, tenantId } = {}, _retried = false) {
+    const gid = groupId || this.groupId;
+    const tid = tenantId || process.env.RUIJIE_TENANT_ID;
+    if (!gid) return { total: 0, byDeviceSn: {} };
+    try {
+      const accessToken = await this.getAccessToken();
+      const url = new URL(this.buildUrl('/open/v1/dev/user/current-user'));
+      url.searchParams.append('access_token', accessToken);
+      url.searchParams.append('group_id', String(gid));
+      url.searchParams.append('page_index', '0');
+      url.searchParams.append('page_size', '1000');
+      if (tid) url.searchParams.append('tenantId', String(tid));
+
+      const response = await fetch(url.toString(), {
+        method: 'GET',
+        headers: { 'Content-Type': 'application/json' },
+      });
+      const data = await response.json().catch(() => ({}));
+
+      if (this.isTokenExpired(data) && !_retried) {
+        this.invalidateToken();
+        return this.getClients({ groupId, tenantId }, true);
+      }
+
+      const list = data?.list || [];
+      const byDeviceSn = {};
+      for (const c of list) {
+        const sn = c.linkedDevice || c.sn;
+        if (sn) byDeviceSn[sn] = (byDeviceSn[sn] || 0) + 1;
+      }
+      return { total: Number(data?.totalCount ?? list.length), byDeviceSn };
+    } catch (error) {
+      console.error('Failed to fetch clients:', error.message);
+      return { total: 0, byDeviceSn: {} };
+    }
+  }
+
+  /** Normalize a raw maint/devices record into a stable shape. */
   _normalizeDevice(d = {}) {
     const pick = (...keys) => {
       for (const k of keys) {
@@ -315,34 +326,35 @@ class RuijieService {
       }
       return undefined;
     };
-    const rawStatus = pick('status', 'onlineStatus', 'online', 'isOnline', 'state');
+    const rawStatus = pick('onlineStatus', 'status', 'online', 'isOnline', 'state');
+    const su = String(rawStatus).toUpperCase();
     const online =
-      rawStatus === 1 || rawStatus === '1' || rawStatus === true ||
-      String(rawStatus).toLowerCase() === 'online';
-    const sn = pick('sn', 'serialNumber', 'serialNum', 'deviceSn');
-    const rawType = String(pick('type', 'deviceType', 'category', 'productType') || '');
+      su === 'ON' || su === 'ONLINE' ||
+      rawStatus === 1 || rawStatus === '1' || rawStatus === true;
+    const sn = pick('serialNumber', 'sn', 'serialNum', 'deviceSn');
+    const rawType = String(pick('commonType', 'common_type', 'productType', 'deviceType', 'type') || '');
     return {
       sn: sn || pick('mac', 'macAddress') || `dev-${Math.random().toString(36).slice(2, 8)}`,
-      name: pick('alias', 'name', 'deviceName', 'hostname') || sn || 'Unknown device',
-      type: this._classifyType(rawType, pick('model', 'deviceModel')),
+      name: pick('aliasName', 'name', 'deviceName', 'hostname') || sn || 'Unknown device',
+      type: this._classifyType(rawType, pick('productClass', 'model', 'deviceModel')),
       rawType,
       online,
-      model: pick('model', 'deviceModel', 'productModel') || '—',
+      model: pick('productClass', 'model', 'deviceModel', 'productModel') || '—',
       mac: pick('mac', 'macAddress') || '—',
-      mgmtIp: pick('managementIp', 'manageIp', 'ip', 'lanIp', 'deviceIp') || '—',
-      publicIp: pick('publicIp', 'egressIp', 'wanIp', 'outerIp') || null,
-      clientCount: Number(pick('clientCount', 'staCount', 'userCount', 'clients', 'onlineClientNum') || 0),
-      firmware: pick('firmware', 'version', 'swVersion', 'softwareVersion', 'firmwareVersion') || '—',
-      offlineTime: pick('offlineTime', 'lastOfflineTime', 'offline_time') || null,
+      mgmtIp: pick('localIp', 'managementIp', 'manageIp', 'ip', 'lanIp') || '—',
+      publicIp: pick('cpeIp', 'publicIp', 'egressIp', 'wanIp', 'outerIp') || null,
+      clientCount: Number(pick('clientCount', 'staCount', 'userCount', 'clients') || 0),
+      firmware: pick('softwareVersion', 'firmware', 'version', 'swVersion') || '—',
+      offlineTime: !online ? (pick('lastOnline', 'offlineTime', 'lastOfflineTime') || null) : null,
     };
   }
 
   /** Bucket a device into gateway | ap | switch | other from its type/model. */
   _classifyType(rawType, model) {
     const s = `${rawType} ${model || ''}`.toLowerCase();
-    if (s.includes('gateway') || s.includes('router') || /\b(eg|egw|nbr)\b/.test(s)) return 'gateway';
-    if (s.includes('access') || /\b(ap|rap|eap|wap)\b/.test(s) || /\bap\d/.test(s)) return 'ap';
-    if (s.includes('switch') || /\b(nbs|es|xs|esw)\b/.test(s)) return 'switch';
+    if (s.includes('gateway') || s.includes('egw') || s.includes('router') || /\b(eg|nbr)\b/.test(s)) return 'gateway';
+    if (s.includes('switch') || /\b(nbs|msw|es|xs|esw)\b/.test(s)) return 'switch';
+    if (s.includes('access') || s.includes('ap') || /\b(rap|eap|wap)\b/.test(s)) return 'ap';
     return 'other';
   }
 

@@ -120,10 +120,21 @@ export function makeNetworkController(pool) {
         const project = rows[0];
         if (!project) return send.notFound(res, "Project not found");
 
-        const { cloudSync, devices, error, reason, endpoint, attempts } = await ruijie.getDevices({
+        const opts = {
           groupId: project.ruijie_group_id,
           tenantId: project.ruijie_tenant_id,
-        });
+        };
+        const { cloudSync, devices, error, reason } = await ruijie.getDevices(opts);
+
+        // Pull current online clients and attach per-AP counts.
+        let clientTotal = 0;
+        if (cloudSync) {
+          const { total, byDeviceSn } = await ruijie.getClients(opts);
+          clientTotal = total;
+          for (const d of devices) {
+            if (byDeviceSn[d.sn] != null) d.clientCount = byDeviceSn[d.sn];
+          }
+        }
 
         const gateways = devices.filter((d) => d.type === "gateway");
         const aps = devices.filter((d) => d.type === "ap");
@@ -143,7 +154,7 @@ export function makeNetworkController(pool) {
           gatewayOnline: onlineCount(gateways),
           switchTotal: switches.length,
           switchOnline: onlineCount(switches),
-          clients: aps.reduce((s, a) => s + (a.clientCount || 0), 0),
+          clients: clientTotal || aps.reduce((s, a) => s + (a.clientCount || 0), 0),
         };
 
         const internet = {
@@ -156,11 +167,8 @@ export function makeNetworkController(pool) {
         return send.ok(res, {
           project: mapProject(project),
           cloudSync,
-          endpoint: endpoint || null,
           // surfaced so the UI can explain an empty result (scope not enabled, etc.)
           notice: cloudSync ? null : reason || error || "Device data unavailable",
-          // discovery attempts (endpoint + Ruijie msg) — for debugging which path works
-          attempts: cloudSync ? undefined : attempts,
           summary,
           internet,
           topology: { internet, gateways, aps, switches, others },
