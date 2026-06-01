@@ -4,6 +4,7 @@ const crypto = require('crypto');
 const { URLSearchParams } = require('url');
 const vvClient = require('../services/voucherValidationClient');
 const { TransactionDB } = require('../config/db');
+const { ruijieAuthDeduped } = require('../services/ruijieAuth');
 
 const RUIJIE_AUTH_URL = process.env.RUIJIE_AUTH_URL || 'https://portal-ap.ruijienetworks.com/api/auth/general';
 
@@ -51,9 +52,15 @@ const authenticateVoucherInternal = async (voucherCode, sessionId, transactionId
   log('>>>> AUTO VOUCHER AUTH POST', authUrl, payload);
 
   try {
-    const { data, status } = await axios.post(authUrl, payload, {
+    // Shared dedup with authController: if the PortalGate re-auth already
+    // authenticated this same session + voucher seconds ago, reuse that result
+    // instead of issuing a second Ruijie call that would be "request limited".
+    const { data, status } = await ruijieAuthDeduped({
+      sessionId: payload.sessionId,
+      voucherCode: payload.account,
+      payload,
+      authUrl,
       timeout: 20000,
-      headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
     });
 
     log('     ↳ auto auth status', status, 'response', data);

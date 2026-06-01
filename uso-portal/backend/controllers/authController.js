@@ -1,6 +1,7 @@
 // controllers/authController.js
 const axios = require('axios');
 const { TransactionDB } = require('../config/db');
+const { ruijieAuthDeduped } = require('../services/ruijieAuth');
 
 const log = (...messages) => console.log(new Date().toISOString(), ...messages);
 
@@ -43,14 +44,17 @@ const authenticateVoucher = async (req, res) => {
       userAgent: clientInfo.userAgent
     });
 
-    const { data, status } = await axios.post(authUrl, payload, { 
+    // Deduplicated upstream call — collapses CNA double-loads, redirect-chain
+    // reloads, retries, and the payment-path race onto a single Ruijie request
+    // so the same session never trips Ruijie's "request limited" rate limiter.
+    const { data, status } = await ruijieAuthDeduped({
+      sessionId: sessionId.trim(),
+      voucherCode: voucherCode.trim(),
+      payload,
+      authUrl,
       timeout: 15000,
-      headers: {
-        'Content-Type': 'application/json',
-        'Accept': 'application/json'
-      }
     });
-    
+
     log('     ↳ status', status, 'response', data);
 
     if (status === 200 && data) {
