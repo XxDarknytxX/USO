@@ -13,6 +13,8 @@ import { makePortalConfigController } from "./controllers/portalConfigController
 import { makePortalApiController } from "./controllers/portalApiController.js";
 import { makePortalConfigRouter } from "./routes/portalConfig.js";
 import { makePortalRouter } from "./routes/portal.js";
+import { makeNetworkController } from "./controllers/networkController.js";
+import { makeNetworkRouter } from "./routes/network.js";
 
 const app = express();
 
@@ -66,6 +68,7 @@ const admin = makeAdminController(pool);
 const voucher = makeVoucherController(pool);
 const portalConfig = makePortalConfigController(pool);
 const portalApi = makePortalApiController(pool);
+const network = makeNetworkController(pool);
 
 // Routes
 app.use("/api", makeAuthRouter(admin));
@@ -74,6 +77,7 @@ app.use("/api/settings", makeSettingsRouter(voucher));
 app.use("/api/users", makeUserRouter(admin));
 app.use("/api/portal-config", makePortalConfigRouter(portalConfig));
 app.use("/api/portal", makePortalRouter(portalApi));
+app.use("/api/network", makeNetworkRouter(network));
 
 // Health check (no secrets exposed)
 app.get("/health", (_req, res) =>

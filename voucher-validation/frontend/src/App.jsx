@@ -9,6 +9,7 @@ const Dashboard = lazy(() => import("./pages/Dashboard"));
 const VouchersPage = lazy(() => import("./pages/VouchersPage"));
 const SyncPage = lazy(() => import("./pages/SyncPage"));
 const ActivityLogPage = lazy(() => import("./pages/ActivityLogPage"));
+const NetworkPage = lazy(() => import("./pages/NetworkPage"));
 const SettingsPage = lazy(() => import("./pages/SettingsPage"));
 const UsersPage = lazy(() => import("./pages/UsersPage"));
 const PortalConfigPage = lazy(() => import("./pages/PortalConfigPage"));
@@ -50,6 +51,7 @@ export default function App() {
             <Route path="/vouchers" element={<VouchersPage />} />
             <Route path="/vouchers/:uuid" element={<VouchersPage />} />
             <Route path="/activity" element={<ActivityLogPage />} />
+            <Route path="/network" element={<NetworkPage />} />
             <Route
               path="/sync"
               element={

@@ -17,6 +17,7 @@ import {
   Globe,
   FileText,
   GitBranch,
+  Network,
   Sun,
   Moon,
   Eye,
@@ -28,6 +29,7 @@ import { useTheme } from "../../hooks/useTheme";
 const allNavItems = [
   { path: "/dashboard", label: "Dashboard", icon: BarChart3 },
   { path: "/vouchers", label: "Vouchers", icon: Ticket },
+  { path: "/network", label: "Network", icon: Network },
   { path: "/activity", label: "Activity", icon: History },
   { path: "/sync", label: "Sync", icon: RefreshCw, adminOnly: true },
   { path: "/users", label: "Users", icon: Users, adminOnly: true },

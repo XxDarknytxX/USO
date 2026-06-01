@@ -117,6 +117,23 @@ export async function getPool() {
       INDEX idx_event_timestamp (event_timestamp),
       INDEX idx_plan_key (plan_key)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
+
+    // Network monitoring "projects" — each maps a named site/portal to a
+    // Ruijie Cloud network (groupId/tenantId) so the dashboard can show the
+    // topology + device health per project. Designed for multiple projects.
+    `CREATE TABLE IF NOT EXISTS network_projects (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      name VARCHAR(255) NOT NULL,
+      hostname VARCHAR(255) NULL,
+      ruijie_group_id VARCHAR(100) NULL,
+      ruijie_tenant_id VARCHAR(100) NULL,
+      is_active BOOLEAN NOT NULL DEFAULT TRUE,
+      sort_order INT NOT NULL DEFAULT 0,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      INDEX idx_active (is_active),
+      INDEX idx_sort (sort_order)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
   ];
 
   for (const sql of tableCreations) {
@@ -158,6 +175,26 @@ export async function getPool() {
         console.log('Collation fix note:', e.message);
       }
     }
+  }
+
+  // Seed the first network project (USO Portal) from env if no projects exist yet.
+  try {
+    const [[{ n }]] = await pool.query('SELECT COUNT(*) AS n FROM network_projects');
+    if (n === 0) {
+      await pool.query(
+        `INSERT INTO network_projects (name, hostname, ruijie_group_id, ruijie_tenant_id, sort_order)
+         VALUES (?, ?, ?, ?, 0)`,
+        [
+          'USO Portal',
+          'portal.vodafone.com.fj',
+          process.env.RUIJIE_GROUP_ID || null,
+          process.env.RUIJIE_TENANT_ID || null,
+        ]
+      );
+      console.log('Seeded default network project: USO Portal');
+    }
+  } catch (e) {
+    console.log('Network project seed note:', e.message);
   }
 
   return pool;

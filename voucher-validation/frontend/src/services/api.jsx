@@ -90,6 +90,15 @@ export const portalConfigApi = {
   remove: (id) => api(`/portal-config/plans/${id}`, { method: "DELETE" }),
 };
 
+// Network monitoring API helpers
+export const networkApi = {
+  projects: () => api("/network/projects"),
+  createProject: (body) => api("/network/projects", { method: "POST", body }),
+  updateProject: (id, body) => api(`/network/projects/${id}`, { method: "PUT", body }),
+  removeProject: (id) => api(`/network/projects/${id}`, { method: "DELETE" }),
+  health: (id) => api(`/network/projects/${id}/health`),
+};
+
 // User management API helpers
 export const userApi = {
   me: () => api("/me"),

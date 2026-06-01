@@ -191,6 +191,111 @@ class RuijieService {
     }
   }
 
+  // ── Device health / network monitoring ─────────────────────
+
+  /**
+   * Device list + status for network-health monitoring.
+   * GET /maint/devices  (Ruijie Cloud "Device Maintenance" API)
+   *
+   * Field names differ across Ruijie Cloud versions/regions, so the
+   * response is normalized defensively. If the endpoint isn't enabled for
+   * this app's API scope (404/405/permission error), this returns
+   * { cloudSync:false, devices:[] } instead of throwing, so the dashboard
+   * degrades gracefully rather than erroring.
+   *
+   * @param {{ groupId?: string|number, tenantId?: string }} [opts]
+   */
+  async getDevices({ groupId, tenantId } = {}, _retried = false) {
+    try {
+      const accessToken = await this.getAccessToken();
+      const url = new URL(this.buildUrl('/maint/devices'));
+      url.searchParams.append('access_token', accessToken);
+      const gid = groupId ?? this.groupId;
+      if (gid) url.searchParams.append('groupId', String(gid));
+      const tid = tenantId ?? process.env.RUIJIE_TENANT_ID;
+      if (tid) url.searchParams.append('tenantId', String(tid));
+
+      const response = await fetch(url.toString(), {
+        method: 'GET',
+        headers: { 'Content-Type': 'application/json' },
+      });
+
+      // Endpoint not present / method not allowed → scope likely not enabled
+      if (response.status === 404 || response.status === 405) {
+        console.warn(`Ruijie device API unavailable (HTTP ${response.status}) — device scope may not be enabled for this app`);
+        return { cloudSync: false, devices: [], reason: `HTTP ${response.status}` };
+      }
+      if (!response.ok) throw new Error(`HTTP ${response.status} ${response.statusText}`);
+
+      const data = await response.json();
+      const okCode = data?.code === 0 || data?.code === 200 || data?.code === undefined;
+      if (!okCode) {
+        if (this.isTokenExpired(data) && !_retried) {
+          this.invalidateToken();
+          return this.getDevices({ groupId, tenantId }, true);
+        }
+        const msg = (data?.msg || '').toLowerCase();
+        if (msg.includes('permission') || msg.includes('not authorized') || msg.includes('no auth') || msg.includes('forbidden')) {
+          console.warn('Ruijie device API not authorized for this app:', data?.msg);
+          return { cloudSync: false, devices: [], reason: data?.msg };
+        }
+        throw new Error(data?.msg || 'Device list error');
+      }
+
+      const rawList =
+        (Array.isArray(data?.data) ? data.data : null) ||
+        data?.data?.list ||
+        data?.list ||
+        data?.devices ||
+        data?.deviceData?.list ||
+        [];
+
+      return { cloudSync: true, devices: rawList.map((d) => this._normalizeDevice(d)) };
+    } catch (error) {
+      console.error('Failed to fetch devices:', error.message);
+      return { cloudSync: false, devices: [], error: error.message };
+    }
+  }
+
+  /** Normalize a raw Ruijie device record into a stable shape. */
+  _normalizeDevice(d = {}) {
+    const pick = (...keys) => {
+      for (const k of keys) {
+        if (d[k] !== undefined && d[k] !== null && d[k] !== '') return d[k];
+      }
+      return undefined;
+    };
+    const rawStatus = pick('status', 'onlineStatus', 'online', 'isOnline', 'state');
+    const online =
+      rawStatus === 1 || rawStatus === '1' || rawStatus === true ||
+      String(rawStatus).toLowerCase() === 'online';
+    const sn = pick('sn', 'serialNumber', 'serialNum', 'deviceSn');
+    const rawType = String(pick('type', 'deviceType', 'category', 'productType') || '');
+    return {
+      sn: sn || pick('mac', 'macAddress') || `dev-${Math.random().toString(36).slice(2, 8)}`,
+      name: pick('alias', 'name', 'deviceName', 'hostname') || sn || 'Unknown device',
+      type: this._classifyType(rawType, pick('model', 'deviceModel')),
+      rawType,
+      online,
+      model: pick('model', 'deviceModel', 'productModel') || '—',
+      mac: pick('mac', 'macAddress') || '—',
+      mgmtIp: pick('managementIp', 'manageIp', 'ip', 'lanIp', 'deviceIp') || '—',
+      publicIp: pick('publicIp', 'egressIp', 'wanIp', 'outerIp') || null,
+      clientCount: Number(pick('clientCount', 'staCount', 'userCount', 'clients', 'onlineClientNum') || 0),
+      firmware: pick('firmware', 'version', 'swVersion', 'softwareVersion', 'firmwareVersion') || '—',
+      offlineTime: pick('offlineTime', 'lastOfflineTime', 'offline_time') || null,
+    };
+  }
+
+  /** Bucket a device into gateway | ap | switch | other from its type/model. */
+  _classifyType(rawType, model) {
+    const s = `${rawType} ${model || ''}`.toLowerCase();
+    if (s.includes('gateway') || s.includes('router') || /\b(eg|egw|nbr)\b/.test(s)) return 'gateway';
+    if (s.includes('access') || /\b(ap|rap|eap|wap)\b/.test(s) || /\bap\d/.test(s)) return 'ap';
+    if (s.includes('switch') || /\b(nbs|es|xs|esw)\b/.test(s)) return 'switch';
+    return 'other';
+  }
+
   // ── Write APIs ──────────────────────────────────────────────
 
   /**
