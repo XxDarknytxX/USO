@@ -43,8 +43,14 @@ export const voucherApi = {
     const qs = new URLSearchParams(params).toString();
     return api(`/vouchers/search${qs ? `?${qs}` : ""}`);
   },
-  stats: () => api("/vouchers/stats"),
-  userGroups: () => api("/vouchers/user-groups"),
+  stats: (params = {}) => {
+    const qs = new URLSearchParams(params).toString();
+    return api(`/vouchers/stats${qs ? `?${qs}` : ""}`);
+  },
+  userGroups: (params = {}) => {
+    const qs = new URLSearchParams(params).toString();
+    return api(`/vouchers/user-groups${qs ? `?${qs}` : ""}`);
+  },
   historical: (params = {}) => {
     const qs = new URLSearchParams(params).toString();
     return api(`/vouchers/historical${qs ? `?${qs}` : ""}`);
@@ -93,6 +99,7 @@ export const portalConfigApi = {
 // Network monitoring API helpers
 export const networkApi = {
   projects: () => api("/network/projects"),
+  discoverGroups: () => api("/network/discover"),
   createProject: (body) => api("/network/projects", { method: "POST", body }),
   updateProject: (id, body) => api(`/network/projects/${id}`, { method: "PUT", body }),
   removeProject: (id) => api(`/network/projects/${id}`, { method: "DELETE" }),

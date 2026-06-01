@@ -19,6 +19,7 @@ import {
 
 import { voucherApi } from "../services/api";
 import { useAuth } from "../hooks/useAuth";
+import { useSite } from "../hooks/useSite";
 import StatusBadge from "../components/shared/StatusBadge";
 import Pagination from "../components/shared/Pagination";
 import ConfirmDialog from "../components/shared/ConfirmDialog";
@@ -30,6 +31,7 @@ export default function VouchersPage() {
   const { uuid: routeUuid } = useParams();
   const navigate = useNavigate();
   const { isAdmin } = useAuth();
+  const { activeSite, activeGroupId } = useSite();
 
   const [vouchers, setVouchers] = useState([]);
   const [total, setTotal] = useState(0);
@@ -54,18 +56,19 @@ export default function VouchersPage() {
 
   useEffect(() => {
     voucherApi
-      .stats()
+      .stats(activeGroupId ? { groupId: activeGroupId } : {})
       .then((data) => {
         const names = (data.packageStats || []).map((p) => p.package_name).sort();
         setPackages(names);
       })
       .catch(() => {});
-  }, []);
+  }, [activeGroupId]);
 
   const fetchVouchers = useCallback(async () => {
     setLoading(true);
     try {
       const params = { page: String(page), limit: String(limit) };
+      if (activeGroupId) params.groupId = activeGroupId;
       if (statusFilter) params.status = statusFilter;
       if (packageFilter) params.packageName = packageFilter;
 
@@ -86,7 +89,7 @@ export default function VouchersPage() {
     } finally {
       setLoading(false);
     }
-  }, [page, limit, statusFilter, packageFilter, searchQuery, viewMode]);
+  }, [page, limit, statusFilter, packageFilter, searchQuery, viewMode, activeGroupId]);
 
   useEffect(() => {
     fetchVouchers();
@@ -162,7 +165,9 @@ export default function VouchersPage() {
             <Ticket size={15} />
           </span>
           <div className="flex flex-col min-w-0">
-            <span className="page-eyebrow">Inventory</span>
+            <span className="page-eyebrow">
+              {activeSite ? `Site · ${activeSite.name}` : "Inventory"}
+            </span>
             <h1 className="page-title">Vouchers</h1>
             <p className="page-subtitle">
               {total.toLocaleString()} total
@@ -502,6 +507,8 @@ export default function VouchersPage() {
 
       {showCreate && (
         <VoucherCreateForm
+          groupId={activeGroupId}
+          siteName={activeSite?.name}
           onClose={() => setShowCreate(false)}
           onCreated={() => {
             setShowCreate(false);

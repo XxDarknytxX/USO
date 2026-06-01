@@ -25,6 +25,7 @@ import {
 
 import { useAuth } from "../../hooks/useAuth";
 import { useTheme } from "../../hooks/useTheme";
+import SiteSwitcher from "./SiteSwitcher";
 
 const allNavItems = [
   { path: "/dashboard", label: "Dashboard", icon: BarChart3 },
@@ -84,6 +85,9 @@ export default function Sidebar() {
           </span>
         )}
       </div>
+
+      {/* ----- Site switcher ----- */}
+      <SiteSwitcher collapsed={collapsed} />
 
       {/* ----- Nav ----- */}
       <nav className="flex-1 py-4 px-2.5 overflow-y-auto">

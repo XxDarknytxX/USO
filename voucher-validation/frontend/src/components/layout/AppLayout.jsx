@@ -4,9 +4,11 @@
 import { Outlet } from "react-router-dom";
 import { Toaster } from "react-hot-toast";
 import Sidebar from "./Sidebar";
+import { SiteProvider } from "../../hooks/useSite";
 
 export default function AppLayout() {
   return (
+    <SiteProvider>
     <div className="flex h-screen bg-[var(--surface)] text-[var(--text-primary)]">
       <Sidebar />
       <main className="flex-1 overflow-y-auto bg-[var(--surface)]">
@@ -41,5 +43,6 @@ export default function AppLayout() {
         }}
       />
     </div>
+    </SiteProvider>
   );
 }

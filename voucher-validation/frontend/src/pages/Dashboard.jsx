@@ -34,9 +34,12 @@ import {
   HardDrive,
   ArrowUpRight,
   Ticket,
+  MapPin,
 } from "lucide-react";
 
+import { useNavigate } from "react-router-dom";
 import { api, voucherApi } from "../services/api";
+import { useSite } from "../hooks/useSite";
 import { Modal, Badge, EmptyState } from "../components/ui";
 
 // Categorize package by time_period (minutes)
@@ -67,6 +70,8 @@ const PALETTE_VARS = [
 ];
 
 export default function Dashboard() {
+  const navigate = useNavigate();
+  const { sites, setActiveSiteId } = useSite();
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
   const [voucherStats, setVoucherStats] = useState(null);
@@ -338,6 +343,38 @@ export default function Dashboard() {
             sub={`${metrics.expired.toLocaleString()} expired`}
           />
         </div>
+
+        {/* ----- Sites overview (all villages) ----- */}
+        {Array.isArray(voucherStats?.perSite) && voucherStats.perSite.length > 0 && (
+          <div>
+            <h2 className="text-[10.5px] font-medium text-[var(--text-quaternary)] mb-3">
+              Sites · {voucherStats.perSite.length}
+            </h2>
+            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
+              {voucherStats.perSite.map((s) => {
+                const site = sites.find(
+                  (x) => String(x.ruijieGroupId) === String(s.group_id)
+                );
+                return (
+                  <SiteCard
+                    key={s.group_id || "unknown"}
+                    name={site?.name || (s.group_id ? `Group ${s.group_id}` : "Unassigned")}
+                    hostname={site?.hostname}
+                    stats={s}
+                    onOpen={
+                      site
+                        ? () => {
+                            setActiveSiteId(site.id);
+                            navigate("/vouchers");
+                          }
+                        : null
+                    }
+                  />
+                );
+              })}
+            </div>
+          </div>
+        )}
 
         {/* ----- Charts Row 1 ----- */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
@@ -842,6 +879,61 @@ export default function Dashboard() {
 }
 
 /* ------------ Sub-components --------------------------------------------- */
+
+function SiteCard({ name, hostname, stats, onOpen }) {
+  const total = Number(stats.total || 0);
+  const active = Number(stats.active || 0);
+  const live = Number(stats.currently_in_use || 0);
+  const usedQ = Number(stats.total_used_quota_mb || 0);
+  const totalQ = Number(stats.total_quota_mb || 0);
+  const dataPct = totalQ ? Math.round((usedQ / totalQ) * 100) : 0;
+  return (
+    <button
+      onClick={onOpen || undefined}
+      disabled={!onOpen}
+      className={
+        "text-left w-full p-4 rounded-lg bg-[var(--surface-raised)] border border-[var(--border-default)] shadow-[var(--elev-1)] " +
+        (onOpen
+          ? "hover:border-[var(--brand)] hover:bg-[var(--surface-hover)] transition-colors cursor-pointer"
+          : "cursor-default")
+      }
+    >
+      <div className="flex items-center justify-between mb-3">
+        <div className="flex items-center gap-2 min-w-0">
+          <span className="h-7 w-7 rounded-md inline-flex items-center justify-center bg-[var(--brand-soft)] text-[var(--brand-fg-on-soft)] shrink-0">
+            <MapPin size={14} />
+          </span>
+          <div className="flex flex-col min-w-0">
+            <span className="text-[13px] font-semibold text-[var(--text-primary)] truncate">{name}</span>
+            {hostname && (
+              <span className="text-[10.5px] font-mono text-[var(--text-quaternary)] truncate">{hostname}</span>
+            )}
+          </div>
+        </div>
+        {onOpen && <ArrowUpRight size={14} className="text-[var(--text-quaternary)] shrink-0" />}
+      </div>
+      <div className="grid grid-cols-3 gap-2 mb-3">
+        <MiniStat label="Vouchers" value={total} />
+        <MiniStat label="Active" value={active} />
+        <MiniStat label="Live" value={live} accent />
+      </div>
+      <div>
+        <div className="flex items-center justify-between text-[10.5px] mb-1.5 font-mono">
+          <span className="text-[var(--text-quaternary)] uppercase tracking-wide">Data</span>
+          <span className="text-[var(--text-tertiary)]">
+            {Math.round(usedQ / 1024)} / {Math.round(totalQ / 1024)} GB
+          </span>
+        </div>
+        <div className="h-1.5 bg-[var(--surface-sunken)] rounded-full overflow-hidden">
+          <div
+            className="h-full bg-[var(--brand)] rounded-full transition-[width] duration-500"
+            style={{ width: `${Math.min(dataPct, 100)}%` }}
+          />
+        </div>
+      </div>
+    </button>
+  );
+}
 
 function MetricCard({ label, value, icon, sub }) {
   return (

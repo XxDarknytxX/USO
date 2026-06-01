@@ -23,7 +23,7 @@ import { Modal, Field, Input, Button, Badge, EmptyState } from "../ui";
 
 const QUICK_QTYS = [1, 5, 10, 25, 50];
 
-export default function VoucherCreateForm({ onClose, onCreated }) {
+export default function VoucherCreateForm({ groupId, siteName, onClose, onCreated }) {
   const [userGroups, setUserGroups] = useState([]);
   const [loadingGroups, setLoadingGroups] = useState(true);
   const [submitting, setSubmitting] = useState(false);
@@ -32,12 +32,13 @@ export default function VoucherCreateForm({ onClose, onCreated }) {
 
   useEffect(() => {
     loadUserGroups();
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [groupId]);
 
   async function loadUserGroups() {
     setLoadingGroups(true);
     try {
-      const data = await voucherApi.userGroups();
+      const data = await voucherApi.userGroups(groupId ? { groupId } : {});
       setUserGroups(data.userGroups || []);
     } catch (err) {
       toast.error("Failed to load profiles: " + err.message);
@@ -65,6 +66,7 @@ export default function VoucherCreateForm({ onClose, onCreated }) {
         profile: selectedGroup.authProfileId || gid,
         package_name: gname,
         quantity,
+        groupId: groupId || undefined,
       };
       const result = await voucherApi.create(payload);
       const count = result.count || 1;
@@ -90,7 +92,7 @@ export default function VoucherCreateForm({ onClose, onCreated }) {
   return (
     <Modal open onClose={onClose} width="lg">
       <Modal.Header
-        eyebrow="Vouchers"
+        eyebrow={siteName ? `Site · ${siteName}` : "Vouchers"}
         title="Generate vouchers"
         subtitle="Pick a profile and how many codes to mint. They appear in the Vouchers list immediately."
         icon={Ticket}

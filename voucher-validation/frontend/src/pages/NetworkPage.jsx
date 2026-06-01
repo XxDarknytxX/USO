@@ -28,6 +28,7 @@ import {
   Modal,
   Field,
   Input,
+  Select,
   Button,
   IconButton,
   Badge,
@@ -248,18 +249,40 @@ function AddProjectModal({ onClose, onSaved }) {
     ruijieTenantId: "",
   });
   const [saving, setSaving] = useState(false);
+  const [discovered, setDiscovered] = useState([]);
+  const [discovering, setDiscovering] = useState(true);
   const set = (k, v) => setForm((p) => ({ ...p, [k]: v }));
+
+  // Pull the list of Ruijie network groups so the admin can pick a village
+  // instead of typing the group ID. Manual entry still works (fallback).
+  useEffect(() => {
+    networkApi
+      .discoverGroups()
+      .then((d) => setDiscovered(d.groups || []))
+      .catch(() => setDiscovered([]))
+      .finally(() => setDiscovering(false));
+  }, []);
+
+  function pickDiscovered(groupId) {
+    const g = discovered.find((x) => String(x.groupId) === String(groupId));
+    if (!g) return;
+    setForm((p) => ({
+      ...p,
+      ruijieGroupId: String(g.groupId),
+      name: p.name?.trim() ? p.name : g.name || `Group ${g.groupId}`,
+    }));
+  }
 
   async function submit(e) {
     e?.preventDefault?.();
     if (!form.name.trim()) {
-      toast.error("Project name is required");
+      toast.error("Site name is required");
       return;
     }
     setSaving(true);
     try {
       await networkApi.createProject(form);
-      toast.success("Project added");
+      toast.success("Site added");
       onSaved();
     } catch (err) {
       toast.error(err.message);
@@ -271,17 +294,36 @@ function AddProjectModal({ onClose, onSaved }) {
   return (
     <Modal open onClose={onClose} width="md">
       <Modal.Header
-        eyebrow="New project"
-        title="Add a network project"
-        subtitle="Each project maps a named site to a Ruijie Cloud network so you can monitor its health."
+        eyebrow="New site"
+        title="Add a site (village)"
+        subtitle="Each site maps a named village to a Ruijie project (group) — its vouchers and devices are scoped to it."
         icon={Network}
         onClose={onClose}
       />
       <form onSubmit={submit}>
         <Modal.Body>
           <div className="flex flex-col gap-4">
-            <Field label="Project name" required hint="Shown on the card, e.g. “USO Portal”.">
-              <Input value={form.name} onChange={(e) => set("name", e.target.value)} placeholder="USO Portal" />
+            <Field
+              label="Discover from Ruijie"
+              hint={discovering ? "Loading sites from Ruijie…" : "Pick a village, or enter the group ID manually below."}
+            >
+              <Select
+                value={form.ruijieGroupId}
+                onChange={(e) => pickDiscovered(e.target.value)}
+                disabled={discovering || discovered.length === 0}
+              >
+                <option value="">
+                  {discovering ? "Loading…" : discovered.length ? "Select a Ruijie network…" : "None found — enter manually"}
+                </option>
+                {discovered.map((g) => (
+                  <option key={g.groupId} value={g.groupId}>
+                    {(g.name || `Group ${g.groupId}`) + ` (${g.groupId})` + (g.type ? ` · ${g.type}` : "")}
+                  </option>
+                ))}
+              </Select>
+            </Field>
+            <Field label="Site name" required hint="The village name shown in the switcher, e.g. “Nadi Village”.">
+              <Input value={form.name} onChange={(e) => set("name", e.target.value)} placeholder="Nadi Village" />
             </Field>
             <Field label="Portal hostname" hint="Optional — the captive portal domain this network serves.">
               <Input
@@ -316,7 +358,7 @@ function AddProjectModal({ onClose, onSaved }) {
             Cancel
           </Button>
           <Button type="submit" variant="primary" size="sm" loading={saving}>
-            Add project
+            Add site
           </Button>
         </Modal.Footer>
       </form>
