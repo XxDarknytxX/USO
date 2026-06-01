@@ -226,10 +226,13 @@ class RuijieService {
       : this._devicesPathTemplate
         ? [this._devicesPathTemplate]
         : [
-            '/open/device/list/{groupId}',
-            '/open/device/getList/{groupId}',
+            // /maint/devices already responds (it returned "groupId is null"
+            // for the query form), so adding groupId to ITS path is the
+            // highest-confidence fix — try it first.
             '/maint/devices/{groupId}',
             '/maint/device/list/{groupId}',
+            '/open/device/list/{groupId}',
+            '/open/device/getList/{groupId}',
             '/intl/device/list/{groupId}',
             '/maint/devices?groupId={groupId}',
           ];
