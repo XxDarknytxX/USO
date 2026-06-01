@@ -231,7 +231,7 @@ export default function MainPage() {
               <span className="text-ink-4 text-sm">Loading plans...</span>
             </div>
           ) : categories?.length ? (
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-5 sm:gap-6 lg:h-full lg:max-h-[460px]">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-5 sm:gap-6 w-full max-w-5xl mx-auto">
               {categories.map((cat, i) => {
                 const cfg = categoryConfig[cat.id] || defaultCatConfig;
                 const Icon = cfg.icon;
@@ -240,7 +240,7 @@ export default function MainPage() {
                     key={cat.id}
                     onClick={() => handleCategoryClick(cat)}
                     className="group text-left relative overflow-hidden bg-card/80 backdrop-blur-sm border border-edge rounded-3xl
-                               min-h-[280px] sm:min-h-[400px] lg:min-h-0
+                               min-h-[200px] sm:min-h-[230px]
                                transition-all duration-300 hover:border-edge-hover hover:bg-card
                                animate-enter"
                     style={{
@@ -254,24 +254,24 @@ export default function MainPage() {
                       style={{ background: cfg.glowColor }}
                     />
 
-                    <div className="relative p-7 sm:p-9 lg:p-7 flex flex-col h-full">
+                    <div className="relative p-6 sm:p-7 flex flex-col h-full">
                       {/* Icon */}
-                      <div className={`w-14 h-14 sm:w-20 sm:h-20 lg:w-14 lg:h-14 rounded-2xl ${cfg.accentBg} border ${cfg.accentBorder}
-                                      flex items-center justify-center shrink-0 mb-5 sm:mb-8 lg:mb-4
+                      <div className={`w-12 h-12 sm:w-14 sm:h-14 rounded-2xl ${cfg.accentBg} border ${cfg.accentBorder}
+                                      flex items-center justify-center shrink-0 mb-4
                                       transition-transform duration-300 group-hover:scale-110`}>
-                        <Icon className={`${cfg.accent} text-xl sm:text-3xl lg:text-2xl`} />
+                        <Icon className={`${cfg.accent} text-lg sm:text-2xl`} />
                       </div>
 
                       {/* Name + badge */}
-                      <div className="flex items-center gap-2.5 mb-2.5 flex-wrap">
-                        <h2 className="text-xl sm:text-3xl lg:text-2xl font-bold text-ink">{cat.name}</h2>
+                      <div className="flex items-center gap-2.5 mb-2 flex-wrap">
+                        <h2 className="text-xl sm:text-2xl font-bold text-ink">{cat.name}</h2>
                         <span className="text-[10px] font-bold text-vf bg-vf/10 border border-vf/15 px-2.5 py-0.5 rounded-full whitespace-nowrap">
                           {cat.count} plan{cat.count !== 1 ? 's' : ''}
                         </span>
                       </div>
 
                       {/* Description */}
-                      <p className="text-ink-4 text-sm sm:text-base lg:text-sm leading-relaxed mb-5 sm:mb-8 lg:mb-4 flex-1">{cfg.desc}</p>
+                      <p className="text-ink-4 text-sm leading-relaxed mb-5 flex-1">{cfg.desc}</p>
 
                       {/* CTA */}
                       <div className="flex items-center gap-2 text-sm font-semibold text-vf group-hover:gap-3 transition-all duration-300 mt-auto">
