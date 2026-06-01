@@ -114,6 +114,10 @@ export default function VoucherStatus() {
   const dataRef = useRef(data);
   dataRef.current = data;
 
+  // Guards async state writes so an in-flight poll that resolves after the
+  // page unmounts (navigation) can't setState on an unmounted component.
+  const mountedRef = useRef(true);
+
   const fetchStatus = useCallback(async (isRefresh = false) => {
     if (isRefresh) setRefreshing(true);
     try {
@@ -124,22 +128,29 @@ export default function VoucherStatus() {
       }
       const json = await res.json();
       if (!json.ok) throw new Error(json.error || 'Unknown error');
+      if (!mountedRef.current) return;
       setData(json);
       setError(null);
       setLastUpdated(new Date());
     } catch (e) {
       // Only set error if we have no existing data to show
-      if (!dataRef.current) setError(e.message);
+      if (mountedRef.current && !dataRef.current) setError(e.message);
     } finally {
-      setLoading(false);
-      setRefreshing(false);
+      if (mountedRef.current) {
+        setLoading(false);
+        setRefreshing(false);
+      }
     }
   }, [voucherCode]);
 
   useEffect(() => {
+    mountedRef.current = true;
     fetchStatus();
     const interval = setInterval(() => fetchStatus(true), REFRESH_INTERVAL);
-    return () => clearInterval(interval);
+    return () => {
+      mountedRef.current = false;
+      clearInterval(interval);
+    };
   }, [fetchStatus]);
 
   const statusUrl = `${window.location.origin}/status/${voucherCode}`;

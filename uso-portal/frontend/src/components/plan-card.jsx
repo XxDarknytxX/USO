@@ -1,5 +1,5 @@
 // src/components/plan-card.jsx
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import {
   FaTimes,
   FaCalendarDay,
@@ -73,14 +73,21 @@ function PlansModal({ selectedCategory, categoryPlans, loading, onClose, onBuy, 
     };
   }, [selectedCategory]);
 
+  const closeTimer = useRef(null);
   const handleClose = useCallback(() => {
     setClosing(true);
-    setTimeout(() => {
+    closeTimer.current = setTimeout(() => {
       setClosing(false);
       setVisible(false);
       onClose();
     }, 280);
   }, [onClose]);
+
+  // Clear a pending close-animation timer if the modal unmounts mid-close,
+  // so onClose()/setState never fire on an unmounted component.
+  useEffect(() => () => {
+    if (closeTimer.current) clearTimeout(closeTimer.current);
+  }, []);
 
   if (!selectedCategory) return null;
 
@@ -204,7 +211,15 @@ export default function PlanCard({ plan, onBuy, index = 0, isModal = false, them
   const Icon = getIconComponent(plan.icon);
   const t = theme || defaultTheme;
 
-  const buy = async () => { setBusy(true); await onBuy(plan); setBusy(false); };
+  // try/finally so the button never gets stuck on "Processing…" if onBuy throws.
+  const buy = async () => {
+    setBusy(true);
+    try {
+      await onBuy(plan);
+    } finally {
+      setBusy(false);
+    }
+  };
 
   return (
     <div
@@ -218,8 +233,9 @@ export default function PlanCard({ plan, onBuy, index = 0, isModal = false, them
         style={{ background: `linear-gradient(to bottom, ${(t.glowRaw || t.raw).replace(/[\d.]+\)$/, '0.06)')}, transparent 50%)` }}
       />
 
-      {/* Popular badge — themed */}
-      {plan.popular && (
+      {/* Popular badge — themed. Boolean() guards against a MySQL tinyint 0
+          rendering a literal "0" in the card. */}
+      {Boolean(plan.popular) && (
         <div className={`absolute top-5 right-5 z-10 text-[10px] font-bold uppercase tracking-wider
                         ${t.badgeText} ${t.badgeBg} border px-2.5 py-1 rounded-full flex items-center gap-1`}>
           <FaStar className="text-[8px]" />

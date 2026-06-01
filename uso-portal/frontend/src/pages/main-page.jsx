@@ -1,7 +1,7 @@
 /**
  * Main WiFi portal — category tiles → plan modal → payment
  */
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import PlanCard, { PlansModal } from '../components/plan-card';
 import {
   FaCalendarDay, FaCalendarWeek, FaCalendarAlt, FaMobileAlt,
@@ -17,6 +17,11 @@ export default function MainPage() {
   const [categoriesLoading, setCategoriesLoading] = useState(true);
   const [sessionId, setSessionId] = useState(null);
   const [handledPayment, setHandledPayment] = useState(false);
+
+  // Track notification/redirect timers so they're cleared if the page unmounts.
+  const timersRef = useRef([]);
+  const track = (id) => { timersRef.current.push(id); return id; };
+  useEffect(() => () => { timersRef.current.forEach(clearTimeout); }, []);
 
   useEffect(() => {
     fetchCategories();
@@ -61,7 +66,7 @@ export default function MainPage() {
       if (rCode === '101') {
         if (d.autoAuth?.success) {
           showSuccess('Connected! Redirecting...');
-          if (d.autoAuth.logonUrl) setTimeout(() => window.location.replace(d.autoAuth.logonUrl), 2500);
+          if (d.autoAuth.logonUrl) track(setTimeout(() => window.location.replace(d.autoAuth.logonUrl), 2500));
           else showSuccess('You now have network access.');
         } else if (d.manualAssistance?.required) showError(d.manualAssistance.message || 'Activation needs assistance.');
         else showError(`Payment OK but ${d.autoAuth?.error || 'auth failed'}. Contact support.`);
@@ -83,9 +88,9 @@ export default function MainPage() {
     } catch (err) { showError(err.message || 'Purchase failed.'); }
   };
 
-  const showSuccess = (m) => { setNotification({ type: 'ok', message: m }); setTimeout(dismiss, 5000); };
-  const showError = (m) => { setNotification({ type: 'err', message: m }); setTimeout(dismiss, 6000); };
-  const dismiss = () => { setNotification(p => p ? { ...p, exit: true } : null); setTimeout(() => setNotification(null), 400); };
+  const showSuccess = (m) => { setNotification({ type: 'ok', message: m }); track(setTimeout(dismiss, 5000)); };
+  const showError = (m) => { setNotification({ type: 'err', message: m }); track(setTimeout(dismiss, 6000)); };
+  const dismiss = () => { setNotification(p => p ? { ...p, exit: true } : null); track(setTimeout(() => setNotification(null), 400)); };
 
   const categoryConfig = {
     daily: {

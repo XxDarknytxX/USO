@@ -19,6 +19,7 @@ export default function PaymentResult() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    let cancelled = false;
     (async () => {
       try {
         const qp = new URLSearchParams(window.location.search || '');
@@ -57,7 +58,6 @@ export default function PaymentResult() {
             const cbData = await cbRes.json();
             if (cbRes.ok && cbData.ok) {
               callbackData = cbData;
-              console.log('[PaymentResult] Callback processed:', cbData.overallStatus || cbData.status);
             } else {
               console.warn('[PaymentResult] Callback returned error:', cbData.error);
             }
@@ -75,6 +75,7 @@ export default function PaymentResult() {
         const data = await res.json();
         if (!data.ok || !data.transaction) throw new Error('Not found');
         const t = data.transaction;
+        if (cancelled) return; // page navigated away while loading
 
         // DB says cancelled
         if (t.status === 'payment_failed' && t.mpaisa_response_code === '111') {
@@ -140,6 +141,7 @@ export default function PaymentResult() {
             const cr = await fetch(`/api/mpaisa/urgent-cases?transactionId=${tID}`);
             if (cr.ok) {
               const cd = await cr.json();
+              if (cancelled) return;
               const ac = cd.cases?.find((c) => c.transaction_id === tID);
               if (ac) {
                 setAssist({ id: ac.id, status: ac.status, error: ac.ruijie_error_message, wait: ac.minutes_waiting });
@@ -154,14 +156,15 @@ export default function PaymentResult() {
           } catch {}
         }
 
-        setStatus(info);
+        if (!cancelled) setStatus(info);
       } catch (e) {
         console.error(e);
-        setStatus({ text: 'Error', type: 'error', success: false, description: 'Unable to load transaction. Try refreshing or contact support.' });
+        if (!cancelled) setStatus({ text: 'Error', type: 'error', success: false, description: 'Unable to load transaction. Try refreshing or contact support.' });
       } finally {
-        setLoading(false);
+        if (!cancelled) setLoading(false);
       }
     })();
+    return () => { cancelled = true; };
   }, []);
 
   const resolve = (t) => {
