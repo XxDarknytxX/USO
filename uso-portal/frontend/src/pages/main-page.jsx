@@ -188,19 +188,19 @@ export default function MainPage() {
   };
 
   return (
-    <div className="min-h-screen font-sans flex flex-col">
+    <div className="min-h-screen lg:h-[100dvh] font-sans flex flex-col lg:overflow-hidden">
 
       {/* ═══════ MAIN CONTENT ═══════ */}
-      <div className="flex-1">
+      <div className="flex-1 flex flex-col lg:min-h-0">
 
         {/* ═══════ HERO ═══════ */}
-        <header className="w-full max-w-6xl mx-auto px-5 sm:px-8 pt-10 sm:pt-16 pb-10 sm:pb-14 text-center">
+        <header className="w-full max-w-6xl mx-auto px-5 sm:px-8 pt-10 sm:pt-14 lg:pt-7 pb-8 sm:pb-12 lg:pb-5 text-center shrink-0">
           {/* Logo */}
-          <div className="flex justify-center mb-8 animate-enter">
+          <div className="flex justify-center mb-6 sm:mb-8 lg:mb-4 animate-enter">
             <img
               src="/images/logo.png"
               alt="Vodafone"
-              className="h-12 sm:h-16 w-auto"
+              className="h-11 sm:h-16 lg:h-12 w-auto"
               onError={(e) => { e.target.style.display = 'none'; e.target.nextElementSibling.style.display = 'flex'; }}
             />
             <div className="hidden items-center gap-2 text-vf font-extrabold text-2xl">
@@ -210,13 +210,13 @@ export default function MainPage() {
 
           {/* Heading */}
           <h1
-            className="text-3xl sm:text-4xl lg:text-5xl font-extrabold text-ink tracking-tight leading-tight mb-4 animate-enter"
+            className="text-3xl sm:text-4xl lg:text-[2.5rem] font-extrabold text-ink tracking-tight leading-tight mb-3 lg:mb-2.5 animate-enter"
             style={{ animationDelay: '80ms' }}
           >
             Choose your <span className="text-vf">data plan</span>
           </h1>
           <p
-            className="text-ink-3 text-sm sm:text-base lg:text-lg leading-relaxed max-w-lg mx-auto animate-enter"
+            className="text-ink-3 text-sm sm:text-base leading-relaxed max-w-lg mx-auto animate-enter"
             style={{ animationDelay: '150ms' }}
           >
             Select a category and find the perfect package. Instant activation, no setup fees.
@@ -224,14 +224,14 @@ export default function MainPage() {
         </header>
 
         {/* ═══════ CATEGORY TILES ═══════ */}
-        <main className="w-full max-w-6xl mx-auto px-5 sm:px-8 pb-16">
+        <main className="w-full max-w-6xl mx-auto px-5 sm:px-8 pb-12 lg:pb-0 lg:flex-1 lg:min-h-0 flex flex-col justify-center">
           {categoriesLoading ? (
             <div className="flex flex-col items-center py-20 gap-3">
               <div className="w-7 h-7 border-[2.5px] border-edge border-t-ink-3 rounded-full animate-spin" />
               <span className="text-ink-4 text-sm">Loading plans...</span>
             </div>
           ) : categories?.length ? (
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-5 sm:gap-6">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-5 sm:gap-6 lg:h-full lg:max-h-[460px]">
               {categories.map((cat, i) => {
                 const cfg = categoryConfig[cat.id] || defaultCatConfig;
                 const Icon = cfg.icon;
@@ -240,7 +240,7 @@ export default function MainPage() {
                     key={cat.id}
                     onClick={() => handleCategoryClick(cat)}
                     className="group text-left relative overflow-hidden bg-card/80 backdrop-blur-sm border border-edge rounded-3xl
-                               min-h-[380px] sm:min-h-[440px]
+                               min-h-[280px] sm:min-h-[400px] lg:min-h-0
                                transition-all duration-300 hover:border-edge-hover hover:bg-card
                                animate-enter"
                     style={{
@@ -254,24 +254,24 @@ export default function MainPage() {
                       style={{ background: cfg.glowColor }}
                     />
 
-                    <div className="relative p-8 sm:p-10 lg:p-12 flex flex-col h-full">
+                    <div className="relative p-7 sm:p-9 lg:p-7 flex flex-col h-full">
                       {/* Icon */}
-                      <div className={`w-16 h-16 sm:w-20 sm:h-20 rounded-2xl ${cfg.accentBg} border ${cfg.accentBorder}
-                                      flex items-center justify-center shrink-0 mb-8
+                      <div className={`w-14 h-14 sm:w-20 sm:h-20 lg:w-14 lg:h-14 rounded-2xl ${cfg.accentBg} border ${cfg.accentBorder}
+                                      flex items-center justify-center shrink-0 mb-5 sm:mb-8 lg:mb-4
                                       transition-transform duration-300 group-hover:scale-110`}>
-                        <Icon className={`${cfg.accent} text-2xl sm:text-3xl`} />
+                        <Icon className={`${cfg.accent} text-xl sm:text-3xl lg:text-2xl`} />
                       </div>
 
                       {/* Name + badge */}
-                      <div className="flex items-center gap-3 mb-3">
-                        <h2 className="text-2xl sm:text-3xl font-bold text-ink">{cat.name}</h2>
+                      <div className="flex items-center gap-2.5 mb-2.5 flex-wrap">
+                        <h2 className="text-xl sm:text-3xl lg:text-2xl font-bold text-ink">{cat.name}</h2>
                         <span className="text-[10px] font-bold text-vf bg-vf/10 border border-vf/15 px-2.5 py-0.5 rounded-full whitespace-nowrap">
                           {cat.count} plan{cat.count !== 1 ? 's' : ''}
                         </span>
                       </div>
 
                       {/* Description */}
-                      <p className="text-ink-4 text-sm sm:text-base leading-relaxed mb-10 flex-1">{cfg.desc}</p>
+                      <p className="text-ink-4 text-sm sm:text-base lg:text-sm leading-relaxed mb-5 sm:mb-8 lg:mb-4 flex-1">{cfg.desc}</p>
 
                       {/* CTA */}
                       <div className="flex items-center gap-2 text-sm font-semibold text-vf group-hover:gap-3 transition-all duration-300 mt-auto">
@@ -300,9 +300,9 @@ export default function MainPage() {
       </div>
 
       {/* ═══════ FEATURES BAR ═══════ */}
-      <section className="border-t border-edge bg-card/40">
-        <div className="w-full max-w-6xl mx-auto px-5 sm:px-8 py-6 sm:py-8">
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-5 sm:gap-6">
+      <section className="border-t border-edge bg-card/40 shrink-0">
+        <div className="w-full max-w-6xl mx-auto px-5 sm:px-8 py-5 sm:py-7 lg:py-4">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 sm:gap-6">
             {[
               { icon: FaBolt, title: 'Instant Activation', desc: 'Connected in seconds after payment' },
               { icon: FaShieldAlt, title: 'Secure & Reliable', desc: 'Enterprise-grade WiFi network' },
@@ -323,8 +323,8 @@ export default function MainPage() {
       </section>
 
       {/* ═══════ FOOTER ═══════ */}
-      <footer className="border-t border-edge">
-        <div className="w-full max-w-6xl mx-auto px-5 sm:px-8 py-4 flex flex-wrap justify-center gap-x-5 gap-y-1 text-ink-5 text-xs">
+      <footer className="border-t border-edge shrink-0">
+        <div className="w-full max-w-6xl mx-auto px-5 sm:px-8 py-3 flex flex-wrap justify-center gap-x-5 gap-y-1 text-ink-5 text-xs">
           <span>No setup fees</span>
           <span>•</span>
           <span>Cancel anytime</span>
