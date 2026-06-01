@@ -195,68 +195,109 @@ class RuijieService {
 
   /**
    * Device list + status for network-health monitoring.
-   * GET /maint/devices  (Ruijie Cloud "Device Maintenance" API)
    *
-   * Field names differ across Ruijie Cloud versions/regions, so the
-   * response is normalized defensively. If the endpoint isn't enabled for
-   * this app's API scope (404/405/permission error), this returns
-   * { cloudSync:false, devices:[] } instead of throwing, so the dashboard
-   * degrades gracefully rather than erroring.
+   * The exact device endpoint isn't in Ruijie's public API docs and this
+   * account's APIs put groupId in the URL PATH (e.g.
+   * /open/auth/voucher/getList/{groupId}), so we try a few likely shapes,
+   * PIN whichever returns a device array, and log each attempt with
+   * Ruijie's exact message. Pin it permanently via the RUIJIE_DEVICES_PATH
+   * env (use {groupId} as a placeholder) to skip discovery.
+   *
+   * Returns { cloudSync, devices, reason?, attempts? } and never throws, so
+   * the dashboard degrades gracefully.
    *
    * @param {{ groupId?: string|number, tenantId?: string }} [opts]
    */
   async getDevices({ groupId, tenantId } = {}, _retried = false) {
+    // || (not ??) so an empty-string project value falls back to the same
+    // RUIJIE_GROUP_ID the voucher/usergroup APIs already use.
+    const gid = groupId || this.groupId;
+    const tid = tenantId || process.env.RUIJIE_TENANT_ID;
+    if (!gid) {
+      console.warn('getDevices: no groupId available (project + RUIJIE_GROUP_ID both empty)');
+      return { cloudSync: false, devices: [], reason: 'No Ruijie group ID configured' };
+    }
+
+    // Candidate endpoint templates, tried in order. {groupId} is substituted.
+    // Path forms first (mirroring the working voucher endpoints for this
+    // account), then query forms. RUIJIE_DEVICES_PATH overrides discovery.
+    const candidates = process.env.RUIJIE_DEVICES_PATH
+      ? [process.env.RUIJIE_DEVICES_PATH]
+      : this._devicesPathTemplate
+        ? [this._devicesPathTemplate]
+        : [
+            '/open/device/list/{groupId}',
+            '/open/device/getList/{groupId}',
+            '/maint/devices/{groupId}',
+            '/maint/device/list/{groupId}',
+            '/intl/device/list/{groupId}',
+            '/maint/devices?groupId={groupId}',
+          ];
+
     try {
       const accessToken = await this.getAccessToken();
-      const url = new URL(this.buildUrl('/maint/devices'));
-      url.searchParams.append('access_token', accessToken);
-      // Use || (not ??) so an empty-string project value falls back to the
-      // same RUIJIE_GROUP_ID the voucher/usergroup APIs already use.
-      const gid = groupId || this.groupId;
-      const tid = tenantId || process.env.RUIJIE_TENANT_ID;
-      if (gid) {
-        url.searchParams.append('groupId', String(gid));
-      } else {
-        console.warn('getDevices: no groupId available (project + RUIJIE_GROUP_ID both empty)');
-      }
-      if (tid) url.searchParams.append('tenantId', String(tid));
+      const attempts = [];
 
-      const response = await fetch(url.toString(), {
-        method: 'GET',
-        headers: { 'Content-Type': 'application/json' },
-      });
+      for (const tmpl of candidates) {
+        const filled = tmpl.replace('{groupId}', encodeURIComponent(gid));
+        const [pathPart, queryPart] = filled.split('?');
+        const url = new URL(this.buildUrl(pathPart));
+        if (queryPart) {
+          for (const [k, v] of new URLSearchParams(queryPart)) url.searchParams.append(k, v);
+        }
+        url.searchParams.append('access_token', accessToken);
+        if (tid) url.searchParams.append('tenantId', String(tid));
 
-      // Endpoint not present / method not allowed → scope likely not enabled
-      if (response.status === 404 || response.status === 405) {
-        console.warn(`Ruijie device API unavailable (HTTP ${response.status}) — device scope may not be enabled for this app`);
-        return { cloudSync: false, devices: [], reason: `HTTP ${response.status}` };
-      }
-      if (!response.ok) throw new Error(`HTTP ${response.status} ${response.statusText}`);
+        const redacted = url.toString().replace(/access_token=[^&]+/, 'access_token=***');
 
-      const data = await response.json();
-      const okCode = data?.code === 0 || data?.code === 200 || data?.code === undefined;
-      if (!okCode) {
+        let response, data;
+        try {
+          response = await fetch(url.toString(), {
+            method: 'GET',
+            headers: { 'Content-Type': 'application/json' },
+          });
+          data = await response.json().catch(() => ({}));
+        } catch (e) {
+          attempts.push({ endpoint: tmpl, error: e.message });
+          continue;
+        }
+
+        // Token expiry → refresh once and restart discovery
         if (this.isTokenExpired(data) && !_retried) {
           this.invalidateToken();
           return this.getDevices({ groupId, tenantId }, true);
         }
-        const msg = (data?.msg || '').toLowerCase();
-        if (msg.includes('permission') || msg.includes('not authorized') || msg.includes('no auth') || msg.includes('forbidden')) {
-          console.warn('Ruijie device API not authorized for this app:', data?.msg);
-          return { cloudSync: false, devices: [], reason: data?.msg };
+
+        const okCode = data?.code === 0 || data?.code === 200 || data?.code === undefined;
+        const rawList =
+          (Array.isArray(data?.data) ? data.data : null) ||
+          data?.data?.list ||
+          data?.list ||
+          data?.devices ||
+          data?.deviceData?.list ||
+          null;
+
+        if (response.ok && okCode && Array.isArray(rawList)) {
+          this._devicesPathTemplate = tmpl; // pin the winner for this process
+          console.log(`getDevices: endpoint ${tmpl} returned ${rawList.length} devices`);
+          return {
+            cloudSync: true,
+            endpoint: tmpl,
+            devices: rawList.map((d) => this._normalizeDevice(d)),
+          };
         }
-        throw new Error(data?.msg || 'Device list error');
+
+        attempts.push({ endpoint: redacted, status: response.status, code: data?.code, msg: data?.msg });
       }
 
-      const rawList =
-        (Array.isArray(data?.data) ? data.data : null) ||
-        data?.data?.list ||
-        data?.list ||
-        data?.devices ||
-        data?.deviceData?.list ||
-        [];
-
-      return { cloudSync: true, devices: rawList.map((d) => this._normalizeDevice(d)) };
+      console.warn('getDevices: no endpoint returned device data. Attempts:', JSON.stringify(attempts, null, 2));
+      const lastMsg = attempts.map((a) => a.msg).filter(Boolean).pop();
+      return {
+        cloudSync: false,
+        devices: [],
+        reason: lastMsg || 'Device API endpoint not found — set RUIJIE_DEVICES_PATH',
+        attempts,
+      };
     } catch (error) {
       console.error('Failed to fetch devices:', error.message);
       return { cloudSync: false, devices: [], error: error.message };

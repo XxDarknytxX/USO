@@ -120,7 +120,7 @@ export function makeNetworkController(pool) {
         const project = rows[0];
         if (!project) return send.notFound(res, "Project not found");
 
-        const { cloudSync, devices, error, reason } = await ruijie.getDevices({
+        const { cloudSync, devices, error, reason, endpoint, attempts } = await ruijie.getDevices({
           groupId: project.ruijie_group_id,
           tenantId: project.ruijie_tenant_id,
         });
@@ -156,8 +156,11 @@ export function makeNetworkController(pool) {
         return send.ok(res, {
           project: mapProject(project),
           cloudSync,
+          endpoint: endpoint || null,
           // surfaced so the UI can explain an empty result (scope not enabled, etc.)
           notice: cloudSync ? null : reason || error || "Device data unavailable",
+          // discovery attempts (endpoint + Ruijie msg) — for debugging which path works
+          attempts: cloudSync ? undefined : attempts,
           summary,
           internet,
           topology: { internet, gateways, aps, switches, others },
