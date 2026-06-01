@@ -210,9 +210,15 @@ class RuijieService {
       const accessToken = await this.getAccessToken();
       const url = new URL(this.buildUrl('/maint/devices'));
       url.searchParams.append('access_token', accessToken);
-      const gid = groupId ?? this.groupId;
-      if (gid) url.searchParams.append('groupId', String(gid));
-      const tid = tenantId ?? process.env.RUIJIE_TENANT_ID;
+      // Use || (not ??) so an empty-string project value falls back to the
+      // same RUIJIE_GROUP_ID the voucher/usergroup APIs already use.
+      const gid = groupId || this.groupId;
+      const tid = tenantId || process.env.RUIJIE_TENANT_ID;
+      if (gid) {
+        url.searchParams.append('groupId', String(gid));
+      } else {
+        console.warn('getDevices: no groupId available (project + RUIJIE_GROUP_ID both empty)');
+      }
       if (tid) url.searchParams.append('tenantId', String(tid));
 
       const response = await fetch(url.toString(), {

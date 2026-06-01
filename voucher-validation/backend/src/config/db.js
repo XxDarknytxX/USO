@@ -193,6 +193,16 @@ export async function getPool() {
       );
       console.log('Seeded default network project: USO Portal');
     }
+    // Backfill: any project missing a Ruijie group ID inherits the env default
+    // (the same ID the voucher API uses) so device-health calls aren't sent
+    // with a null/empty groupId.
+    if (process.env.RUIJIE_GROUP_ID) {
+      await pool.query(
+        `UPDATE network_projects SET ruijie_group_id = ?
+         WHERE ruijie_group_id IS NULL OR ruijie_group_id = ''`,
+        [process.env.RUIJIE_GROUP_ID]
+      );
+    }
   } catch (e) {
     console.log('Network project seed note:', e.message);
   }
