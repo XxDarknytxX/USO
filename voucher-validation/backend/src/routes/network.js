@@ -12,6 +12,9 @@ export function makeNetworkRouter(controller) {
   // Projects (any authenticated user can view)
   router.get("/projects", controller.listProjects);
 
+  // Discover Ruijie network groups for the "add site" picker (admin)
+  router.get("/discover", requireAdmin, controller.discoverGroups);
+
   // Project management is admin-only
   router.post(
     "/projects",

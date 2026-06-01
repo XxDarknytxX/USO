@@ -72,18 +72,18 @@ class RuijieService {
    * 2.3.3 Query Voucher List
    * GET /open/auth/voucher/getList/{groupId}
    */
-  async getVouchers(start = 0, pageSize = 100, _retried = false) {
+  async getVouchers(start = 0, pageSize = 100, opts = {}, _retried = false) {
     try {
       const accessToken = await this.getAccessToken();
+      const gid = opts.groupId || this.groupId;
+      const tid = opts.tenantId || process.env.RUIJIE_TENANT_ID;
 
-      const voucherUrl = this.buildUrl(`/open/auth/voucher/getList/${this.groupId}`);
+      const voucherUrl = this.buildUrl(`/open/auth/voucher/getList/${gid}`);
       const url = new URL(voucherUrl);
       url.searchParams.append('access_token', accessToken);
       url.searchParams.append('start', String(start));
       url.searchParams.append('pageSize', String(pageSize));
-      if (process.env.RUIJIE_TENANT_ID) {
-        url.searchParams.append('tenantId', process.env.RUIJIE_TENANT_ID);
-      }
+      if (tid) url.searchParams.append('tenantId', String(tid));
 
       const response = await fetch(url.toString(), {
         method: 'GET',
@@ -98,7 +98,7 @@ class RuijieService {
         if (this.isTokenExpired(data) && !_retried) {
           console.log('Ruijie token expired (Login timeout) in getVouchers, refreshing...');
           this.invalidateToken();
-          return this.getVouchers(start, pageSize, true);
+          return this.getVouchers(start, pageSize, opts, true);
         }
         console.error('Voucher list payload not OK:', JSON.stringify(data));
         throw new Error(data?.msg || 'Voucher list error');
@@ -113,19 +113,68 @@ class RuijieService {
     }
   }
 
-  async getAllVouchers() {
+  /** Fetch every voucher for a site (groupId). Defaults to the env group. */
+  async getAllVouchers(opts = {}) {
     const allVouchers = [];
     let start = 0;
     const pageSize = 100;
     let hasMore = true;
     while (hasMore) {
-      const result = await this.getVouchers(start, pageSize);
+      const result = await this.getVouchers(start, pageSize, opts);
       allVouchers.push(...result.vouchers);
       hasMore = result.hasMore;
       start += pageSize;
       if (hasMore) await new Promise(r => setTimeout(r, 100));
     }
     return allVouchers;
+  }
+
+  /**
+   * Enumerate all network groups (sites/projects) under this account.
+   * Ruijie Cloud API §2.2.1: GET /service/api/group/single/tree?depth=DEVICE
+   * Returns a flat list { groupId, name, type, parentName } for the
+   * "Add site" picker. Each groupId is a site vouchers can be scoped to.
+   */
+  async getNetworkGroups(_retried = false) {
+    try {
+      const accessToken = await this.getAccessToken();
+      const url = new URL(this.buildUrl('/group/single/tree'));
+      url.searchParams.append('access_token', accessToken);
+      url.searchParams.append('depth', 'DEVICE');
+
+      const response = await fetch(url.toString(), {
+        method: 'GET',
+        headers: { 'Content-Type': 'application/json' },
+      });
+      const data = await response.json().catch(() => ({}));
+
+      if (this.isTokenExpired(data) && !_retried) {
+        this.invalidateToken();
+        return this.getNetworkGroups(true);
+      }
+      const okCode = data?.code === 0 || data?.code === 200 || data?.code === undefined;
+      if (!okCode) return { groups: [], error: data?.msg };
+
+      const out = [];
+      const walk = (node, parentName) => {
+        if (!node) return;
+        const gid = node.groupId;
+        if (gid !== undefined && gid !== null && String(gid) !== '0') {
+          out.push({
+            groupId: String(gid),
+            name: node.name,
+            type: node.type || null,
+            parentName: parentName || null,
+          });
+        }
+        for (const sub of node.subGroups || []) walk(sub, node.name);
+      };
+      walk(data?.groups, null);
+      return { groups: out };
+    } catch (error) {
+      console.error('Failed to fetch network groups:', error.message);
+      return { groups: [], error: error.message };
+    }
   }
 
   /**
@@ -149,10 +198,11 @@ class RuijieService {
     return data?.code === 3 || (data?.msg || '').toLowerCase().includes('login timeout');
   }
 
-  async getUserGroups(_retried = false) {
+  async getUserGroups(opts = {}, _retried = false) {
     try {
       const accessToken = await this.getAccessToken();
-      const url = new URL(this.buildUrl(`/intl/usergroup/list/${this.groupId}`));
+      const gid = opts.groupId || this.groupId;
+      const url = new URL(this.buildUrl(`/intl/usergroup/list/${gid}`));
       url.searchParams.append('access_token', accessToken);
       url.searchParams.append('pageIndex', '0');
       url.searchParams.append('pageSize', '100');
@@ -169,7 +219,7 @@ class RuijieService {
         if (this.isTokenExpired(data) && !_retried) {
           console.log('Ruijie token expired (Login timeout) in getUserGroups, refreshing...');
           this.invalidateToken();
-          return this.getUserGroups(true);
+          return this.getUserGroups(opts, true);
         }
         throw new Error(data?.msg || 'Get user groups failed');
       }
@@ -392,7 +442,7 @@ class RuijieService {
   async createVoucher(payload) {
     return this._tryCloudOperation('createVoucher', async () => {
       const accessToken = await this.getAccessToken();
-      const url = new URL(this.buildUrl(`/open/auth/voucher/create/${this.groupId}`));
+      const url = new URL(this.buildUrl(`/open/auth/voucher/create/${payload.groupId || this.groupId}`));
       url.searchParams.append('access_token', accessToken);
       if (process.env.RUIJIE_TENANT_ID) {
         url.searchParams.append('tenantId', process.env.RUIJIE_TENANT_ID);
@@ -436,14 +486,14 @@ class RuijieService {
   async createCustomVoucher(code, payload) {
     return this._tryCloudOperation('createCustomVoucher', async () => {
       const accessToken = await this.getAccessToken();
-      const url = new URL(this.buildUrl(`/open/auth/voucher/customerCreate/${this.groupId}/${code}`));
+      const url = new URL(this.buildUrl(`/open/auth/voucher/customerCreate/${payload.groupId || this.groupId}/${code}`));
       url.searchParams.append('access_token', accessToken);
       if (process.env.RUIJIE_TENANT_ID) {
         url.searchParams.append('tenantId', process.env.RUIJIE_TENANT_ID);
       }
 
       const body = {
-        groupId: String(this.groupId),
+        groupId: String(payload.groupId || this.groupId),
         profile: payload.profile,
         userGroupId: payload.userGroupId,
       };
@@ -467,7 +517,7 @@ class RuijieService {
   async updateVoucher(uuid, payload) {
     return this._tryCloudOperation('updateVoucher', async () => {
       const accessToken = await this.getAccessToken();
-      const url = new URL(this.buildUrl(`/open/auth/voucher/update/${this.groupId}`));
+      const url = new URL(this.buildUrl(`/open/auth/voucher/update/${payload.groupId || this.groupId}`));
       url.searchParams.append('access_token', accessToken);
       if (process.env.RUIJIE_TENANT_ID) {
         url.searchParams.append('tenantId', process.env.RUIJIE_TENANT_ID);
@@ -487,10 +537,10 @@ class RuijieService {
     });
   }
 
-  async deleteVouchers(uuids) {
+  async deleteVouchers(uuids, groupId) {
     return this._tryCloudOperation('deleteVouchers', async () => {
       const accessToken = await this.getAccessToken();
-      const url = new URL(this.buildUrl(`/open/auth/voucher/delete/${this.groupId}`));
+      const url = new URL(this.buildUrl(`/open/auth/voucher/delete/${groupId || this.groupId}`));
       url.searchParams.append('access_token', accessToken);
       if (process.env.RUIJIE_TENANT_ID) {
         url.searchParams.append('tenantId', process.env.RUIJIE_TENANT_ID);
@@ -510,10 +560,10 @@ class RuijieService {
     });
   }
 
-  async disableVoucher(uuid) {
+  async disableVoucher(uuid, groupId) {
     return this._tryCloudOperation('disableVoucher', async () => {
       const accessToken = await this.getAccessToken();
-      const url = new URL(this.buildUrl(`/open/auth/voucher/disable/${this.groupId}`));
+      const url = new URL(this.buildUrl(`/open/auth/voucher/disable/${groupId || this.groupId}`));
       url.searchParams.append('access_token', accessToken);
       if (process.env.RUIJIE_TENANT_ID) {
         url.searchParams.append('tenantId', process.env.RUIJIE_TENANT_ID);
@@ -533,10 +583,10 @@ class RuijieService {
     });
   }
 
-  async enableVoucher(uuid) {
+  async enableVoucher(uuid, groupId) {
     return this._tryCloudOperation('enableVoucher', async () => {
       const accessToken = await this.getAccessToken();
-      const url = new URL(this.buildUrl(`/open/auth/voucher/enable/${this.groupId}`));
+      const url = new URL(this.buildUrl(`/open/auth/voucher/enable/${groupId || this.groupId}`));
       url.searchParams.append('access_token', accessToken);
       if (process.env.RUIJIE_TENANT_ID) {
         url.searchParams.append('tenantId', process.env.RUIJIE_TENANT_ID);

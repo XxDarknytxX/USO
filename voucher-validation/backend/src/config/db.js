@@ -157,6 +157,25 @@ export async function getPool() {
     catch (e) { if (e.code !== 'ER_DUP_FIELDNAME' && e.code !== 'ER_DUP_KEYNAME') { /* ignore */ } }
   }
 
+  // Multi-site: tag each voucher with its Ruijie network group (the "site").
+  // Vouchers existed before this column, so add it + backfill to the env group.
+  const siteColumnMigrations = [
+    `ALTER TABLE vouchers ADD COLUMN group_id VARCHAR(100) NULL AFTER user_group_id`,
+    `ALTER TABLE vouchers ADD INDEX idx_group_id (group_id)`,
+    `ALTER TABLE vouchers_historical ADD COLUMN group_id VARCHAR(100) NULL AFTER user_group_id`,
+    `ALTER TABLE vouchers_historical ADD INDEX idx_group_id (group_id)`,
+  ];
+  for (const sql of siteColumnMigrations) {
+    try { await pool.query(sql); console.log(`Migration OK: ${sql.slice(0, 60)}...`); }
+    catch (e) { if (e.code !== 'ER_DUP_FIELDNAME' && e.code !== 'ER_DUP_KEYNAME' && !String(e.message).includes("doesn't exist")) { /* ignore */ } }
+  }
+  if (process.env.RUIJIE_GROUP_ID) {
+    try {
+      await pool.query(`UPDATE vouchers SET group_id = ? WHERE group_id IS NULL OR group_id = ''`, [process.env.RUIJIE_GROUP_ID]);
+      await pool.query(`UPDATE vouchers_historical SET group_id = ? WHERE group_id IS NULL OR group_id = ''`, [process.env.RUIJIE_GROUP_ID]);
+    } catch (e) { /* tables may not exist yet on a fresh DB */ }
+  }
+
   // Fix collation on existing tables if they were created with the wrong collation.
   // Must match the vouchers/schema.sql collation (utf8mb4_unicode_ci), otherwise
   // JOINs across the portal tables and vouchers fail with ER_CANT_AGGREGATE_2COLLATIONS.

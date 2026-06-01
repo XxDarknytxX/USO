@@ -40,6 +40,19 @@ export function makeNetworkController(pool) {
       }
     },
 
+    // GET /api/network/discover  (admin)
+    // Lists every Ruijie network group (project) so an admin can pick a
+    // village when adding a site, instead of typing the group ID by hand.
+    discoverGroups: async (_req, res) => {
+      try {
+        const { groups, error } = await ruijie.getNetworkGroups();
+        return send.ok(res, { groups: groups || [], error: error || null });
+      } catch (e) {
+        console.error(e);
+        return send.serverErr(res);
+      }
+    },
+
     // POST /api/network/projects  (admin)
     createProject: async (req, res) => {
       try {

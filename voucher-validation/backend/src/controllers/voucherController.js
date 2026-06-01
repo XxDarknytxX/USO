@@ -26,7 +26,9 @@ async function getVoucherByUuid(pool, uuid) {
   return rows[0] || null;
 }
 
-async function getVoucherStats(pool) {
+async function getVoucherStats(pool, groupId) {
+  const where = groupId ? 'WHERE group_id = ?' : '';
+  const params = groupId ? [groupId] : [];
   const [rows] = await pool.query(`
     SELECT
       package_name,
@@ -44,8 +46,28 @@ async function getVoucherStats(pool) {
       AVG(download_rate_limit) AS avg_download_limit,
       AVG(upload_rate_limit) AS avg_upload_limit
     FROM vouchers
+    ${where}
     GROUP BY package_name
     ORDER BY package_name
+  `, params);
+  return rows;
+}
+
+// Per-site rollup for the all-sites dashboard view.
+async function getStatsPerSite(pool) {
+  const [rows] = await pool.query(`
+    SELECT
+      group_id,
+      COUNT(*) AS total,
+      SUM(CASE WHEN status = '1' THEN 1 ELSE 0 END) AS unused,
+      SUM(CASE WHEN status = '2' THEN 1 ELSE 0 END) AS active,
+      SUM(CASE WHEN status = '3' THEN 1 ELSE 0 END) AS expired,
+      SUM(CASE WHEN status = '0' THEN 1 ELSE 0 END) AS inactive,
+      SUM(quota) AS total_quota_mb,
+      SUM(used_quota) AS total_used_quota_mb,
+      SUM(current_clients) AS currently_in_use
+    FROM vouchers
+    GROUP BY group_id
   `);
   return rows;
 }
@@ -64,11 +86,12 @@ async function getHistoricalStats(pool) {
   return rows;
 }
 
-async function getVoucherList(pool, { page = 1, limit = 10, status, packageName, userGroupId, includeHistorical = false }) {
+async function getVoucherList(pool, { page = 1, limit = 10, status, packageName, userGroupId, groupId, includeHistorical = false }) {
   const offset = (page - 1) * limit;
   const params = [];
   const where = [];
 
+  if (groupId) { where.push('v.group_id = ?'); params.push(groupId); }
   if (status) { where.push('v.status = ?'); params.push(status); }
   if (packageName) { where.push('v.package_name = ?'); params.push(packageName); }
   if (userGroupId) { where.push('v.user_group_id = ?'); params.push(userGroupId); }
@@ -89,35 +112,44 @@ async function getVoucherList(pool, { page = 1, limit = 10, status, packageName,
   return { vouchers: rows, total: countRow.total, page, limit, totalPages: Math.ceil(countRow.total / limit) };
 }
 
-async function archiveVouchersNotInCloud(pool, cloudVoucherUuids, syncId) {
+// Archive vouchers that are no longer in the cloud — SCOPED TO ONE SITE so a
+// per-site sync never archives another village's vouchers. groupId omitted
+// keeps legacy global behavior.
+async function archiveVouchersNotInCloud(pool, cloudVoucherUuids, syncId, groupId) {
   const insertCols = `original_voucher_id, uuid, tenant_id, voucher_code, name_ref, package_name,
     time_period, used_time, create_time, login_time, expiry_time, max_clients,
     current_clients, quota, used_quota, status, qrcode_url, download_rate_limit,
-    upload_rate_limit, bind_mac, user_group_id, user_group_name, first_name,
+    upload_rate_limit, bind_mac, user_group_id, user_group_name, group_id, first_name,
     last_name, email, phone, comment, disable_status, raw_data, last_synced,
     archived_reason, sync_log_id`;
   const selectCols = `id, uuid, tenant_id, voucher_code, name_ref, package_name,
     time_period, used_time, create_time, login_time, expiry_time, max_clients,
     current_clients, quota, used_quota, status, qrcode_url, download_rate_limit,
-    upload_rate_limit, bind_mac, user_group_id, user_group_name, first_name,
+    upload_rate_limit, bind_mac, user_group_id, user_group_name, group_id, first_name,
     last_name, email, phone, comment, disable_status, raw_data, last_synced,
     'removed_from_cloud', ?`;
 
+  const siteFilter = groupId ? 'group_id = ?' : '1=1';
+  const siteParam = groupId ? [groupId] : [];
+
   if (cloudVoucherUuids.length === 0) {
-    const [result] = await pool.query(`INSERT INTO vouchers_historical (${insertCols}) SELECT ${selectCols} FROM vouchers`, [syncId]);
+    const [result] = await pool.query(
+      `INSERT INTO vouchers_historical (${insertCols}) SELECT ${selectCols} FROM vouchers WHERE ${siteFilter}`,
+      [syncId, ...siteParam]
+    );
     const archivedCount = result.affectedRows;
-    await pool.query('DELETE FROM vouchers');
+    if (archivedCount > 0) await pool.query(`DELETE FROM vouchers WHERE ${siteFilter}`, siteParam);
     return archivedCount;
   }
 
   const placeholders = cloudVoucherUuids.map(() => '?').join(',');
   const [result] = await pool.query(
-    `INSERT INTO vouchers_historical (${insertCols}) SELECT ${selectCols} FROM vouchers WHERE uuid NOT IN (${placeholders})`,
-    [syncId, ...cloudVoucherUuids]
+    `INSERT INTO vouchers_historical (${insertCols}) SELECT ${selectCols} FROM vouchers WHERE ${siteFilter} AND uuid NOT IN (${placeholders})`,
+    [syncId, ...siteParam, ...cloudVoucherUuids]
   );
   const archivedCount = result.affectedRows;
   if (archivedCount > 0) {
-    await pool.query(`DELETE FROM vouchers WHERE uuid NOT IN (${placeholders})`, cloudVoucherUuids);
+    await pool.query(`DELETE FROM vouchers WHERE ${siteFilter} AND uuid NOT IN (${placeholders})`, [...siteParam, ...cloudVoucherUuids]);
   }
   return archivedCount;
 }
@@ -127,7 +159,7 @@ async function upsertVoucher(pool, voucherData) {
     uuid, tenant_id, voucher_code, name_ref, package_name, time_period, used_time,
     create_time, login_time, expiry_time, max_clients, current_clients, quota, used_quota,
     status, qrcode_url, download_rate_limit, upload_rate_limit, bind_mac,
-    user_group_id, user_group_name, first_name, last_name, email, phone, comment,
+    user_group_id, user_group_name, group_id, first_name, last_name, email, phone, comment,
     disable_status, raw_data,
   } = voucherData;
 
@@ -136,9 +168,9 @@ async function upsertVoucher(pool, voucherData) {
       uuid, tenant_id, voucher_code, name_ref, package_name, time_period, used_time,
       create_time, login_time, expiry_time, max_clients, current_clients, quota, used_quota,
       status, qrcode_url, download_rate_limit, upload_rate_limit, bind_mac,
-      user_group_id, user_group_name, first_name, last_name, email, phone, comment,
+      user_group_id, user_group_name, group_id, first_name, last_name, email, phone, comment,
       disable_status, raw_data
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON DUPLICATE KEY UPDATE
       tenant_id = VALUES(tenant_id), voucher_code = VALUES(voucher_code), name_ref = VALUES(name_ref),
       package_name = VALUES(package_name), time_period = VALUES(time_period), used_time = VALUES(used_time),
@@ -147,13 +179,14 @@ async function upsertVoucher(pool, voucherData) {
       used_quota = VALUES(used_quota), status = VALUES(status), qrcode_url = VALUES(qrcode_url),
       download_rate_limit = VALUES(download_rate_limit), upload_rate_limit = VALUES(upload_rate_limit),
       bind_mac = VALUES(bind_mac), user_group_id = VALUES(user_group_id), user_group_name = VALUES(user_group_name),
+      group_id = VALUES(group_id),
       first_name = VALUES(first_name), last_name = VALUES(last_name), email = VALUES(email),
       phone = VALUES(phone), comment = VALUES(comment), disable_status = VALUES(disable_status),
       raw_data = VALUES(raw_data), last_synced = CURRENT_TIMESTAMP`,
     [uuid, tenant_id, voucher_code, name_ref, package_name, time_period, used_time,
      create_time, login_time, expiry_time, max_clients, current_clients, quota, used_quota,
      status, qrcode_url, download_rate_limit, upload_rate_limit, bind_mac,
-     user_group_id, user_group_name, first_name, last_name, email, phone, comment,
+     user_group_id, user_group_name, group_id ?? null, first_name, last_name, email, phone, comment,
      disable_status, JSON.stringify(raw_data)]
   );
   return result;
@@ -197,10 +230,11 @@ function toTimestamp(val) {
   return null;
 }
 
-function transformVoucherData(externalVoucher) {
+function transformVoucherData(externalVoucher, groupId = null) {
   return {
     uuid: externalVoucher.uuid,
     tenant_id: externalVoucher.tenantId,
+    group_id: groupId,
     voucher_code: externalVoucher.voucherCode ?? externalVoucher.codeNo ?? null,
     name_ref: externalVoucher.nameRef ?? null,
     package_name: externalVoucher.packageName ?? externalVoucher.userGroupName ?? '',
@@ -243,21 +277,24 @@ export function makeVoucherController(pool) {
   const ruijieService = new RuijieService();
 
   return {
-    getStats: async (_req, res) => {
+    getStats: async (req, res) => {
       try {
-        const [stats, historicalStats] = await Promise.all([getVoucherStats(pool), getHistoricalStats(pool)]);
+        const groupId = req.query.groupId || null;
+        const [stats, historicalStats] = await Promise.all([getVoucherStats(pool, groupId), getHistoricalStats(pool)]);
         const totalVouchers = stats.reduce((sum, item) => sum + Number(item.total || 0), 0);
         const totalHistorical = historicalStats.reduce((sum, item) => sum + Number(item.total_historical || 0), 0);
-        return send.ok(res, { packageStats: stats, historicalStats, totalVouchers, totalHistorical, lastSync: await getLastSyncTime(pool) });
+        // When no site is selected, include a per-site rollup for the all-sites dashboard.
+        const perSite = groupId ? undefined : await getStatsPerSite(pool);
+        return send.ok(res, { packageStats: stats, historicalStats, perSite, totalVouchers, totalHistorical, lastSync: await getLastSyncTime(pool) });
       } catch (e) { console.error(e); return send.serverErr(res); }
     },
 
     getVouchers: async (req, res) => {
       try {
-        const { page, limit, status, packageName, userGroupId, includeHistorical } = req.query;
+        const { page, limit, status, packageName, userGroupId, includeHistorical, groupId } = req.query;
         const result = await getVoucherList(pool, {
           page: parseInt(page) || 1, limit: parseInt(limit) || 10,
-          status, packageName, userGroupId, includeHistorical: includeHistorical === 'true'
+          status, packageName, userGroupId, groupId, includeHistorical: includeHistorical === 'true'
         });
         return send.ok(res, result);
       } catch (e) { console.error(e); return send.serverErr(res); }
@@ -283,19 +320,22 @@ export function makeVoucherController(pool) {
 
     searchVouchers: async (req, res) => {
       try {
-        const { q, page, limit } = req.query;
+        const { q, page, limit, groupId } = req.query;
         if (!q || q.trim().length < 2) return send.bad(res, 'Search query must be at least 2 characters');
         const pg = parseInt(page) || 1;
         const lim = parseInt(limit) || 20;
         const offset = (pg - 1) * lim;
         const like = `%${q.trim()}%`;
-        const searchFields = 'voucher_code LIKE ? OR first_name LIKE ? OR last_name LIKE ? OR email LIKE ? OR phone LIKE ? OR comment LIKE ? OR name_ref LIKE ? OR package_name LIKE ?';
+        // Parenthesized so the optional site filter ANDs correctly with the OR group.
+        const searchFields = '(voucher_code LIKE ? OR first_name LIKE ? OR last_name LIKE ? OR email LIKE ? OR phone LIKE ? OR comment LIKE ? OR name_ref LIKE ? OR package_name LIKE ?)';
         const searchParams = Array(8).fill(like);
+        const where = groupId ? `${searchFields} AND group_id = ?` : searchFields;
+        const whereParams = groupId ? [...searchParams, groupId] : searchParams;
 
-        const [[countRow]] = await pool.query(`SELECT COUNT(*) AS total FROM vouchers WHERE ${searchFields}`, searchParams);
+        const [[countRow]] = await pool.query(`SELECT COUNT(*) AS total FROM vouchers WHERE ${where}`, whereParams);
         const [rows] = await pool.query(
-          `SELECT * FROM vouchers WHERE ${searchFields} ORDER BY created_at DESC LIMIT ? OFFSET ?`,
-          [...searchParams, lim, offset]
+          `SELECT * FROM vouchers WHERE ${where} ORDER BY created_at DESC LIMIT ? OFFSET ?`,
+          [...whereParams, lim, offset]
         );
         return send.ok(res, { vouchers: rows, total: countRow.total, page: pg, limit: lim, totalPages: Math.ceil(countRow.total / lim) });
       } catch (e) { console.error(e); return send.serverErr(res); }
@@ -352,24 +392,28 @@ export function makeVoucherController(pool) {
       } catch (e) { console.error(e); return send.serverErr(res); }
     },
 
-    getUserGroups: async (_req, res) => {
+    getUserGroups: async (req, res) => {
       try {
-        // Primary source: distinct user groups already synced into local DB
+        const groupId = req.query.groupId || null;
+        // Primary source: distinct user groups already synced into local DB (per-site if given)
+        const dbWhere = groupId
+          ? "user_group_id IS NOT NULL AND user_group_id != '' AND group_id = ?"
+          : "user_group_id IS NOT NULL AND user_group_id != ''";
         const [dbGroups] = await pool.query(`
           SELECT DISTINCT user_group_id, user_group_name,
             AVG(time_period) AS avg_time_period,
             COUNT(*) AS voucher_count
           FROM vouchers
-          WHERE user_group_id IS NOT NULL AND user_group_id != ''
+          WHERE ${dbWhere}
           GROUP BY user_group_id, user_group_name
           ORDER BY user_group_name
-        `);
+        `, groupId ? [groupId] : []);
 
         // Also try Ruijie API for richer data (e.g. authprofileid / profile UUID)
         let cloudGroups = [];
         let cloudSync = false;
         try {
-          const result = await ruijieService.getUserGroups();
+          const result = await ruijieService.getUserGroups({ groupId });
           cloudGroups = result.data || [];
           cloudSync = result.cloudSync ?? false;
         } catch (_) { /* cloud unavailable, use DB only */ }
@@ -428,6 +472,8 @@ export function makeVoucherController(pool) {
         const body = req.body;
         // Fallback: if no profile UUID provided, use user_group_id
         const profile = body.profile || body.user_group_id;
+        // The site (Ruijie groupId) these vouchers belong to. Defaults to env group.
+        const groupId = body.groupId || body.group_id || null;
 
         // Ruijie API 2.3.1: requires quantity, profile (UUID), userGroupId
         // Optionally 2.3.2: custom code via customerCreate endpoint
@@ -436,6 +482,7 @@ export function makeVoucherController(pool) {
           cloudResult = await ruijieService.createCustomVoucher(body.custom_code, {
             profile,
             userGroupId: body.user_group_id,
+            groupId,
           });
         } else {
           cloudResult = await ruijieService.createVoucher({
@@ -447,6 +494,7 @@ export function makeVoucherController(pool) {
             email: body.email,
             phone: body.phone,
             comment: body.comment,
+            groupId,
           });
         }
 
@@ -457,7 +505,7 @@ export function makeVoucherController(pool) {
         if (cloudList.length > 0) {
           for (const cv of cloudList) {
             // Do a lightweight insert with the sparse data we got from the create response
-            const voucherData = transformVoucherData(cv);
+            const voucherData = transformVoucherData(cv, groupId);
             await upsertVoucher(pool, voucherData);
             await logLifecycleEvent(pool, { voucherUuid: voucherData.uuid, eventType: 'created', newStatus: voucherData.status, notes: 'Created via cloud API', userId: req.user.id });
             createdUuids.push(voucherData.uuid);
@@ -470,12 +518,12 @@ export function makeVoucherController(pool) {
           try {
             // Small delay to let the cloud settle the new records
             await new Promise(r => setTimeout(r, 500));
-            const allCloudVouchers = await ruijieService.getAllVouchers();
+            const allCloudVouchers = await ruijieService.getAllVouchers({ groupId });
             const createdSet = new Set(createdUuids);
             let enrichedCount = 0;
             for (const externalVoucher of allCloudVouchers) {
               if (createdSet.has(externalVoucher.uuid)) {
-                const fullData = transformVoucherData(externalVoucher);
+                const fullData = transformVoucherData(externalVoucher, groupId);
                 await upsertVoucher(pool, fullData);
                 enrichedCount++;
               }
@@ -512,6 +560,7 @@ export function makeVoucherController(pool) {
               bind_mac: 0,
               user_group_id: body.user_group_id || null,
               user_group_name: body.user_group_name || null,
+              group_id: groupId,
               first_name: body.first_name || null,
               last_name: body.last_name || null,
               email: body.email || null,
@@ -562,7 +611,7 @@ export function makeVoucherController(pool) {
 
         if (setClauses.length === 0) return send.ok(res, { success: true, message: 'No changes detected' });
 
-        const cloudResult = await ruijieService.updateVoucher(uuid, body);
+        const cloudResult = await ruijieService.updateVoucher(uuid, { ...body, groupId: existing.group_id });
 
         setClauses.push('last_synced = CURRENT_TIMESTAMP');
         await pool.query(`UPDATE vouchers SET ${setClauses.join(', ')} WHERE uuid = ?`, [...setValues, uuid]);
@@ -586,16 +635,16 @@ export function makeVoucherController(pool) {
         const existing = await getVoucherByUuid(pool, uuid);
         if (!existing) return send.notFound(res, 'Voucher not found');
 
-        const cloudResult = await ruijieService.deleteVouchers([uuid]);
+        const cloudResult = await ruijieService.deleteVouchers([uuid], existing.group_id);
 
         await pool.query(
           `INSERT INTO vouchers_historical (original_voucher_id, uuid, tenant_id, voucher_code, name_ref, package_name,
             time_period, used_time, create_time, login_time, expiry_time, max_clients, current_clients, quota, used_quota,
-            status, qrcode_url, download_rate_limit, upload_rate_limit, bind_mac, user_group_id, user_group_name,
+            status, qrcode_url, download_rate_limit, upload_rate_limit, bind_mac, user_group_id, user_group_name, group_id,
             first_name, last_name, email, phone, comment, disable_status, raw_data, last_synced, archived_reason)
            SELECT id, uuid, tenant_id, voucher_code, name_ref, package_name,
             time_period, used_time, create_time, login_time, expiry_time, max_clients, current_clients, quota, used_quota,
-            status, qrcode_url, download_rate_limit, upload_rate_limit, bind_mac, user_group_id, user_group_name,
+            status, qrcode_url, download_rate_limit, upload_rate_limit, bind_mac, user_group_id, user_group_name, group_id,
             first_name, last_name, email, phone, comment, disable_status, raw_data, last_synced, 'manually_deleted'
            FROM vouchers WHERE uuid = ?`,
           [uuid]
@@ -617,11 +666,11 @@ export function makeVoucherController(pool) {
         let cloudResult;
 
         if (isDisabled) {
-          cloudResult = await ruijieService.enableVoucher(uuid);
+          cloudResult = await ruijieService.enableVoucher(uuid, existing.group_id);
           await pool.query('UPDATE vouchers SET disable_status = 0, last_synced = CURRENT_TIMESTAMP WHERE uuid = ?', [uuid]);
           await logLifecycleEvent(pool, { voucherUuid: uuid, eventType: 'enabled', oldStatus: existing.status, notes: 'Voucher enabled', userId: req.user.id });
         } else {
-          cloudResult = await ruijieService.disableVoucher(uuid);
+          cloudResult = await ruijieService.disableVoucher(uuid, existing.group_id);
           await pool.query('UPDATE vouchers SET disable_status = 1, last_synced = CURRENT_TIMESTAMP WHERE uuid = ?', [uuid]);
           await logLifecycleEvent(pool, { voucherUuid: uuid, eventType: 'disabled', oldStatus: existing.status, notes: 'Voucher disabled', userId: req.user.id });
         }
@@ -644,24 +693,24 @@ export function makeVoucherController(pool) {
             if (!voucher) { results.failed++; results.errors.push(`${uuid}: not found`); continue; }
 
             if (action === 'delete') {
-              await ruijieService.deleteVouchers([uuid]);
+              await ruijieService.deleteVouchers([uuid], voucher.group_id);
               await pool.query(
                 `INSERT INTO vouchers_historical (original_voucher_id, uuid, tenant_id, voucher_code, name_ref, package_name,
                   time_period, used_time, create_time, login_time, expiry_time, max_clients, current_clients, quota, used_quota,
-                  status, qrcode_url, download_rate_limit, upload_rate_limit, bind_mac, user_group_id, user_group_name,
+                  status, qrcode_url, download_rate_limit, upload_rate_limit, bind_mac, user_group_id, user_group_name, group_id,
                   first_name, last_name, email, phone, comment, disable_status, raw_data, last_synced, archived_reason)
                  SELECT id, uuid, tenant_id, voucher_code, name_ref, package_name,
                   time_period, used_time, create_time, login_time, expiry_time, max_clients, current_clients, quota, used_quota,
-                  status, qrcode_url, download_rate_limit, upload_rate_limit, bind_mac, user_group_id, user_group_name,
+                  status, qrcode_url, download_rate_limit, upload_rate_limit, bind_mac, user_group_id, user_group_name, group_id,
                   first_name, last_name, email, phone, comment, disable_status, raw_data, last_synced, 'bulk_deleted'
                  FROM vouchers WHERE uuid = ?`, [uuid]
               );
               await pool.query('DELETE FROM vouchers WHERE uuid = ?', [uuid]);
             } else if (action === 'disable') {
-              await ruijieService.disableVoucher(uuid);
+              await ruijieService.disableVoucher(uuid, voucher.group_id);
               await pool.query('UPDATE vouchers SET disable_status = 1 WHERE uuid = ?', [uuid]);
             } else if (action === 'enable') {
-              await ruijieService.enableVoucher(uuid);
+              await ruijieService.enableVoucher(uuid, voucher.group_id);
               await pool.query('UPDATE vouchers SET disable_status = 0 WHERE uuid = ?', [uuid]);
             }
 
@@ -677,31 +726,63 @@ export function makeVoucherController(pool) {
       } catch (e) { console.error(e); return send.serverErr(res, e.message); }
     },
 
+    // Syncs EVERY active site (one Ruijie groupId per village), tagging each
+    // voucher with its site's group_id and archiving per-site. Falls back to
+    // the env group as a single implicit site when no sites are configured.
     syncVouchers: async (req, res) => {
       const syncId = await createSyncLog(pool, req.user.id);
       try {
-        const externalVouchers = await ruijieService.getAllVouchers();
-        const cloudVoucherUuids = externalVouchers.map(v => v.uuid);
-        const archivedCount = await archiveVouchersNotInCloud(pool, cloudVoucherUuids, syncId);
+        let sites = [];
+        try {
+          const [rows] = await pool.query(
+            `SELECT name, ruijie_group_id AS group_id, ruijie_tenant_id AS tenant_id
+             FROM network_projects
+             WHERE is_active = 1 AND ruijie_group_id IS NOT NULL AND ruijie_group_id != ''
+             ORDER BY sort_order, name`
+          );
+          sites = rows;
+        } catch { /* table may not exist yet */ }
+        if (sites.length === 0) {
+          sites = [{ name: 'Default', group_id: process.env.RUIJIE_GROUP_ID, tenant_id: process.env.RUIJIE_TENANT_ID }];
+        }
 
-        let processedCount = 0, newCount = 0, updatedCount = 0;
-        for (const externalVoucher of externalVouchers) {
+        let totalFetched = 0, processedCount = 0, newCount = 0, updatedCount = 0, archivedCount = 0;
+        const siteResults = [];
+
+        for (const site of sites) {
+          const gid = site.group_id;
+          if (!gid) continue;
           try {
-            const voucherData = transformVoucherData(externalVoucher);
-            const result = await upsertVoucher(pool, voucherData);
-            processedCount++;
-            if (result.affectedRows === 1) newCount++;
-            else if (result.affectedRows === 2) updatedCount++;
-          } catch (error) { console.error('Error processing voucher:', error); }
+            const externalVouchers = await ruijieService.getAllVouchers({ groupId: gid, tenantId: site.tenant_id });
+            const cloudUuids = externalVouchers.map(v => v.uuid);
+            const arch = await archiveVouchersNotInCloud(pool, cloudUuids, syncId, gid);
+
+            let proc = 0, nw = 0, upd = 0;
+            for (const ev of externalVouchers) {
+              try {
+                const result = await upsertVoucher(pool, transformVoucherData(ev, gid));
+                proc++;
+                if (result.affectedRows === 1) nw++;
+                else if (result.affectedRows === 2) upd++;
+              } catch (error) { console.error('Error processing voucher:', error); }
+            }
+
+            totalFetched += externalVouchers.length;
+            processedCount += proc; newCount += nw; updatedCount += upd; archivedCount += arch;
+            siteResults.push({ site: site.name, groupId: gid, fetched: externalVouchers.length, processed: proc, new: nw, updated: upd, archived: arch });
+          } catch (e) {
+            console.error(`Sync failed for site "${site.name}" (${gid}):`, e.message);
+            siteResults.push({ site: site.name, groupId: gid, error: e.message });
+          }
         }
 
         await updateSyncLog(pool, syncId, {
-          sync_completed_at: new Date(), total_fetched: externalVouchers.length,
+          sync_completed_at: new Date(), total_fetched: totalFetched,
           total_processed: processedCount, total_new: newCount, total_updated: updatedCount,
           total_archived: archivedCount, status: 'completed',
         });
 
-        return send.ok(res, { success: true, totalFetched: externalVouchers.length, totalProcessed: processedCount, newVouchers: newCount, updatedVouchers: updatedCount, archivedVouchers: archivedCount, syncId });
+        return send.ok(res, { success: true, sites: siteResults, totalFetched, totalProcessed: processedCount, newVouchers: newCount, updatedVouchers: updatedCount, archivedVouchers: archivedCount, syncId });
       } catch (error) {
         console.error('Sync failed:', error);
         await updateSyncLog(pool, syncId, { sync_completed_at: new Date(), status: 'failed', error_message: error.message });
