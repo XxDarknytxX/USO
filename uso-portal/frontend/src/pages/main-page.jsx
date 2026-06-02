@@ -26,6 +26,7 @@ export default function MainPage() {
   const [notification, setNotification] = useState(null);
   const [sessionId, setSessionId] = useState(null);
   const [handledPayment, setHandledPayment] = useState(false);
+  const [redirectUrl, setRedirectUrl] = useState(null);
 
   const timersRef = useRef([]);
   const track = (id) => { timersRef.current.push(id); return id; };
@@ -128,7 +129,20 @@ export default function MainPage() {
     const p = await res.json();
     if (!res.ok) throw new Error(p?.error || 'Failed to start payment');
     if (!p.paymentUrl) throw new Error('No payment URL');
-    window.location.href = p.paymentUrl;
+
+    // Hand off to M-PAiSA. On iOS — especially inside the WiFi captive
+    // pop-up (Captive Network Assistant) — a redirect issued AFTER an `await`
+    // is no longer tied to the original tap, so the browser blocks it and the
+    // screen just freezes. We show a hand-off screen whose main button is a
+    // real <a> link (a direct user gesture iOS allows). Desktop/Android, which
+    // don't enforce this, navigate automatically.
+    setRedirectUrl(p.paymentUrl);
+    const ua = navigator.userAgent || '';
+    const isAppleMobile = /iPad|iPhone|iPod/.test(ua)
+      || (/Macintosh/.test(ua) && navigator.maxTouchPoints > 1);
+    if (!isAppleMobile) {
+      setTimeout(() => { try { window.location.assign(p.paymentUrl); } catch { /* manual link */ } }, 60);
+    }
   };
 
   const showSuccess = (m) => { setNotification({ type: 'ok', message: m }); track(setTimeout(dismiss, 5000)); };
@@ -223,6 +237,8 @@ export default function MainPage() {
       )}
 
       {notification && <Toast type={notification.type} message={notification.message} exit={notification.exit} />}
+
+      {redirectUrl && <PaymentHandoff url={redirectUrl} onCancel={() => setRedirectUrl(null)} />}
     </div>
   );
 }
@@ -440,6 +456,29 @@ function ModalPlanCard({ plan, popular, onBuy, onError }) {
         ) : (
           <>Get this plan <FaArrowRight className="text-[10px] transition-transform duration-200 group-hover:translate-x-0.5" /></>
         )}
+      </button>
+    </div>
+  );
+}
+
+/* ── Full-screen hand-off to M-PAiSA (reliable inside iOS captive browsers) ── */
+function PaymentHandoff({ url, onCancel }) {
+  return (
+    <div className="fixed inset-0 z-[100] flex flex-col items-center justify-center px-6 text-center bg-page/95 backdrop-blur-md animate-fade-in">
+      <div className="w-12 h-12 border-[3px] border-white/15 border-t-vf rounded-full animate-spin mb-7" />
+      <h2 className="text-ink text-[20px] font-bold mb-2 tracking-tight">Opening secure payment…</h2>
+      <p className="text-ink-4 text-[13.5px] leading-relaxed max-w-xs mb-7">
+        You&apos;re being taken to M-PAiSA to finish your purchase. If this screen doesn&apos;t move, tap below to continue.
+      </p>
+      <a
+        href={url}
+        rel="external"
+        className="inline-flex items-center justify-center gap-2 rounded-xl bg-vf hover:bg-vf-hover text-white text-sm font-semibold px-8 py-3.5 shadow-lg shadow-vf/25 active:scale-[0.98] transition-all"
+      >
+        Continue to M-PAiSA <FaArrowRight className="text-[10px]" />
+      </a>
+      <button onClick={onCancel} className="mt-5 text-ink-5 text-[13px] hover:text-ink-3 transition-colors">
+        Cancel
       </button>
     </div>
   );
