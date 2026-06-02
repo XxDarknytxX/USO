@@ -141,17 +141,17 @@ export default function MainPage() {
       <div className="pointer-events-none absolute -top-44 left-1/2 -translate-x-1/2 w-[760px] h-[520px] rounded-full blur-[150px] opacity-45"
         style={{ background: 'radial-gradient(circle, rgba(230,0,0,0.28), transparent 70%)' }} />
 
-      <main className="relative flex-1 w-full max-w-6xl mx-auto px-5 sm:px-8 pt-12 sm:pt-16 pb-12">
+      <main className="relative flex-1 w-full max-w-7xl mx-auto px-5 sm:px-8 pt-12 sm:pt-16 pb-12">
         {/* Logo */}
         <div className="flex justify-center mb-9 sm:mb-11 animate-enter">
           <img
             src="/images/logo.png"
             alt="Vodafone"
-            className="h-9 sm:h-10 w-auto"
+            className="h-14 sm:h-[68px] w-auto"
             onError={(e) => { e.target.style.display = 'none'; e.target.nextElementSibling.style.display = 'flex'; }}
           />
-          <div className="hidden items-center gap-2 text-vf font-extrabold text-2xl">
-            <FaWifi className="text-xl" /> vodafone
+          <div className="hidden items-center gap-2.5 text-vf font-extrabold text-3xl sm:text-4xl">
+            <FaWifi className="text-2xl sm:text-3xl" /> vodafone
           </div>
         </div>
 
@@ -166,16 +166,16 @@ export default function MainPage() {
 
         {/* Category cards */}
         {plansLoading ? (
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-5 sm:gap-6 max-w-5xl mx-auto">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-6 sm:gap-8 max-w-6xl mx-auto">
             {Array.from({ length: 3 }).map((_, i) => (
-              <div key={i} className="h-[420px] rounded-2xl bg-white/[0.03] border border-edge animate-pulse" />
+              <div key={i} className="h-[480px] rounded-3xl bg-white/[0.03] border border-edge animate-pulse" />
             ))}
           </div>
         ) : categories.length > 0 ? (
-          <div className={`grid gap-5 sm:gap-6 items-stretch mx-auto
-            ${categories.length >= 3 ? 'grid-cols-1 sm:grid-cols-3 max-w-5xl'
-              : categories.length === 2 ? 'grid-cols-1 sm:grid-cols-2 max-w-3xl'
-              : 'grid-cols-1 max-w-sm'}`}>
+          <div className={`grid gap-6 sm:gap-8 items-stretch mx-auto
+            ${categories.length >= 3 ? 'grid-cols-1 sm:grid-cols-3 max-w-6xl'
+              : categories.length === 2 ? 'grid-cols-1 sm:grid-cols-2 max-w-4xl'
+              : 'grid-cols-1 max-w-md'}`}>
             {categories.map((cat, i) => (
               <CategoryCard
                 key={cat.id}
@@ -230,43 +230,43 @@ export default function MainPage() {
 /* ── Category card (elegant, glass for the featured one) ── */
 function CategoryCard({ cat, featured, index = 0, onOpen }) {
   return (
-    <div className="relative pt-3">
+    <div className={`relative pt-3 ${featured ? 'sm:-my-6 sm:z-10' : ''}`}>
       {featured && (
-        <div className="absolute top-0 left-1/2 -translate-x-1/2 -translate-y-1/2 z-10 w-10 h-10 rounded-full bg-vf flex items-center justify-center shadow-[0_10px_26px_-6px_rgba(230,0,0,0.65)] ring-[5px] ring-page">
-          <FaStar className="text-white text-[14px]" />
+        <div className="absolute top-0 left-1/2 -translate-x-1/2 -translate-y-1/2 z-10 w-11 h-11 rounded-full bg-vf flex items-center justify-center shadow-[0_12px_30px_-6px_rgba(230,0,0,0.7)] ring-[6px] ring-page">
+          <FaStar className="text-white text-[15px]" />
         </div>
       )}
       <button
         onClick={onOpen}
-        className={`group w-full h-full text-left rounded-2xl p-7 sm:p-8 flex flex-col animate-enter transition-all duration-300
+        className={`group w-full h-full text-left rounded-3xl p-8 sm:p-10 flex flex-col animate-enter transition-all duration-300
           ${featured
-            ? 'bg-white/[0.07] backdrop-blur-md border border-white/15 shadow-[0_30px_70px_-26px_rgba(0,0,0,0.75)]'
+            ? 'bg-white/[0.07] backdrop-blur-md border border-white/15 shadow-[0_36px_90px_-30px_rgba(0,0,0,0.85)]'
             : 'bg-white/[0.02] border border-edge hover:bg-white/[0.045] hover:border-edge-hover'}`}
         style={{ animationDelay: `${index * 90}ms` }}
       >
-        <h2 className="text-[22px] sm:text-[25px] font-bold text-ink mb-1.5 capitalize tracking-tight">{cat.name}</h2>
-        <p className="text-ink-4 text-[13.5px] leading-relaxed mb-7">{cat.desc}</p>
+        <h2 className="text-[25px] sm:text-[29px] font-bold text-ink mb-2 capitalize tracking-tight">{cat.name}</h2>
+        <p className="text-ink-4 text-[14px] leading-relaxed mb-8 sm:min-h-[44px]">{cat.desc}</p>
 
         {/* From price */}
-        <div className="flex items-baseline gap-1.5 mb-7">
+        <div className="flex items-baseline gap-1.5 mb-8">
           <span className="text-ink-4 text-[12.5px] mr-0.5">from</span>
-          <span className="text-[38px] sm:text-[42px] font-extrabold text-vf leading-none tracking-tight">{cat.fromPrice}</span>
-          <span className="text-ink-4 text-[13px]">/ {cat.period}</span>
+          <span className="text-[46px] sm:text-[52px] font-extrabold text-vf leading-none tracking-tight">{cat.fromPrice}</span>
+          <span className="text-ink-4 text-[14px]">/ {cat.period}</span>
         </div>
 
         {/* What you get */}
-        <div className="text-[11.5px] font-bold uppercase tracking-[0.12em] text-ink-3 mb-3.5">What you get</div>
-        <ul className="space-y-3 mb-8 flex-1">
+        <div className="text-[11.5px] font-bold uppercase tracking-[0.12em] text-ink-3 mb-4">What you get</div>
+        <ul className="space-y-3.5 mb-9 flex-1">
           {cat.points.map((p, i) => (
-            <li key={i} className="flex items-start gap-2.5 text-[13.5px] text-ink-2">
-              <FaCheck className="text-vf text-[10px] mt-[3px] shrink-0" />
+            <li key={i} className="flex items-start gap-3 text-[14px] text-ink-2">
+              <FaCheck className="text-vf text-[11px] mt-[3px] shrink-0" />
               <span className="leading-snug">{p}</span>
             </li>
           ))}
         </ul>
 
         {/* CTA */}
-        <span className={`w-full inline-flex items-center justify-center gap-2 rounded-xl py-3.5 text-sm font-semibold transition-all duration-200
+        <span className={`w-full inline-flex items-center justify-center gap-2 rounded-xl py-4 text-[15px] font-semibold transition-all duration-200
           ${featured
             ? 'bg-vf text-white group-hover:bg-vf-hover shadow-lg shadow-vf/25'
             : 'bg-white/[0.05] text-ink border border-edge group-hover:bg-white/[0.1] group-hover:border-edge-hover'}`}>

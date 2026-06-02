@@ -86,10 +86,12 @@ html {
 body {
   margin: 0;
   background-color: var(--color-page);
-  /* Subtle ambient: a soft red glow from the top that fades out fast —
-     refined instead of a heavy dark-red band. */
+  /* Reddish-black gradient: a warm maroon top that fades into near-black at
+     the bottom, lifted by a soft red glow up top and a faint ember below. */
   background-image:
-    radial-gradient(120% 70% at 50% -15%, rgba(230, 0, 0, 0.16) 0%, rgba(120, 0, 0, 0.05) 32%, transparent 60%);
+    radial-gradient(125% 78% at 50% -12%, rgba(230, 0, 0, 0.30) 0%, rgba(150, 0, 0, 0.12) 30%, transparent 62%),
+    radial-gradient(120% 95% at 50% 120%, rgba(95, 0, 0, 0.18) 0%, transparent 55%),
+    linear-gradient(178deg, #1a070b 0%, #100407 50%, #0a0305 100%);
   background-attachment: fixed;
   background-repeat: no-repeat;
   color: var(--color-ink);
@@ -114,8 +116,9 @@ body {
     inset: 0;
     z-index: -1;
     background:
-      radial-gradient(120% 70% at 50% -15%, rgba(230, 0, 0, 0.16) 0%, rgba(120, 0, 0, 0.05) 32%, transparent 60%),
-      var(--color-page);
+      radial-gradient(125% 78% at 50% -12%, rgba(230, 0, 0, 0.30) 0%, rgba(150, 0, 0, 0.12) 30%, transparent 62%),
+      radial-gradient(120% 95% at 50% 120%, rgba(95, 0, 0, 0.18) 0%, transparent 55%),
+      linear-gradient(178deg, #1a070b 0%, #100407 50%, #0a0305 100%);
   }
 }
 
