@@ -186,8 +186,11 @@ const initiatePayment = async (req, res) => {
 
   let selectedPlan;
   try {
-    // Scope to the site the customer is on (site1/site2 → that site's plans).
-    const allPlans = await vvClient.fetchPlans(req.headers.host);
+    // Resolve the selected plan by its globally-unique plan_key across ALL plans
+    // (NOT host-scoped). The voucher claim still routes to the right site via the
+    // plan's userGroupId; host-scoping a by-id lookup only adds a way for a valid
+    // purchase to 404 if the host→group mapping isn't aligned in the data.
+    const allPlans = await vvClient.fetchPlans();
     selectedPlan = allPlans.find(p => p.id === planId);
   } catch (err) {
     log('XXXX Failed to fetch plans from Voucher Validation:', err.message);
