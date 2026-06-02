@@ -78,7 +78,7 @@ sudo nginx -t && sudo systemctl reload nginx
 ```bash
 cd /var/www/uso-portal && git pull
 bash deploy/deploy-app.sh vv && bash deploy/deploy-app.sh uso
-pm2 restart uso-backend vv-backend
+pm2 restart uso-portal voucher-validation   # (the deploy script already reloads them)
 ```
 
 ### A6. Verify
