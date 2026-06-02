@@ -461,14 +461,22 @@ function ModalPlanCard({ plan, popular, onBuy, onError }) {
   );
 }
 
-/* ── Full-screen hand-off to M-PAiSA (reliable inside iOS captive browsers) ── */
+/* ── Full-screen hand-off to M-PAiSA ── */
 function PaymentHandoff({ url, onCancel }) {
+  const [slow, setSlow] = useState(false);
+  useEffect(() => {
+    const t = setTimeout(() => setSlow(true), 5000);
+    return () => clearTimeout(t);
+  }, []);
+  let host = '';
+  try { host = new URL(url).host; } catch { /* ignore */ }
+
   return (
     <div className="fixed inset-0 z-[100] flex flex-col items-center justify-center px-6 text-center bg-page/95 backdrop-blur-md animate-fade-in">
       <div className="w-12 h-12 border-[3px] border-white/15 border-t-vf rounded-full animate-spin mb-7" />
       <h2 className="text-ink text-[20px] font-bold mb-2 tracking-tight">Opening secure payment…</h2>
-      <p className="text-ink-4 text-[13.5px] leading-relaxed max-w-xs mb-7">
-        You&apos;re being taken to M-PAiSA to finish your purchase. If this screen doesn&apos;t move, tap below to continue.
+      <p className="text-ink-4 text-[13.5px] leading-relaxed max-w-xs mb-6">
+        Tap below to continue to M-PAiSA and complete your purchase.
       </p>
       <a
         href={url}
@@ -477,6 +485,13 @@ function PaymentHandoff({ url, onCancel }) {
       >
         Continue to M-PAiSA <FaArrowRight className="text-[10px]" />
       </a>
+      {slow && (
+        <p className="mt-6 text-ink-5 text-[12px] leading-relaxed max-w-[17rem]">
+          Still not opening? Your device may not be able to reach{' '}
+          <span className="text-ink-3 break-all">{host || 'the payment site'}</span>{' '}
+          on this WiFi yet. Try again, or open the portal in your phone&apos;s main browser.
+        </p>
+      )}
       <button onClick={onCancel} className="mt-5 text-ink-5 text-[13px] hover:text-ink-3 transition-colors">
         Cancel
       </button>
