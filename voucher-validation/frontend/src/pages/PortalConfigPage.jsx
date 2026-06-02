@@ -8,6 +8,7 @@
 import { useEffect, useState, useCallback } from "react";
 import { portalConfigApi, voucherApi } from "../services/api";
 import { useAuth } from "../hooks/useAuth";
+import { useSite } from "../hooks/useSite";
 import toast from "react-hot-toast";
 import {
   Globe,
@@ -93,6 +94,7 @@ const EMPTY_FORM = {
 // ---------------------------------------------------------------------------
 export default function PortalConfigPage() {
   const { isAdmin } = useAuth();
+  const { activeGroupId } = useSite();
 
   const [plans, setPlans] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -109,6 +111,7 @@ export default function PortalConfigPage() {
     try {
       const params = {};
       if (categoryFilter) params.category = categoryFilter;
+      if (activeGroupId) params.groupId = activeGroupId;
       const data = await portalConfigApi.list(params);
       setPlans(data.plans || []);
     } catch (err) {
@@ -116,18 +119,19 @@ export default function PortalConfigPage() {
     } finally {
       setLoading(false);
     }
-  }, [categoryFilter]);
+  }, [categoryFilter, activeGroupId]);
 
   useEffect(() => {
     fetchPlans();
   }, [fetchPlans]);
 
   useEffect(() => {
+    const params = activeGroupId ? { groupId: activeGroupId } : {};
     voucherApi
-      .userGroups()
+      .userGroups(params)
       .then((data) => setUserGroups(data.userGroups || []))
       .catch(() => {});
-  }, []);
+  }, [activeGroupId]);
 
   const handleCreate = () => {
     setEditingPlan(null);
@@ -180,7 +184,7 @@ export default function PortalConfigPage() {
         );
         toast.success("Plan updated");
       } else {
-        await portalConfigApi.create(formData);
+        await portalConfigApi.create({ ...formData, groupId: activeGroupId });
         toast.success("Plan created");
       }
       setShowModal(false);

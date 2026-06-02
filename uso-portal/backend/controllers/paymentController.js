@@ -186,7 +186,8 @@ const initiatePayment = async (req, res) => {
 
   let selectedPlan;
   try {
-    const allPlans = await vvClient.fetchPlans();
+    // Scope to the site the customer is on (site1/site2 → that site's plans).
+    const allPlans = await vvClient.fetchPlans(req.headers.host);
     selectedPlan = allPlans.find(p => p.id === planId);
   } catch (err) {
     log('XXXX Failed to fetch plans from Voucher Validation:', err.message);

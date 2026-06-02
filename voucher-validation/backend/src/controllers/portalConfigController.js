@@ -14,12 +14,13 @@ export function makePortalConfigController(pool) {
     // GET /api/portal-config/plans
     getPlans: async (req, res) => {
       try {
-        const { category, active } = req.query;
+        const { category, active, groupId } = req.query;
         const where = [];
         const params = [];
 
         if (category) { where.push('p.category = ?'); params.push(category); }
         if (active !== undefined) { where.push('p.is_active = ?'); params.push(active === 'true' ? 1 : 0); }
+        if (groupId) { where.push('p.group_id = ?'); params.push(groupId); }
 
         const whereClause = where.length ? `WHERE ${where.join(' AND ')}` : '';
 
@@ -45,6 +46,7 @@ export function makePortalConfigController(pool) {
           userGroupId: p.user_group_id,
           userGroup: p.user_group_id,
           userGroupName: p.user_group_name,
+          groupId: p.group_id,
           dataAllowance: p.data_allowance,
           sortOrder: p.sort_order,
           isActive: !!p.is_active,
@@ -77,6 +79,7 @@ export function makePortalConfigController(pool) {
         plan.userGroupId = plan.user_group_id;
         plan.userGroup = plan.user_group_id;
         plan.userGroupName = plan.user_group_name;
+        plan.groupId = plan.group_id;
         plan.dataAllowance = plan.data_allowance;
         plan.sortOrder = plan.sort_order;
         plan.isActive = !!plan.is_active;
@@ -91,12 +94,15 @@ export function makePortalConfigController(pool) {
         console.log('[PortalConfig] createPlan received body:', JSON.stringify(req.body, null, 2));
 
         const {
-          userGroupId, userGroup, userGroupName, planKey, name, category, price, currency,
+          userGroupId, userGroup, userGroupName, groupId, planKey, name, category, price, currency,
           dataAllowance, icon, popular, description, features, sortOrder, isActive
         } = req.body;
 
         // Accept both userGroupId and userGroup (frontend sends userGroup)
         const resolvedUserGroupId = userGroupId || userGroup;
+        // Site (Ruijie network group) this plan belongs to. Defaults to the
+        // env site (site1) so single-site installs keep working.
+        const resolvedGroupId = (groupId && String(groupId).trim()) || process.env.RUIJIE_GROUP_ID || null;
 
         // Detailed validation with specific error messages
         const missing = [];
@@ -118,11 +124,11 @@ export function makePortalConfigController(pool) {
 
         const [result] = await pool.query(
           `INSERT INTO portal_plan_configs
-           (user_group_id, user_group_name, plan_key, name, category, price, currency,
+           (user_group_id, user_group_name, group_id, plan_key, name, category, price, currency,
             data_allowance, icon, popular, description, features, sort_order, is_active, created_by)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           [
-            resolvedUserGroupId, userGroupName || null, planKey, name, category,
+            resolvedUserGroupId, userGroupName || null, resolvedGroupId, planKey, name, category,
             price, currency || 'FJD', resolvedDataAllowance,
             icon || 'fas fa-calendar-day', popular || false,
             description || null, JSON.stringify(features || []),
@@ -137,6 +143,7 @@ export function makePortalConfigController(pool) {
         plan.userGroupId = plan.user_group_id;
         plan.userGroup = plan.user_group_id;
         plan.userGroupName = plan.user_group_name;
+        plan.groupId = plan.group_id;
         plan.dataAllowance = plan.data_allowance;
         plan.sortOrder = plan.sort_order;
         plan.isActive = !!plan.is_active;
@@ -162,11 +169,11 @@ export function makePortalConfigController(pool) {
         }
 
         const fields = [
-          'user_group_id', 'user_group_name', 'plan_key', 'name', 'category', 'price', 'currency',
+          'user_group_id', 'user_group_name', 'group_id', 'plan_key', 'name', 'category', 'price', 'currency',
           'data_allowance', 'icon', 'popular', 'description', 'features', 'sort_order', 'is_active',
         ];
         const bodyMap = {
-          user_group_id: 'userGroupId', user_group_name: 'userGroupName', plan_key: 'planKey',
+          user_group_id: 'userGroupId', user_group_name: 'userGroupName', plan_key: 'planKey', group_id: 'groupId',
           data_allowance: 'dataAllowance', sort_order: 'sortOrder', is_active: 'isActive',
         };
 
@@ -199,6 +206,7 @@ export function makePortalConfigController(pool) {
         plan.userGroupId = plan.user_group_id;
         plan.userGroup = plan.user_group_id;
         plan.userGroupName = plan.user_group_name;
+        plan.groupId = plan.group_id;
         plan.dataAllowance = plan.data_allowance;
         plan.sortOrder = plan.sort_order;
         plan.isActive = !!plan.is_active;

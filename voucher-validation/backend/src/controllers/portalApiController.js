@@ -14,6 +14,28 @@ const log = (...m) => console.log(new Date().toISOString(), '[PortalAPI]', ...m)
 // Shared Ruijie service instance for live voucher lookups
 const ruijie = new RuijieService();
 
+// Resolve which site (Ruijie network group) a public request is for.
+// USO Portal passes ?hostname=<the site domain the customer is on>; admin/debug
+// may pass ?groupId=. When a hostname is given but doesn't match a site we fall
+// back to the env default site so a public caller never sees every site's plans.
+// Returns null only when there's no site signal at all (internal id lookups).
+async function resolveSiteGroup(pool, req) {
+  const qGroup = (req.query.groupId || '').toString().trim();
+  if (qGroup) return qGroup;
+  const host = (req.query.hostname || '').toString().split(':')[0].trim().toLowerCase();
+  if (host) {
+    try {
+      const [rows] = await pool.query(
+        'SELECT ruijie_group_id FROM network_projects WHERE LOWER(hostname) = ? LIMIT 1',
+        [host]
+      );
+      if (rows[0] && rows[0].ruijie_group_id) return rows[0].ruijie_group_id;
+    } catch { /* ignore lookup failure */ }
+    return process.env.RUIJIE_GROUP_ID || null; // host given but unmatched → default site
+  }
+  return null; // no site signal → caller gets all plans
+}
+
 // In-memory live-data cache: voucherCode → { data, timestamp }
 const liveVoucherCache = new Map();
 const LIVE_CACHE_TTL = 20000; // 20 seconds — fresh enough for status page, avoids hammering API
@@ -37,10 +59,15 @@ export function makePortalApiController(pool) {
 
   return {
     // GET /api/portal/plans - returns active plans formatted for USO Portal
-    getPortalPlans: async (_req, res) => {
+    getPortalPlans: async (req, res) => {
       try {
+        const groupId = await resolveSiteGroup(pool, req);
+        const where = ['is_active = 1'];
+        const params = [];
+        if (groupId) { where.push('group_id = ?'); params.push(groupId); }
         const [plans] = await pool.query(
-          `SELECT * FROM portal_plan_configs WHERE is_active = 1 ORDER BY category, sort_order, name`
+          `SELECT * FROM portal_plan_configs WHERE ${where.join(' AND ')} ORDER BY category, sort_order, name`,
+          params
         );
 
         // Format to match the exact shape the USO Portal frontend expects
@@ -64,14 +91,19 @@ export function makePortalApiController(pool) {
     },
 
     // GET /api/portal/categories - returns categories derived from active plans
-    getPortalCategories: async (_req, res) => {
+    getPortalCategories: async (req, res) => {
       try {
+        const groupId = await resolveSiteGroup(pool, req);
+        const where = ['is_active = 1'];
+        const params = [];
+        if (groupId) { where.push('group_id = ?'); params.push(groupId); }
         const [rows] = await pool.query(
           `SELECT category, COUNT(*) AS count
            FROM portal_plan_configs
-           WHERE is_active = 1
+           WHERE ${where.join(' AND ')}
            GROUP BY category
-           ORDER BY FIELD(category, 'daily', 'weekly', 'monthly', 'custom')`
+           ORDER BY FIELD(category, 'daily', 'weekly', 'monthly', 'custom')`,
+          params
         );
 
         const result = rows.map(r => ({

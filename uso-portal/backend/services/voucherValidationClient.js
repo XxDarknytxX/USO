@@ -6,8 +6,11 @@ const CACHE_TTL = 60000; // 60 seconds
 
 const log = (...m) => console.log(new Date().toISOString(), '[VV-Client]', ...m);
 
-let plansCache = { data: null, timestamp: 0 };
-let categoriesCache = { data: null, timestamp: 0 };
+// Per-site caches: key = the site hostname the customer is on
+// (or '_all' for the unscoped internal lookup used by id-based plan fetches).
+const plansCacheByHost = new Map();
+const categoriesCacheByHost = new Map();
+const siteKey = (hostname) => (hostname || '').toString().split(':')[0].toLowerCase() || '_all';
 
 // Lazy-init: read env at call time, not module load time, so .env is guaranteed loaded
 let _client = null;
@@ -30,22 +33,28 @@ function getClient() {
  * Returns data in the exact shape the USO frontend expects.
  * Cached for 60 seconds.
  */
-async function fetchPlans() {
-  if (plansCache.data && Date.now() - plansCache.timestamp < CACHE_TTL) {
-    return plansCache.data;
+async function fetchPlans(hostname = '') {
+  const key = siteKey(hostname);
+  const cached = plansCacheByHost.get(key);
+  if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
+    return cached.data;
   }
 
   try {
-    const { data } = await getClient().get('/api/portal/plans');
-    plansCache = { data, timestamp: Date.now() };
-    log(`Fetched ${data.length} plans from Voucher Validation API`);
+    const path = key === '_all'
+      ? '/api/portal/plans'
+      : `/api/portal/plans?hostname=${encodeURIComponent(key)}`;
+    const { data } = await getClient().get(path);
+    plansCacheByHost.set(key, { data, timestamp: Date.now() });
+    log(`Fetched ${data.length} plans from Voucher Validation API (site=${key})`);
     return data;
   } catch (err) {
     log('Failed to fetch plans:', err.message);
     // Return stale cache if available
-    if (plansCache.data) {
+    const stale = plansCacheByHost.get(key);
+    if (stale && stale.data) {
       log('Returning stale cached plans');
-      return plansCache.data;
+      return stale.data;
     }
     throw err;
   }
@@ -56,20 +65,26 @@ async function fetchPlans() {
  * Returns data in the exact shape the USO frontend expects.
  * Cached for 60 seconds.
  */
-async function fetchCategories() {
-  if (categoriesCache.data && Date.now() - categoriesCache.timestamp < CACHE_TTL) {
-    return categoriesCache.data;
+async function fetchCategories(hostname = '') {
+  const key = siteKey(hostname);
+  const cached = categoriesCacheByHost.get(key);
+  if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
+    return cached.data;
   }
 
   try {
-    const { data } = await getClient().get('/api/portal/categories');
-    categoriesCache = { data, timestamp: Date.now() };
+    const path = key === '_all'
+      ? '/api/portal/categories'
+      : `/api/portal/categories?hostname=${encodeURIComponent(key)}`;
+    const { data } = await getClient().get(path);
+    categoriesCacheByHost.set(key, { data, timestamp: Date.now() });
     return data;
   } catch (err) {
     log('Failed to fetch categories:', err.message);
-    if (categoriesCache.data) {
+    const stale = categoriesCacheByHost.get(key);
+    if (stale && stale.data) {
       log('Returning stale cached categories');
-      return categoriesCache.data;
+      return stale.data;
     }
     throw err;
   }
@@ -218,8 +233,8 @@ async function fetchVoucherStatus(voucherCode) {
  * Invalidate the local cache (e.g., after plan config changes).
  */
 function invalidateCache() {
-  plansCache = { data: null, timestamp: 0 };
-  categoriesCache = { data: null, timestamp: 0 };
+  plansCacheByHost.clear();
+  categoriesCacheByHost.clear();
 }
 
 module.exports = {

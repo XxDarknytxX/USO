@@ -50,6 +50,7 @@ export async function getPool() {
       id INT AUTO_INCREMENT PRIMARY KEY,
       user_group_id VARCHAR(50) NOT NULL,
       user_group_name VARCHAR(255) NULL,
+      group_id VARCHAR(100) NULL,
       plan_key VARCHAR(100) NOT NULL UNIQUE,
       name VARCHAR(255) NOT NULL,
       category ENUM('daily','weekly','monthly','custom') NOT NULL DEFAULT 'daily',
@@ -69,6 +70,7 @@ export async function getPool() {
       INDEX idx_category (category),
       INDEX idx_is_active (is_active),
       INDEX idx_user_group_id (user_group_id),
+      INDEX idx_plan_group_id (group_id),
       INDEX idx_sort_order (sort_order)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
 
@@ -174,6 +176,23 @@ export async function getPool() {
       await pool.query(`UPDATE vouchers SET group_id = ? WHERE group_id IS NULL OR group_id = ''`, [process.env.RUIJIE_GROUP_ID]);
       await pool.query(`UPDATE vouchers_historical SET group_id = ? WHERE group_id IS NULL OR group_id = ''`, [process.env.RUIJIE_GROUP_ID]);
     } catch (e) { /* tables may not exist yet on a fresh DB */ }
+  }
+
+  // Multi-site: tag each portal plan with its site (Ruijie network group) so a
+  // site's portal only shows/sells its own plans. Backfill legacy plans to the
+  // env group (site1).
+  const planSiteMigrations = [
+    `ALTER TABLE portal_plan_configs ADD COLUMN group_id VARCHAR(100) NULL AFTER user_group_name`,
+    `ALTER TABLE portal_plan_configs ADD INDEX idx_plan_group_id (group_id)`,
+  ];
+  for (const sql of planSiteMigrations) {
+    try { await pool.query(sql); console.log(`Migration OK: ${sql.slice(0, 60)}...`); }
+    catch (e) { if (e.code !== 'ER_DUP_FIELDNAME' && e.code !== 'ER_DUP_KEYNAME' && !String(e.message).includes("doesn't exist")) { /* ignore */ } }
+  }
+  if (process.env.RUIJIE_GROUP_ID) {
+    try {
+      await pool.query(`UPDATE portal_plan_configs SET group_id = ? WHERE group_id IS NULL OR group_id = ''`, [process.env.RUIJIE_GROUP_ID]);
+    } catch (e) { /* table may not exist yet on a fresh DB */ }
   }
 
   // Fix collation on existing tables if they were created with the wrong collation.

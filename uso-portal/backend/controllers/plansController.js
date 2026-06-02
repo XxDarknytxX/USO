@@ -4,7 +4,7 @@ const vvClient = require('../services/voucherValidationClient');
 
 const getAllPlans = async (req, res) => {
   try {
-    const plans = await vvClient.fetchPlans();
+    const plans = await vvClient.fetchPlans(req.headers.host);
     res.json(plans);
   } catch (err) {
     console.error('Failed to fetch plans:', err.message);
@@ -14,7 +14,7 @@ const getAllPlans = async (req, res) => {
 
 const getPlanById = async (req, res) => {
   try {
-    const plans = await vvClient.fetchPlans();
+    const plans = await vvClient.fetchPlans(req.headers.host);
     const plan = plans.find(p => p.id === req.params.id);
     res.json(plan || {});
   } catch (err) {
@@ -25,7 +25,7 @@ const getPlanById = async (req, res) => {
 
 const getPlansByCategory = async (req, res) => {
   try {
-    const plans = await vvClient.fetchPlans();
+    const plans = await vvClient.fetchPlans(req.headers.host);
     const categoryPlans = plans.filter(p => p.category === req.params.cat);
 
     if (categoryPlans.length > 0) {
@@ -41,7 +41,7 @@ const getPlansByCategory = async (req, res) => {
 
 const getCategories = async (req, res) => {
   try {
-    const categories = await vvClient.fetchCategories();
+    const categories = await vvClient.fetchCategories(req.headers.host);
     res.json(categories);
   } catch (err) {
     console.error('Failed to fetch categories:', err.message);
