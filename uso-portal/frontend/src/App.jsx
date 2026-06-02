@@ -40,13 +40,17 @@ function PortalGate() {
     const sessionId = urlSession || sessionStorage.getItem('wifiSessionId');
     const clientMac = urlMac || sessionStorage.getItem('deviceMac');
 
-    // Helper: check if a voucher code is still active AND has usable data/time
+    // Helper: check if a voucher code is still active AND has usable data/time.
+    // Returns false for expired, disabled (admin-deactivated), or fully-consumed
+    // vouchers so the gate falls through to the purchase page instead of
+    // reconnecting + bouncing to the status page.
     const isVoucherActive = async (code) => {
       try {
         const r = await fetch(`/api/voucher-status/${encodeURIComponent(code)}`);
         if (r.ok) {
           const d = await r.json();
-          if (!d.ok || !d.isActive || d.isExpired) return false;
+          if (!d.ok || !d.isActive || d.isExpired || d.disabled) return false;
+          if (String(d.status) === '3') return false; // expired status code
           // Also check remaining data and time — if fully consumed, not usable
           if (d.remainingQuota !== undefined && d.remainingQuota <= 0 && d.quota > 0) return false;
           if (d.remainingTime !== undefined && d.remainingTime <= 0 && d.timePeriod > 0) return false;

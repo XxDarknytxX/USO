@@ -153,6 +153,17 @@ export default function VoucherStatus() {
     };
   }, [fetchStatus]);
 
+  // Backstop: if the voucher isn't usable (expired / deactivated / out of data),
+  // send the customer to the purchase portal instead of leaving them on the
+  // status page. Only auto-bounce when on the captive WiFi (a session exists);
+  // an off-network status check keeps the expired view + "Buy More Data" button.
+  useEffect(() => {
+    if (data && data.isActive === false && sessionStorage.getItem('wifiSessionId')) {
+      const t = setTimeout(() => { window.location.replace('/'); }, 1800);
+      return () => clearTimeout(t);
+    }
+  }, [data]);
+
   const statusUrl = `${window.location.origin}/status/${voucherCode}`;
 
   /* ── Loading ── */
@@ -343,12 +354,18 @@ export default function VoucherStatus() {
             />
             <div className="relative text-center">
               <h2 className="text-lg sm:text-xl font-bold text-ink mb-2">
-                {data.isExpired ? 'Your Plan Has Expired' : 'Connection Inactive'}
+                {data.disabled
+                  ? 'Plan Deactivated'
+                  : data.isExpired
+                    ? 'Your Plan Has Expired'
+                    : 'Plan Used Up'}
               </h2>
               <p className="text-sm text-ink-3 mb-5 max-w-md mx-auto">
-                {data.isExpired
-                  ? 'Your data plan has run out. Purchase a new plan to get back online.'
-                  : 'Your connection is currently inactive. Purchase a new plan to reconnect.'}
+                {data.disabled
+                  ? 'This plan has been deactivated. Purchase a new plan to get back online.'
+                  : data.isExpired
+                    ? 'Your data plan has run out. Purchase a new plan to get back online.'
+                    : 'You’ve used all your data or time. Purchase a new plan to reconnect.'}
               </p>
               <Link
                 to="/"

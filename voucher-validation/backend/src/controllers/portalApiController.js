@@ -259,8 +259,10 @@ export function makePortalApiController(pool) {
 
       const code = voucherCode.trim();
 
-      // Helper: build the response object from a voucher record
-      const buildResponse = (v) => {
+      // Helper: build the response object from a voucher record.
+      // disableStatus (0/1) is tracked in the local DB — admin deactivation
+      // is NOT reflected in Ruijie's voucher list, so it must be merged in.
+      const buildResponse = (v, disableStatus = Number(v.disable_status) || 0) => {
         const now = Date.now();
         const remainingQuota = Math.max(0, (v.quota || 0) - (v.used_quota || 0));
         const remainingTime = Math.max(0, (v.time_period || 0) - (v.used_time || 0));
@@ -276,17 +278,22 @@ export function makePortalApiController(pool) {
         //   '1' = Unused (not yet activated)
         //   '2' = In-use  (active / connected)
         //   '3' = Expired
+        const isDisabled = Number(disableStatus) === 1;
         const isExpired = v.status === '3' || (expiryMs !== null && expiryMs < now);
         // Also treat as inactive if data quota or time is fully consumed
         const dataExhausted = v.quota > 0 && remainingQuota <= 0;
         const timeExhausted = v.time_period > 0 && remainingTime <= 0;
-        const isActive = (v.status === '1' || v.status === '2') && !isExpired && !dataExhausted && !timeExhausted;
+        // Usable only if unused/in-use, not expired, not exhausted, not disabled.
+        const isActive =
+          (v.status === '1' || v.status === '2') &&
+          !isExpired && !dataExhausted && !timeExhausted && !isDisabled;
 
         return {
           voucherCode: v.voucher_code,
           status: v.status,
           isActive,
           isExpired,
+          disabled: isDisabled,
           quota: v.quota,
           usedQuota: v.used_quota,
           remainingQuota,
@@ -354,9 +361,16 @@ export function makePortalApiController(pool) {
           log(`Ruijie Cloud fetch failed, falling back to local DB: ${cloudErr.message}`);
         }
 
-        // 3. Use live data if available, otherwise fall back to local DB
+        // 3. Use live data if available, otherwise fall back to local DB.
+        //    Ruijie's list doesn't carry the admin "disabled" flag, so merge
+        //    it from the local DB before deciding usability.
         if (liveVoucher) {
-          const responseData = buildResponse(liveVoucher);
+          let localDisable = 0;
+          try {
+            const [dr] = await pool.query('SELECT disable_status FROM vouchers WHERE voucher_code = ? LIMIT 1', [code]);
+            if (dr[0]) localDisable = Number(dr[0].disable_status) || 0;
+          } catch { /* ignore */ }
+          const responseData = buildResponse(liveVoucher, localDisable);
           liveVoucherCache.set(code, { data: responseData, timestamp: Date.now() });
           return send.ok(res, responseData);
         }
@@ -366,7 +380,7 @@ export function makePortalApiController(pool) {
           `SELECT voucher_code, status, quota, used_quota, time_period, used_time,
                   expiry_time, login_time, current_clients, max_clients,
                   download_rate_limit, upload_rate_limit, package_name, user_group_name,
-                  create_time
+                  create_time, disable_status
            FROM vouchers WHERE voucher_code = ?`,
           [code]
         );
