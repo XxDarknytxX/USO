@@ -196,22 +196,35 @@ export async function getPool() {
     }
   }
 
-  // Seed the first network project (USO Portal) from env if no projects exist yet.
+  // ── Sites (network projects) ───────────────────────────────────────────
+  // Each site (village) is one Ruijie project (groupId) with its own portal
+  // subdomain. Sites are managed from the admin (Network > Add site); this
+  // block just keeps site1/site2 consistent across deploys.
   try {
     const [[{ n }]] = await pool.query('SELECT COUNT(*) AS n FROM network_projects');
     if (n === 0) {
+      // Fresh install → seed the first site (uso_1) from env.
       await pool.query(
         `INSERT INTO network_projects (name, hostname, ruijie_group_id, ruijie_tenant_id, sort_order)
          VALUES (?, ?, ?, ?, 0)`,
         [
-          'USO Portal',
-          'portal.vodafone.com.fj',
+          'uso_1',
+          'site1.vodafonefiji.cloud',
           process.env.RUIJIE_GROUP_ID || null,
           process.env.RUIJIE_TENANT_ID || null,
         ]
       );
-      console.log('Seeded default network project: USO Portal');
+      console.log('Seeded first network project: uso_1');
     }
+
+    // Rename the legacy single-site default → site-style name + domain.
+    await pool.query(
+      `UPDATE network_projects
+          SET name = 'uso_1', hostname = 'site1.vodafonefiji.cloud'
+        WHERE name = 'USO Portal'
+           OR hostname IN ('portal.vodafone.com.fj', 'portal.vodafonefiji.cloud')`
+    );
+
     // Backfill: any project missing a Ruijie group ID inherits the env default
     // (the same ID the voucher API uses) so device-health calls aren't sent
     // with a null/empty groupId.
@@ -221,6 +234,23 @@ export async function getPool() {
          WHERE ruijie_group_id IS NULL OR ruijie_group_id = ''`,
         [process.env.RUIJIE_GROUP_ID]
       );
+    }
+
+    // Ensure the second site (uso_2) exists. Idempotent — keyed on its groupId,
+    // so it won't duplicate and can still be edited/removed from the admin.
+    const SITE2_GROUP = process.env.SITE2_GROUP_ID || '7847952';
+    const SITE2_HOST = process.env.SITE2_HOSTNAME || 'site2.vodafonefiji.cloud';
+    const [[{ n2 }]] = await pool.query(
+      'SELECT COUNT(*) AS n2 FROM network_projects WHERE ruijie_group_id = ?',
+      [SITE2_GROUP]
+    );
+    if (n2 === 0) {
+      await pool.query(
+        `INSERT INTO network_projects (name, hostname, ruijie_group_id, ruijie_tenant_id, sort_order)
+         VALUES ('uso_2', ?, ?, ?, 1)`,
+        [SITE2_HOST, SITE2_GROUP, process.env.RUIJIE_TENANT_ID || null]
+      );
+      console.log('Seeded second network project: uso_2');
     }
   } catch (e) {
     console.log('Network project seed note:', e.message);
