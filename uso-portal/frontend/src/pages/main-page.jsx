@@ -1,20 +1,34 @@
 /**
- * Main WiFi portal — category tiles → plan modal → payment
+ * Main WiFi portal — a proper pricing page: hero → category tabs → plan cards → pay
  */
-import { useEffect, useRef, useState } from 'react';
-import PlanCard, { PlansModal } from '../components/plan-card';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   FaCalendarDay, FaCalendarWeek, FaCalendarAlt, FaMobileAlt,
   FaCheckCircle, FaExclamationCircle, FaWifi, FaBolt, FaShieldAlt,
+  FaCheck, FaArrowRight, FaInfinity,
 } from 'react-icons/fa';
 
+const ICON_MAP = {
+  'fas fa-calendar-day': FaCalendarDay,
+  'fas fa-calendar-week': FaCalendarWeek,
+  'fas fa-calendar-alt': FaCalendarAlt,
+  'fas fa-mobile-alt': FaMobileAlt,
+  'fas fa-bolt': FaBolt,
+  'fas fa-wifi': FaWifi,
+  'fas fa-infinity': FaInfinity,
+};
+const iconFor = (s) => ICON_MAP[s] || FaWifi;
+
+const CAT_ORDER = ['daily', 'weekly', 'monthly', 'custom'];
+const CAT_VALIDITY = { daily: 'day', weekly: 'week', monthly: 'month' };
+const validityShort = (cat) => CAT_VALIDITY[cat] || 'plan';
+const titleCase = (s = '') => s.charAt(0).toUpperCase() + s.slice(1);
+
 export default function MainPage() {
-  const [categories, setCategories] = useState([]);
-  const [selectedCategory, setSelectedCategory] = useState(null);
-  const [categoryPlans, setCategoryPlans] = useState([]);
+  const [plans, setPlans] = useState([]);
+  const [plansLoading, setPlansLoading] = useState(true);
+  const [activeCat, setActiveCat] = useState(null);
   const [notification, setNotification] = useState(null);
-  const [loading, setLoading] = useState(false);
-  const [categoriesLoading, setCategoriesLoading] = useState(true);
   const [sessionId, setSessionId] = useState(null);
   const [handledPayment, setHandledPayment] = useState(false);
 
@@ -24,32 +38,47 @@ export default function MainPage() {
   useEffect(() => () => { timersRef.current.forEach(clearTimeout); }, []);
 
   useEffect(() => {
-    fetchCategories();
+    loadPlans();
     const p = new URLSearchParams(window.location.search);
     const sid = p.get('sessionId');
     if (sid) { sessionStorage.setItem('wifiSessionId', sid); setSessionId(sid); }
     else { const s = sessionStorage.getItem('wifiSessionId'); if (s) setSessionId(s); }
-    // Capture device MAC address from Ruijie captive portal redirect
     const mac = p.get('clientMac') || p.get('usermac') || p.get('mac');
     if (mac) { sessionStorage.setItem('deviceMac', mac); }
     if (p.get('tID') && p.get('rCode')) handlePaymentCallback(p);
   }, []); // eslint-disable-line
 
-  const fetchCategories = async () => {
-    setCategoriesLoading(true);
-    try { const r = await fetch('/api/categories'); if (!r.ok) throw new Error(); setCategories(await r.json()); }
-    catch { showError('Failed to load categories. Please refresh.'); }
-    finally { setCategoriesLoading(false); }
+  const loadPlans = async () => {
+    setPlansLoading(true);
+    try {
+      const r = await fetch('/api/plans');
+      if (!r.ok) throw new Error();
+      const data = await r.json();
+      setPlans(Array.isArray(data) ? data : []);
+    } catch {
+      showError('Failed to load plans. Please refresh.');
+    } finally {
+      setPlansLoading(false);
+    }
   };
 
-  const handleCategoryClick = async (cat) => {
-    setLoading(true); setSelectedCategory(cat);
-    try { const r = await fetch(`/api/plans/category/${cat.id}`); if (!r.ok) throw new Error(); setCategoryPlans(await r.json()); }
-    catch { showError('Failed to load plans.'); }
-    finally { setLoading(false); }
-  };
+  // Derive ordered category tabs from the plans.
+  const categories = useMemo(() => {
+    const groups = {};
+    for (const p of plans) (groups[p.category] ||= []).push(p);
+    const known = CAT_ORDER.filter((c) => groups[c]);
+    const extra = Object.keys(groups).filter((c) => !CAT_ORDER.includes(c));
+    return [...known, ...extra].map((c) => ({ id: c, name: titleCase(c), count: groups[c].length }));
+  }, [plans]);
 
-  const closeModal = () => { setSelectedCategory(null); setCategoryPlans([]); };
+  useEffect(() => {
+    if (!activeCat && categories.length) setActiveCat(categories[0].id);
+  }, [categories, activeCat]);
+
+  const visiblePlans = useMemo(
+    () => (activeCat ? plans.filter((p) => p.category === activeCat) : plans),
+    [plans, activeCat]
+  );
 
   const handlePaymentCallback = async (urlParams) => {
     if (handledPayment) return;
@@ -79,172 +108,259 @@ export default function MainPage() {
     const sid = sessionStorage.getItem('wifiSessionId');
     if (!sid) { showError('Session expired. Refresh and try again.'); return; }
     const mac = sessionStorage.getItem('deviceMac') || null;
-    try {
-      const res = await fetch('/api/mpaisa/initiate', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ amount: plan.price.replace('$', ''), planId: plan.id, sessionId: sid, clientMac: mac }) });
-      const p = await res.json();
-      if (!res.ok) throw new Error(p?.error || 'Failed');
-      if (!p.paymentUrl) throw new Error('No payment URL');
-      window.location.href = p.paymentUrl;
-    } catch (err) { showError(err.message || 'Purchase failed.'); }
+    const res = await fetch('/api/mpaisa/initiate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ amount: String(plan.price).replace('$', ''), planId: plan.id, sessionId: sid, clientMac: mac }),
+    });
+    const p = await res.json();
+    if (!res.ok) throw new Error(p?.error || 'Failed to start payment');
+    if (!p.paymentUrl) throw new Error('No payment URL');
+    window.location.href = p.paymentUrl;
   };
 
   const showSuccess = (m) => { setNotification({ type: 'ok', message: m }); track(setTimeout(dismiss, 5000)); };
   const showError = (m) => { setNotification({ type: 'err', message: m }); track(setTimeout(dismiss, 6000)); };
   const dismiss = () => { setNotification(p => p ? { ...p, exit: true } : null); track(setTimeout(() => setNotification(null), 400)); };
 
-  // ── Category metadata: icon + a short tagline. The palette is unified to
-  //    the Vodafone red brand for a clean, modern, on-brand look. ──
-  const CATEGORY_META = {
-    daily:   { icon: FaCalendarDay,  tagline: 'Quick connectivity, pay as you go' },
-    weekly:  { icon: FaCalendarWeek, tagline: 'Reliable data, all week' },
-    monthly: { icon: FaCalendarAlt,  tagline: 'Best value — always on' },
-  };
-  const DEFAULT_META = { icon: FaMobileAlt, tagline: 'Explore all available plans' };
-
-  // Single red theme handed to the plans modal.
-  const MODAL_THEME = {
-    accentBar: 'from-vf/60 via-vf/30 to-transparent',
-    badgeText: 'text-vf',
-    badgeBg: 'bg-vf/10 border-vf/20',
-    iconBg: 'bg-vf/10 border-vf/15',
-    iconText: 'text-vf',
-    btnBg: 'bg-vf hover:bg-vf-hover',
-    checkBg: 'bg-vf/10 border-vf/20',
-    checkText: 'text-vf',
-    raw: 'rgba(230,0,0,0.06)',
-    modalBg: 'linear-gradient(165deg, rgba(230,0,0,0.10) 0%, rgba(150,0,0,0.05) 28%, rgba(20,20,23,0.98) 58%)',
-    modalBorder: 'rgba(230,0,0,0.14)',
-    glowRaw: 'rgba(230,0,0,0.10)',
-  };
-
   return (
     <div className="min-h-screen min-h-[100dvh] font-sans flex flex-col">
 
       {/* ═══════ TOP BAR ═══════ */}
-      <header className="w-full max-w-5xl mx-auto px-5 sm:px-8 pt-5 sm:pt-7 flex items-center justify-between shrink-0">
-        <div className="flex items-center gap-2.5 animate-enter">
-          <img
-            src="/images/logo.png"
-            alt="Vodafone"
-            className="h-7 sm:h-8 w-auto"
-            onError={(e) => { e.target.style.display = 'none'; e.target.nextElementSibling.style.display = 'flex'; }}
-          />
-          <div className="hidden items-center gap-1.5 text-vf font-extrabold text-lg">
-            <FaWifi className="text-base" /> vodafone
+      <header className="sticky top-0 z-30 backdrop-blur-md bg-page/60 border-b border-edge/60">
+        <div className="w-full max-w-6xl mx-auto px-5 sm:px-8 h-14 flex items-center justify-between">
+          <div className="flex items-center gap-2.5">
+            <img
+              src="/images/logo.png"
+              alt="Vodafone"
+              className="h-7 w-auto"
+              onError={(e) => { e.target.style.display = 'none'; e.target.nextElementSibling.style.display = 'flex'; }}
+            />
+            <div className="hidden items-center gap-1.5 text-vf font-extrabold text-lg">
+              <FaWifi className="text-base" /> vodafone
+            </div>
           </div>
-        </div>
-        <span className="inline-flex items-center gap-1.5 pl-2 pr-2.5 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-emerald-300 text-[11px] font-medium animate-enter">
-          <span className="relative flex h-1.5 w-1.5">
-            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
-            <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-emerald-400" />
+          <span className="inline-flex items-center gap-1.5 pl-2 pr-2.5 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-emerald-300 text-[11px] font-medium">
+            <span className="relative flex h-1.5 w-1.5">
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
+              <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-emerald-400" />
+            </span>
+            WiFi connected
           </span>
-          WiFi connected
-        </span>
+        </div>
       </header>
 
-      {/* ═══════ HERO + CATEGORIES ═══════ */}
-      <main className="flex-1 w-full max-w-5xl mx-auto px-5 sm:px-8 flex flex-col justify-center py-8 sm:py-10">
-        {/* Hero — intentionally compact */}
-        <div className="text-center mb-7 sm:mb-9">
-          <h1 className="text-[26px] sm:text-[34px] lg:text-[38px] font-bold text-ink tracking-[-0.02em] leading-[1.08] animate-enter">
-            Choose your <span className="text-vf">plan</span>
-          </h1>
-          <p
-            className="text-ink-3 text-[13.5px] sm:text-[15px] mt-2.5 animate-enter"
-            style={{ animationDelay: '70ms' }}
-          >
-            Instant activation · No setup fees
-          </p>
-        </div>
-
-        {/* Categories */}
-        {categoriesLoading ? (
-          <div className="flex flex-col items-center py-16 gap-3">
-            <div className="w-6 h-6 border-[2.5px] border-edge border-t-vf rounded-full animate-spin" />
-            <span className="text-ink-4 text-sm">Loading plans…</span>
-          </div>
-        ) : categories?.length ? (
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3.5 sm:gap-4">
-            {categories.map((cat, i) => {
-              const meta = CATEGORY_META[cat.id] || DEFAULT_META;
-              const Icon = meta.icon;
-              return (
-                <button
-                  key={cat.id}
-                  onClick={() => handleCategoryClick(cat)}
-                  className="group relative text-left overflow-hidden rounded-2xl border border-edge bg-card/60 backdrop-blur-sm
-                             p-5 sm:p-6 transition-all duration-300
-                             hover:border-vf/40 hover:bg-card hover:-translate-y-0.5
-                             focus-visible:border-vf/50 animate-enter"
-                  style={{ animationDelay: `${i * 70}ms` }}
-                >
-                  {/* top hairline highlight on hover */}
-                  <span className="pointer-events-none absolute inset-x-6 top-0 h-px bg-gradient-to-r from-transparent via-vf/50 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
-
-                  <div className="flex items-start justify-between mb-5 sm:mb-6">
-                    <span className="w-11 h-11 rounded-xl bg-vf/10 border border-vf/15 flex items-center justify-center text-vf
-                                     transition-transform duration-300 group-hover:scale-105">
-                      <Icon className="text-lg" />
-                    </span>
-                    <span className="text-[11px] font-semibold text-ink-4 bg-white/[0.04] border border-edge px-2 py-0.5 rounded-full">
-                      {cat.count} plan{cat.count !== 1 ? 's' : ''}
-                    </span>
-                  </div>
-
-                  <h2 className="text-[17px] sm:text-[18px] font-bold text-ink mb-1 capitalize">{cat.name}</h2>
-                  <p className="text-ink-4 text-[12.5px] sm:text-[13px] leading-relaxed mb-4">{meta.tagline}</p>
-
-                  <div className="flex items-center gap-1.5 text-[13px] font-semibold text-vf">
-                    <span>View plans</span>
-                    <svg className="w-3.5 h-3.5 transition-transform duration-300 group-hover:translate-x-1" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M13 7l5 5m0 0l-5 5m5-5H6" />
-                    </svg>
-                  </div>
-                </button>
-              );
-            })}
-          </div>
-        ) : (
-          <div className="text-center py-16">
-            <div className="w-14 h-14 rounded-2xl bg-card border border-edge flex items-center justify-center mx-auto mb-3">
-              <FaWifi className="text-ink-5 text-lg" />
+      <main className="flex-1">
+        {/* ═══════ HERO ═══════ */}
+        <section className="relative overflow-hidden">
+          {/* decorative orbs */}
+          <div className="pointer-events-none absolute -top-24 left-1/2 -translate-x-1/2 w-[640px] h-[420px] rounded-full blur-[120px] opacity-50"
+            style={{ background: 'radial-gradient(circle, rgba(230,0,0,0.28), transparent 70%)' }} />
+          <div className="relative w-full max-w-6xl mx-auto px-5 sm:px-8 pt-14 sm:pt-20 pb-10 sm:pb-14 text-center">
+            <span className="inline-block text-[11px] sm:text-[12px] font-bold uppercase tracking-[0.22em] text-vf mb-4 animate-enter">
+              Vodafone WiFi
+            </span>
+            <h1 className="text-[34px] sm:text-[52px] lg:text-[60px] font-extrabold text-ink tracking-[-0.03em] leading-[1.03] animate-enter"
+              style={{ animationDelay: '60ms' }}>
+              Get online in
+              <br className="hidden sm:block" />{' '}
+              <span className="bg-gradient-to-r from-vf via-[#ff3b3b] to-[#ff7a7a] bg-clip-text text-transparent">seconds.</span>
+            </h1>
+            <p className="text-ink-3 text-[15px] sm:text-[17px] leading-relaxed max-w-xl mx-auto mt-5 animate-enter"
+              style={{ animationDelay: '130ms' }}>
+              Pick a data plan, pay with M-PAiSA, and you're connected instantly.
+              No contracts, no setup fees.
+            </p>
+            <div className="flex flex-wrap items-center justify-center gap-x-6 gap-y-2 mt-7 text-[12.5px] text-ink-4 animate-enter"
+              style={{ animationDelay: '200ms' }}>
+              <span className="flex items-center gap-1.5"><FaBolt className="text-vf/80 text-[11px]" /> Instant activation</span>
+              <span className="flex items-center gap-1.5"><FaShieldAlt className="text-vf/80 text-[11px]" /> Secure network</span>
+              <span className="flex items-center gap-1.5"><FaWifi className="text-vf/80 text-[11px]" /> Calls &amp; texts included</span>
             </div>
-            <p className="text-ink-4 mb-3 text-sm">No plans available right now</p>
-            <button onClick={fetchCategories} className="text-sm font-semibold text-vf hover:text-vf-hover transition-colors">
-              Try again
-            </button>
           </div>
-        )}
+        </section>
+
+        {/* ═══════ PRICING ═══════ */}
+        <section id="plans" className="w-full max-w-6xl mx-auto px-5 sm:px-8 pb-14 sm:pb-20">
+          {/* Section heading + tabs */}
+          <div className="flex flex-col items-center text-center mb-8 sm:mb-10">
+            <h2 className="text-[22px] sm:text-[28px] font-bold text-ink tracking-tight mb-5">Choose your plan</h2>
+            {categories.length > 0 && (
+              <div className="inline-flex items-center gap-1 p-1 rounded-xl bg-card/70 border border-edge">
+                {categories.map((c) => (
+                  <button
+                    key={c.id}
+                    onClick={() => setActiveCat(c.id)}
+                    className={`px-4 sm:px-6 py-2 rounded-lg text-[13px] font-semibold capitalize transition-all duration-200
+                      ${activeCat === c.id
+                        ? 'bg-vf text-white shadow-md shadow-vf/20'
+                        : 'text-ink-3 hover:text-ink'}`}
+                  >
+                    {c.name}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* Plan cards */}
+          {plansLoading ? (
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
+              {Array.from({ length: 3 }).map((_, i) => (
+                <div key={i} className="h-80 rounded-2xl bg-card/40 border border-edge animate-pulse" />
+              ))}
+            </div>
+          ) : visiblePlans.length > 0 ? (
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
+              {visiblePlans.map((plan, i) => (
+                <PricingCard key={plan.id} plan={plan} index={i} onBuy={handleBuy} onError={showError} />
+              ))}
+            </div>
+          ) : (
+            <div className="text-center py-16">
+              <div className="w-14 h-14 rounded-2xl bg-card border border-edge flex items-center justify-center mx-auto mb-3">
+                <FaWifi className="text-ink-5 text-lg" />
+              </div>
+              <p className="text-ink-4 mb-3 text-sm">No plans available right now</p>
+              <button onClick={loadPlans} className="text-sm font-semibold text-vf hover:text-vf-hover transition-colors">
+                Try again
+              </button>
+            </div>
+          )}
+        </section>
+
+        {/* ═══════ WHY VODAFONE ═══════ */}
+        <section className="border-t border-edge/60 bg-card/20">
+          <div className="w-full max-w-6xl mx-auto px-5 sm:px-8 py-12 sm:py-16">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-6 sm:gap-8">
+              {[
+                { icon: FaBolt, title: 'Instant activation', desc: 'Pay with M-PAiSA and you’re online in seconds — no waiting, no setup.' },
+                { icon: FaShieldAlt, title: 'Secure & reliable', desc: 'An enterprise-grade network with full coverage you can count on.' },
+                { icon: FaWifi, title: 'Calls & texts included', desc: 'Every plan comes with unlimited calls and texts on Vodafone.' },
+              ].map(({ icon: FIcon, title, desc }) => (
+                <div key={title} className="text-center sm:text-left">
+                  <span className="inline-flex w-11 h-11 rounded-xl bg-vf/10 border border-vf/15 items-center justify-center text-vf mb-4">
+                    <FIcon className="text-lg" />
+                  </span>
+                  <h3 className="text-[15px] font-bold text-ink mb-1.5">{title}</h3>
+                  <p className="text-[13px] text-ink-4 leading-relaxed max-w-xs mx-auto sm:mx-0">{desc}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+        </section>
       </main>
 
-      {/* ═══════ TRUST STRIP ═══════ */}
-      <footer className="border-t border-edge/70 shrink-0">
-        <div className="w-full max-w-5xl mx-auto px-5 sm:px-8 py-3.5 flex flex-wrap items-center justify-center gap-x-6 gap-y-1.5">
-          {[
-            { icon: FaBolt, label: 'Instant activation' },
-            { icon: FaShieldAlt, label: 'Secure network' },
-            { icon: FaWifi, label: 'Unlimited calls & texts' },
-          ].map(({ icon: FIcon, label }) => (
-            <span key={label} className="flex items-center gap-2 text-ink-4 text-[12px]">
-              <FIcon className="text-vf/70 text-[11px]" />
-              {label}
-            </span>
-          ))}
+      {/* ═══════ FOOTER ═══════ */}
+      <footer className="border-t border-edge">
+        <div className="w-full max-w-6xl mx-auto px-5 sm:px-8 py-5 flex flex-col sm:flex-row items-center justify-between gap-2">
+          <div className="flex items-center gap-2 text-ink-5 text-[12px]">
+            <FaWifi className="text-vf/60 text-[11px]" />
+            <span>Vodafone Fiji WiFi</span>
+          </div>
+          <div className="flex flex-wrap justify-center gap-x-4 gap-y-1 text-ink-5 text-[12px]">
+            <span>No setup fees</span>
+            <span className="text-ink-5/50">•</span>
+            <span>Secure payments</span>
+            <span className="text-ink-5/50">•</span>
+            <span>24/7 support</span>
+          </div>
         </div>
       </footer>
 
-      {/* ═══════ MODAL ═══════ */}
-      <PlansModal
-        selectedCategory={selectedCategory}
-        categoryPlans={categoryPlans}
-        loading={loading}
-        onClose={closeModal}
-        onBuy={handleBuy}
-        theme={MODAL_THEME}
-      />
-
       {/* ═══════ TOAST ═══════ */}
       {notification && <Toast type={notification.type} message={notification.message} exit={notification.exit} />}
+    </div>
+  );
+}
+
+/* ── Pricing card ── */
+function PricingCard({ plan, index = 0, onBuy, onError }) {
+  const [busy, setBusy] = useState(false);
+  const Icon = iconFor(plan.icon);
+  const popular = Boolean(plan.popular);
+  const features = Array.isArray(plan.features) ? plan.features : [];
+
+  const buy = async () => {
+    setBusy(true);
+    try { await onBuy(plan); }
+    catch (e) { onError?.(e.message || 'Purchase failed.'); }
+    finally { setBusy(false); }
+  };
+
+  return (
+    <div
+      className={`group relative flex flex-col rounded-2xl p-6 sm:p-7 animate-enter transition-all duration-300
+        ${popular
+          ? 'border border-vf/45 bg-gradient-to-b from-vf/[0.13] to-card shadow-[0_0_44px_-14px_rgba(230,0,0,0.45)] lg:scale-[1.04] z-10'
+          : 'border border-edge bg-card/60 backdrop-blur-sm hover:border-vf/30 hover:-translate-y-1'}`}
+      style={{ animationDelay: `${index * 80}ms` }}
+    >
+      {popular && (
+        <div className="absolute -top-3 left-1/2 -translate-x-1/2 px-3 py-1 rounded-full bg-vf text-white text-[10px] font-bold uppercase tracking-wider shadow-lg shadow-vf/30 whitespace-nowrap">
+          Most popular
+        </div>
+      )}
+
+      {/* Icon + data allowance */}
+      <div className="flex items-center justify-between mb-5">
+        <span className="w-11 h-11 rounded-xl bg-vf/10 border border-vf/15 flex items-center justify-center text-vf">
+          <Icon className="text-lg" />
+        </span>
+        {plan.data && (
+          <span className="text-[12px] font-bold text-ink-2 bg-white/[0.05] border border-edge px-2.5 py-1 rounded-lg">
+            {plan.data}
+          </span>
+        )}
+      </div>
+
+      {/* Name + description */}
+      <h3 className="text-[19px] font-bold text-ink mb-1">{plan.name}</h3>
+      {plan.description && (
+        <p className="text-[13px] text-ink-4 leading-relaxed mb-5 line-clamp-2">{plan.description}</p>
+      )}
+      {!plan.description && <div className="mb-5" />}
+
+      {/* Price */}
+      <div className="flex items-baseline gap-1.5 mb-6">
+        <span className="text-[34px] font-extrabold text-ink tracking-tight leading-none">{plan.price}</span>
+        <span className="text-[13px] text-ink-5 font-medium">/ {validityShort(plan.category)}</span>
+      </div>
+
+      {/* Features */}
+      {features.length > 0 ? (
+        <ul className="space-y-2.5 mb-6 flex-1">
+          {features.slice(0, 5).map((f, i) => (
+            <li key={i} className="flex items-start gap-2.5 text-[13px] text-ink-3">
+              <FaCheck className="text-vf text-[10px] mt-[3px] shrink-0" />
+              <span>{f}</span>
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <div className="flex-1" />
+      )}
+
+      {/* CTA */}
+      <button
+        onClick={buy}
+        disabled={busy}
+        className={`w-full flex items-center justify-center gap-2 rounded-xl text-sm font-semibold py-3 transition-all duration-200 outline-none
+          ${busy
+            ? 'bg-white/5 text-ink-5 cursor-not-allowed'
+            : popular
+              ? 'bg-vf hover:bg-vf-hover text-white active:scale-[0.98] shadow-lg shadow-vf/25'
+              : 'bg-white/[0.06] hover:bg-white/[0.11] text-ink border border-edge active:scale-[0.98]'}`}
+      >
+        {busy ? (
+          <>
+            <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+            Processing…
+          </>
+        ) : (
+          <>Get this plan <FaArrowRight className="text-[10px]" /></>
+        )}
+      </button>
     </div>
   );
 }
