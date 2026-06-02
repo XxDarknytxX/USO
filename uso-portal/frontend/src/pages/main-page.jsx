@@ -138,27 +138,27 @@ export default function MainPage() {
   return (
     <div className="relative min-h-screen min-h-[100dvh] font-sans flex flex-col overflow-hidden text-ink">
       {/* soft top glow */}
-      <div className="pointer-events-none absolute -top-44 left-1/2 -translate-x-1/2 w-[760px] h-[520px] rounded-full blur-[150px] opacity-45"
+      <div className="pointer-events-none absolute -top-44 left-1/2 -translate-x-1/2 w-[min(760px,120vw)] h-[520px] rounded-full blur-[150px] opacity-35"
         style={{ background: 'radial-gradient(circle, rgba(230,0,0,0.28), transparent 70%)' }} />
 
-      <main className="relative flex-1 w-full max-w-7xl mx-auto px-5 sm:px-8 pt-12 sm:pt-16 pb-12">
+      <main className="relative flex-1 w-full max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-[clamp(24px,5vh,60px)] pb-12">
         {/* Logo */}
-        <div className="flex justify-center mb-9 sm:mb-11 animate-enter">
+        <div className="flex justify-center mb-[clamp(20px,4vh,44px)] animate-enter">
           <img
             src="/images/logo.png"
             alt="Vodafone"
-            className="h-14 sm:h-[68px] w-auto"
+            className="h-[clamp(44px,7.5vw,68px)] w-auto"
             onError={(e) => { e.target.style.display = 'none'; e.target.nextElementSibling.style.display = 'flex'; }}
           />
-          <div className="hidden items-center gap-2.5 text-vf font-extrabold text-3xl sm:text-4xl">
-            <FaWifi className="text-2xl sm:text-3xl" /> vodafone
+          <div className="hidden items-center gap-2.5 text-vf font-extrabold text-[clamp(26px,5vw,38px)]">
+            <FaWifi className="text-[0.85em]" /> vodafone
           </div>
         </div>
 
         {/* Heading */}
-        <div className="text-center mb-12 sm:mb-16">
-          <p className="text-ink-4 text-[13.5px] sm:text-[15px] mb-3 animate-enter">Stay connected on Vodafone WiFi</p>
-          <h1 className="text-[32px] sm:text-[50px] font-extrabold text-ink tracking-[-0.03em] leading-[1.03] animate-enter"
+        <div className="text-center mb-[clamp(28px,6vh,64px)]">
+          <p className="text-ink-4 text-[clamp(12.5px,1.6vw,15px)] mb-3 animate-enter">Stay connected on Vodafone WiFi</p>
+          <h1 className="text-[clamp(27px,5.2vw,50px)] font-extrabold text-ink tracking-[-0.03em] leading-[1.05] animate-enter px-2"
             style={{ animationDelay: '60ms' }}>
             Choose the plan that&apos;s <span className="text-vf">right for you</span>
           </h1>
@@ -166,14 +166,14 @@ export default function MainPage() {
 
         {/* Category cards */}
         {plansLoading ? (
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-6 sm:gap-8 max-w-6xl mx-auto">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-5 lg:gap-7 xl:gap-8 max-w-6xl mx-auto">
             {Array.from({ length: 3 }).map((_, i) => (
-              <div key={i} className="h-[480px] rounded-3xl bg-white/[0.03] border border-edge animate-pulse" />
+              <div key={i} className="h-[440px] rounded-3xl bg-white/[0.03] border border-edge animate-pulse" />
             ))}
           </div>
         ) : categories.length > 0 ? (
-          <div className={`grid gap-6 sm:gap-8 items-stretch mx-auto
-            ${categories.length >= 3 ? 'grid-cols-1 sm:grid-cols-3 max-w-6xl'
+          <div className={`grid gap-5 lg:gap-7 xl:gap-8 items-stretch mx-auto
+            ${categories.length >= 3 ? 'grid-cols-1 md:grid-cols-3 max-w-6xl'
               : categories.length === 2 ? 'grid-cols-1 sm:grid-cols-2 max-w-4xl'
               : 'grid-cols-1 max-w-md'}`}>
             {categories.map((cat, i) => (
@@ -230,7 +230,7 @@ export default function MainPage() {
 /* ── Category card (elegant, glass for the featured one) ── */
 function CategoryCard({ cat, featured, index = 0, onOpen }) {
   return (
-    <div className={`relative pt-3 ${featured ? 'sm:-my-6 sm:z-10' : ''}`}>
+    <div className={`relative pt-3 ${featured ? 'md:-my-6 md:z-10' : ''}`}>
       {featured && (
         <div className="absolute top-0 left-1/2 -translate-x-1/2 -translate-y-1/2 z-10 w-11 h-11 rounded-full bg-vf flex items-center justify-center shadow-[0_12px_30px_-6px_rgba(230,0,0,0.7)] ring-[6px] ring-page">
           <FaStar className="text-white text-[15px]" />
@@ -238,27 +238,27 @@ function CategoryCard({ cat, featured, index = 0, onOpen }) {
       )}
       <button
         onClick={onOpen}
-        className={`group w-full h-full text-left rounded-3xl p-8 sm:p-10 flex flex-col animate-enter transition-all duration-300
+        className={`group w-full h-full text-left rounded-3xl p-6 sm:p-7 lg:p-8 xl:p-10 flex flex-col animate-enter transition-all duration-300
           ${featured
             ? 'bg-white/[0.07] backdrop-blur-md border border-white/15 shadow-[0_36px_90px_-30px_rgba(0,0,0,0.85)]'
             : 'bg-white/[0.02] border border-edge hover:bg-white/[0.045] hover:border-edge-hover'}`}
         style={{ animationDelay: `${index * 90}ms` }}
       >
-        <h2 className="text-[25px] sm:text-[29px] font-bold text-ink mb-2 capitalize tracking-tight">{cat.name}</h2>
-        <p className="text-ink-4 text-[14px] leading-relaxed mb-8 sm:min-h-[44px]">{cat.desc}</p>
+        <h2 className="text-[23px] lg:text-[26px] xl:text-[29px] font-bold text-ink mb-2 capitalize tracking-tight">{cat.name}</h2>
+        <p className="text-ink-4 text-[13.5px] lg:text-[14px] leading-relaxed mb-6 lg:mb-8 md:min-h-[44px]">{cat.desc}</p>
 
         {/* From price */}
-        <div className="flex items-baseline gap-1.5 mb-8">
+        <div className="flex items-baseline gap-1.5 mb-6 lg:mb-8">
           <span className="text-ink-4 text-[12.5px] mr-0.5">from</span>
-          <span className="text-[46px] sm:text-[52px] font-extrabold text-vf leading-none tracking-tight">{cat.fromPrice}</span>
+          <span className="text-[42px] lg:text-[46px] xl:text-[52px] font-extrabold text-vf leading-none tracking-tight">{cat.fromPrice}</span>
           <span className="text-ink-4 text-[14px]">/ {cat.period}</span>
         </div>
 
         {/* What you get */}
         <div className="text-[11.5px] font-bold uppercase tracking-[0.12em] text-ink-3 mb-4">What you get</div>
-        <ul className="space-y-3.5 mb-9 flex-1">
+        <ul className="space-y-3 lg:space-y-3.5 mb-7 lg:mb-9 flex-1">
           {cat.points.map((p, i) => (
-            <li key={i} className="flex items-start gap-3 text-[14px] text-ink-2">
+            <li key={i} className="flex items-start gap-3 text-[13.5px] lg:text-[14px] text-ink-2">
               <FaCheck className="text-vf text-[11px] mt-[3px] shrink-0" />
               <span className="leading-snug">{p}</span>
             </li>
@@ -266,7 +266,7 @@ function CategoryCard({ cat, featured, index = 0, onOpen }) {
         </ul>
 
         {/* CTA */}
-        <span className={`w-full inline-flex items-center justify-center gap-2 rounded-xl py-4 text-[15px] font-semibold transition-all duration-200
+        <span className={`w-full inline-flex items-center justify-center gap-2 rounded-xl py-3.5 lg:py-4 text-[14.5px] lg:text-[15px] font-semibold transition-all duration-200
           ${featured
             ? 'bg-vf text-white group-hover:bg-vf-hover shadow-lg shadow-vf/25'
             : 'bg-white/[0.05] text-ink border border-edge group-hover:bg-white/[0.1] group-hover:border-edge-hover'}`}>
@@ -316,7 +316,7 @@ function PlansModal({ category, featured, onClose, onBuy, onError }) {
           style={{ background: 'radial-gradient(circle, rgba(230,0,0,0.20), transparent 70%)' }} />
 
         {/* Header */}
-        <div className="relative flex items-center justify-between px-6 sm:px-8 py-5 border-b border-white/[0.06] shrink-0">
+        <div className="relative flex items-center justify-between px-5 sm:px-7 py-4 sm:py-5 border-b border-white/[0.06] shrink-0">
           <div>
             <p className="text-ink-4 text-[12px] mb-0.5">{category.count} plan{category.count !== 1 ? 's' : ''} available</p>
             <h2 className="text-[22px] sm:text-[26px] font-extrabold text-ink capitalize leading-tight tracking-tight">
@@ -333,9 +333,9 @@ function PlansModal({ category, featured, onClose, onBuy, onError }) {
         </div>
 
         {/* Body */}
-        <div className="relative p-5 sm:p-7 overflow-y-auto">
+        <div className="relative p-4 sm:p-6 lg:p-7 overflow-y-auto">
           <div className={`grid gap-4 sm:gap-5
-            ${plans.length >= 3 ? 'sm:grid-cols-3'
+            ${plans.length >= 3 ? 'md:grid-cols-3'
               : plans.length === 2 ? 'sm:grid-cols-2 max-w-2xl mx-auto'
               : 'max-w-sm mx-auto'}`}>
             {plans.map((plan) => (
