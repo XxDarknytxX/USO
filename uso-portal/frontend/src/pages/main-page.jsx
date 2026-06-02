@@ -3,7 +3,7 @@
  */
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
-  FaCheck, FaArrowRight, FaTimes, FaWifi, FaStar, FaLock,
+  FaCheck, FaArrowRight, FaTimes, FaWifi, FaStar, FaLock, FaBolt,
   FaCheckCircle, FaExclamationCircle,
 } from 'react-icons/fa';
 
@@ -300,13 +300,18 @@ function PlansModal({ category, featured, onClose, onBuy, onError }) {
   const close = () => { setShow(false); closeTimer.current = setTimeout(onClose, 250); };
   const plans = category.plans || [];
 
+  // Modal hugs its content so it stays symmetric no matter the plan count.
+  const widthClass = plans.length >= 3 ? 'sm:max-w-4xl'
+    : plans.length === 2 ? 'sm:max-w-3xl'
+    : 'sm:max-w-md';
+
   return (
     <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center sm:p-6" onClick={close}>
       <div className={`absolute inset-0 bg-black/70 backdrop-blur-md transition-opacity duration-300 ${show ? 'opacity-100' : 'opacity-0'}`} />
 
       <div
         onClick={(e) => e.stopPropagation()}
-        className={`relative w-full sm:max-w-4xl max-h-[92vh] max-h-[92dvh] flex flex-col overflow-hidden
+        className={`relative w-full ${widthClass} max-h-[92vh] max-h-[92dvh] flex flex-col overflow-hidden
                     rounded-t-3xl sm:rounded-3xl border border-white/10 shadow-2xl transition-all duration-300
                     ${show ? 'opacity-100 translate-y-0 sm:scale-100' : 'opacity-0 translate-y-10 sm:translate-y-3 sm:scale-[0.98]'}`}
         style={{ background: 'linear-gradient(180deg, #140b0d 0%, #0c0709 100%)' }}
@@ -335,9 +340,9 @@ function PlansModal({ category, featured, onClose, onBuy, onError }) {
         {/* Body */}
         <div className="relative p-4 sm:p-6 lg:p-7 overflow-y-auto">
           <div className={`grid gap-4 sm:gap-5
-            ${plans.length >= 3 ? 'md:grid-cols-3'
-              : plans.length === 2 ? 'sm:grid-cols-2 max-w-2xl mx-auto'
-              : 'max-w-sm mx-auto'}`}>
+            ${plans.length >= 3 ? 'sm:grid-cols-2 lg:grid-cols-3'
+              : plans.length === 2 ? 'sm:grid-cols-2'
+              : 'grid-cols-1'}`}>
             {plans.map((plan) => (
               <ModalPlanCard key={plan.id} plan={plan} popular={Boolean(plan.popular)} onBuy={onBuy} onError={onError} />
             ))}
@@ -352,11 +357,12 @@ function PlansModal({ category, featured, onClose, onBuy, onError }) {
 function ModalPlanCard({ plan, popular, onBuy, onError }) {
   const [busy, setBusy] = useState(false);
   const period = periodOf(plan.category);
+  const dataLabel = plan.data ? String(plan.data) : null;
   const features = [
-    plan.data ? `${plan.data} data` : null,
     ...(Array.isArray(plan.features) ? plan.features : []),
+    `Valid for one ${period}`,
     'Unlimited calls & texts',
-  ].filter(Boolean).slice(0, 6);
+  ].filter(Boolean).slice(0, 5);
 
   const buy = async () => {
     setBusy(true);
@@ -366,31 +372,51 @@ function ModalPlanCard({ plan, popular, onBuy, onError }) {
   };
 
   return (
-    <div className={`relative flex flex-col rounded-2xl p-6 transition-all duration-300
+    <div className={`group relative flex flex-col rounded-2xl p-6 sm:p-7 overflow-hidden transition-all duration-300 hover:-translate-y-0.5
       ${popular
-        ? 'bg-white/[0.06] border border-vf/40 shadow-[0_0_40px_-16px_rgba(230,0,0,0.4)]'
-        : 'bg-white/[0.02] border border-edge'}`}>
+        ? 'border border-vf/45 bg-gradient-to-b from-vf/[0.13] via-white/[0.02] to-transparent shadow-[0_26px_64px_-30px_rgba(230,0,0,0.6)]'
+        : 'border border-edge bg-white/[0.02] hover:bg-white/[0.035] hover:border-edge-hover'}`}>
       {popular && (
-        <span className="absolute top-4 right-4 px-2 py-0.5 rounded-full bg-vf/15 text-vf text-[10px] font-bold uppercase tracking-wide border border-vf/25">
-          Popular
+        <span className="absolute top-5 right-5 inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-vf text-white text-[10px] font-bold uppercase tracking-wider shadow-lg shadow-vf/30">
+          <FaStar className="text-[8px]" /> Popular
         </span>
       )}
 
-      <h3 className="text-[19px] font-bold text-ink mb-1 tracking-tight">{plan.name}</h3>
-      {plan.description && (
-        <p className="text-ink-4 text-[12.5px] leading-relaxed mb-5 line-clamp-2">{plan.description}</p>
-      )}
-      {!plan.description && <div className="mb-5" />}
+      {/* Name + blurb */}
+      <h3 className={`text-[19px] font-bold text-ink mb-1 tracking-tight ${popular ? 'pr-20' : ''}`}>{plan.name}</h3>
+      <p className="text-ink-4 text-[12.5px] leading-relaxed mb-5 line-clamp-2 min-h-[36px]">
+        {plan.description || `Stay connected for a full ${period}.`}
+      </p>
 
-      <div className="flex items-baseline gap-1.5 mb-6">
-        <span className="text-[34px] font-extrabold text-vf leading-none tracking-tight">{plan.price}</span>
-        <span className="text-ink-4 text-[13px]">/ {period}</span>
+      {/* Price */}
+      <div className="flex items-end gap-1.5 mb-5">
+        <span className="text-[40px] font-extrabold text-vf leading-[0.85] tracking-tight">{plan.price}</span>
+        <span className="text-ink-4 text-[13px] mb-1">/ {period}</span>
       </div>
 
-      <ul className="space-y-2.5 flex-1 mb-6">
+      {/* Data highlight */}
+      {dataLabel && (
+        <div className="mb-5 flex items-center gap-3 rounded-xl bg-white/[0.04] border border-edge px-3.5 py-2.5">
+          <span className="w-8 h-8 rounded-lg bg-vf/15 flex items-center justify-center shrink-0">
+            <FaBolt className="text-vf text-[12px]" />
+          </span>
+          <div className="leading-tight">
+            <div className="text-ink font-bold text-[15px]">{dataLabel}</div>
+            <div className="text-ink-4 text-[11px]">high-speed data included</div>
+          </div>
+        </div>
+      )}
+
+      {/* Divider */}
+      <div className="h-px bg-white/[0.07] mb-5" />
+
+      {/* Features */}
+      <ul className="space-y-3 flex-1 mb-6">
         {features.map((f, i) => (
           <li key={i} className="flex items-start gap-2.5 text-[13px] text-ink-2">
-            <FaCheck className="text-vf text-[9px] mt-[3px] shrink-0" />
+            <span className="mt-[1px] w-[18px] h-[18px] rounded-full bg-vf/15 flex items-center justify-center shrink-0">
+              <FaCheck className="text-vf text-[8px]" />
+            </span>
             <span className="leading-snug">{f}</span>
           </li>
         ))}
@@ -399,7 +425,7 @@ function ModalPlanCard({ plan, popular, onBuy, onError }) {
       <button
         onClick={buy}
         disabled={busy}
-        className={`w-full flex items-center justify-center gap-2 rounded-xl text-sm font-semibold py-3 transition-all duration-200 outline-none
+        className={`w-full flex items-center justify-center gap-2 rounded-xl text-sm font-semibold py-3.5 transition-all duration-200 outline-none
           ${busy
             ? 'bg-white/5 text-ink-5 cursor-not-allowed'
             : popular
@@ -412,7 +438,7 @@ function ModalPlanCard({ plan, popular, onBuy, onError }) {
             Processing…
           </>
         ) : (
-          <>Get this plan <FaArrowRight className="text-[10px]" /></>
+          <>Get this plan <FaArrowRight className="text-[10px] transition-transform duration-200 group-hover:translate-x-0.5" /></>
         )}
       </button>
     </div>
