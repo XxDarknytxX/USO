@@ -3,7 +3,7 @@
  */
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
-  FaCheck, FaArrowRight, FaTimes, FaWifi,
+  FaCheck, FaArrowRight, FaTimes, FaWifi, FaStar, FaLock,
   FaCheckCircle, FaExclamationCircle,
 } from 'react-icons/fa';
 
@@ -158,9 +158,9 @@ export default function MainPage() {
         {/* Heading */}
         <div className="text-center mb-12 sm:mb-16">
           <p className="text-ink-4 text-[13.5px] sm:text-[15px] mb-3 animate-enter">Stay connected on Vodafone WiFi</p>
-          <h1 className="font-serif text-[34px] sm:text-[52px] font-semibold text-ink tracking-[-0.01em] leading-[1.04] animate-enter"
+          <h1 className="text-[32px] sm:text-[50px] font-extrabold text-ink tracking-[-0.03em] leading-[1.03] animate-enter"
             style={{ animationDelay: '60ms' }}>
-            Choose a plan that&apos;s <span className="text-vf">right for you</span>
+            Choose the plan that&apos;s <span className="text-vf">right for you</span>
           </h1>
         </div>
 
@@ -201,10 +201,14 @@ export default function MainPage() {
 
       {/* Footer */}
       <footer className="relative w-full px-5 pb-9 pt-2">
-        <p className="text-center text-ink-5 text-[12.5px]">
-          Pay securely with M-PAiSA · No setup fees · Need help?{' '}
-          <span className="text-ink-4 underline underline-offset-2">Contact support</span>
-        </p>
+        <div className="flex items-center justify-center gap-2 text-ink-5 text-[12.5px]">
+          <FaLock className="text-[10px] text-ink-4" />
+          <span>Secured by M-PAiSA</span>
+          <span className="text-ink-5/60">·</span>
+          <span>Instant activation</span>
+          <span className="text-ink-5/60">·</span>
+          <span>No setup fees</span>
+        </div>
       </footer>
 
       {/* Modal */}
@@ -228,8 +232,8 @@ function CategoryCard({ cat, featured, index = 0, onOpen }) {
   return (
     <div className="relative pt-3">
       {featured && (
-        <div className="absolute top-0 left-1/2 -translate-x-1/2 -translate-y-1/2 z-10 px-3.5 py-1 rounded-full bg-vf text-white text-[10.5px] font-bold tracking-wide shadow-lg shadow-vf/30 whitespace-nowrap">
-          Best value
+        <div className="absolute top-0 left-1/2 -translate-x-1/2 -translate-y-1/2 z-10 w-10 h-10 rounded-full bg-vf flex items-center justify-center shadow-[0_10px_26px_-6px_rgba(230,0,0,0.65)] ring-[5px] ring-page">
+          <FaStar className="text-white text-[14px]" />
         </div>
       )}
       <button
@@ -240,13 +244,13 @@ function CategoryCard({ cat, featured, index = 0, onOpen }) {
             : 'bg-white/[0.02] border border-edge hover:bg-white/[0.045] hover:border-edge-hover'}`}
         style={{ animationDelay: `${index * 90}ms` }}
       >
-        <h2 className="font-serif text-[26px] sm:text-[30px] font-semibold text-ink mb-1.5 capitalize">{cat.name}</h2>
+        <h2 className="text-[22px] sm:text-[25px] font-bold text-ink mb-1.5 capitalize tracking-tight">{cat.name}</h2>
         <p className="text-ink-4 text-[13.5px] leading-relaxed mb-7">{cat.desc}</p>
 
         {/* From price */}
         <div className="flex items-baseline gap-1.5 mb-7">
           <span className="text-ink-4 text-[12.5px] mr-0.5">from</span>
-          <span className="font-serif text-[40px] sm:text-[46px] font-semibold text-vf leading-none">{cat.fromPrice}</span>
+          <span className="text-[38px] sm:text-[42px] font-extrabold text-vf leading-none tracking-tight">{cat.fromPrice}</span>
           <span className="text-ink-4 text-[13px]">/ {cat.period}</span>
         </div>
 
@@ -315,7 +319,7 @@ function PlansModal({ category, featured, onClose, onBuy, onError }) {
         <div className="relative flex items-center justify-between px-6 sm:px-8 py-5 border-b border-white/[0.06] shrink-0">
           <div>
             <p className="text-ink-4 text-[12px] mb-0.5">{category.count} plan{category.count !== 1 ? 's' : ''} available</p>
-            <h2 className="font-serif text-[24px] sm:text-[28px] font-semibold text-ink capitalize leading-tight">
+            <h2 className="text-[22px] sm:text-[26px] font-extrabold text-ink capitalize leading-tight tracking-tight">
               {category.name} plans
             </h2>
           </div>
@@ -372,14 +376,14 @@ function ModalPlanCard({ plan, popular, onBuy, onError }) {
         </span>
       )}
 
-      <h3 className="font-serif text-[22px] font-semibold text-ink mb-1">{plan.name}</h3>
+      <h3 className="text-[19px] font-bold text-ink mb-1 tracking-tight">{plan.name}</h3>
       {plan.description && (
         <p className="text-ink-4 text-[12.5px] leading-relaxed mb-5 line-clamp-2">{plan.description}</p>
       )}
       {!plan.description && <div className="mb-5" />}
 
       <div className="flex items-baseline gap-1.5 mb-6">
-        <span className="font-serif text-[36px] font-semibold text-vf leading-none">{plan.price}</span>
+        <span className="text-[34px] font-extrabold text-vf leading-none tracking-tight">{plan.price}</span>
         <span className="text-ink-4 text-[13px]">/ {period}</span>
       </div>
 
@@ -408,7 +412,7 @@ function ModalPlanCard({ plan, popular, onBuy, onError }) {
             Processing…
           </>
         ) : (
-          <>Subscribe <FaArrowRight className="text-[10px]" /></>
+          <>Get this plan <FaArrowRight className="text-[10px]" /></>
         )}
       </button>
     </div>
