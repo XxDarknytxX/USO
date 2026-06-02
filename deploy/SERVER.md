@@ -142,9 +142,27 @@ bash deploy/deploy-app.sh        # both
 | uso_1 | `site1.vodafonefiji.cloud` | uso_1 | env `RUIJIE_GROUP_ID` |
 | uso_2 | `site2.vodafonefiji.cloud` | uso_2 | `7847952` |
 
+### Ruijie pre-auth allowlist (walled garden)
+Before a device authenticates it can only reach domains in each Ruijie
+project's **Pre-auth Allowlist**. Two URL entries cover everything — the
+wildcard means **no per-site entry is ever needed**:
+
+| Type | Entry | Why |
+|---|---|---|
+| URL | `*.vodafonefiji.cloud` | the portal — every site (site1…siteN + admin) |
+| URL | `pay.mpaisa.vodafone.com.fj` | M-PAiSA payment gateway |
+
+- If the M-PAiSA page stalls *mid-payment*, it's pulling sub-resources from
+  another host (e.g. `*.vodafone.com.fj` or a 3-D-Secure/bank domain) — add those.
+  Confirm the live payment host from `pm2 logs uso-portal` (`destinationurl`).
+- Do **NOT** allowlist captive-detection probes (`captive.apple.com`,
+  `connectivitycheck.gstatic.com`, `*.msftconnecttest.com`) — those are what
+  trigger the portal to appear.
+
 ### Add a new site (3 … 30) — no server changes
 1. `cd Resources/sites && ./new-site.sh 3` → `site3.zip` (captive HTML, outside the repo).
-2. Ruijie Cloud (uso_3 project): upload `site3.zip` as Custom HTML + allowlist the domain.
+2. Ruijie Cloud (uso_3 project): upload `site3.zip` as Custom HTML. The
+   `*.vodafonefiji.cloud` allowlist entry already covers the domain.
 3. Admin → **Network → Add site** (name `uso_3`, hostname `site3.vodafonefiji.cloud`, its groupId) → switch to it → **Sync** → add its plans (use site-prefixed plan keys, e.g. `s3-daily-1gb`; plan keys are globally unique).
 
 Wildcard DNS + wildcard cert + wildcard nginx + host-aware backend mean steps above are all that's needed.
