@@ -1,27 +1,38 @@
 # =====================================================================
 # Nginx vhosts for the USO stack.
 #
-# Two hostnames:
-#   - portal.example.com  → public captive-portal payment app
-#                           (USO Portal frontend + /api/* to :5000)
-#   - admin.example.com   → internal admin dashboard
-#                           (VV frontend + /api/* to :4001)
+# Multi-site: ONE USO Portal vhost serves EVERY site domain
+# (portal / site1 / site2 / … siteN.vodafonefiji.cloud). The backend tells
+# the sites apart from the forwarded Host header, so adding a site = adding
+# its domain to the USO `server_name` below (+ a cert). No new vhost per site.
+#
+# Hostnames:
+#   - portal / site1 / site2 / … .vodafonefiji.cloud
+#                              → public captive-portal payment app
+#                                (USO Portal frontend + /api/* + /payment/* to :5000)
+#   - admin.vodafonefiji.cloud → internal admin dashboard
+#                                (VV frontend + /api/* to :4001)
 #
 # Place at: /etc/nginx/sites-available/uso-stack
 # Symlink:  sudo ln -s /etc/nginx/sites-available/uso-stack /etc/nginx/sites-enabled/
 # Test:     sudo nginx -t
 # Reload:   sudo systemctl reload nginx
 #
-# SSL:
-#   sudo certbot --nginx -d portal.example.com -d admin.example.com
-# Certbot will add 443 server blocks and HTTP→HTTPS redirects in place.
+# SSL (list every site domain + admin in ONE cert):
+#   sudo certbot --nginx \
+#     -d portal.vodafonefiji.cloud -d site1.vodafonefiji.cloud \
+#     -d site2.vodafonefiji.cloud -d admin.vodafonefiji.cloud
+#   Certbot adds the 443 blocks + HTTP→HTTPS redirects in place.
+#   Adding a later site: re-run certbot with --expand and the extra -d.
 #
-# IMPORTANT — replace these tokens before enabling:
-#   portal.example.com    → your public portal hostname
-#   admin.example.com     → your admin hostname (can be the same domain
-#                           on a different subdomain, or use a different
-#                           port if you don't want a second DNS record)
-#   /var/www/uso-portal   → wherever you cloned the repo
+# IMPORTANT:
+#   - The DNS A record for each site domain must point at the server FIRST,
+#     or certbot's challenge fails.
+#   - Add each new site's domain to the USO `server_name` line (+ cert).
+#   - Keep `proxy_set_header Host $host;` — the backend resolves which site
+#     (and thus which plans/vouchers) from it. Without it every site would
+#     fall back to site1.
+#   - /var/www/uso-portal → wherever you cloned the repo.
 # =====================================================================
 
 upstream uso_backend {
@@ -35,12 +46,14 @@ upstream vv_backend {
 }
 
 # =====================================================================
-# Public Portal — portal.example.com
+# Public Portal — ALL site domains (one vhost; backend resolves by Host)
+#   Add new sites to this server_name line:
+#     server_name portal... site1... site2... site3... ;
 # =====================================================================
 server {
     listen 80;
     listen [::]:80;
-    server_name portal.example.com;
+    server_name portal.vodafonefiji.cloud site1.vodafonefiji.cloud site2.vodafonefiji.cloud;
 
     root /var/www/uso-portal/uso-portal/frontend/build;
     index index.html;
@@ -59,7 +72,7 @@ server {
     location ~ ^/(api|payment)/ {
         proxy_pass         http://uso_backend;
         proxy_http_version 1.1;
-        proxy_set_header   Host              $host;
+        proxy_set_header   Host              $host;   # ← backend resolves the site from this
         proxy_set_header   X-Real-IP         $remote_addr;
         proxy_set_header   X-Forwarded-For   $proxy_add_x_forwarded_for;
         proxy_set_header   X-Forwarded-Proto $scheme;
@@ -82,14 +95,14 @@ server {
 }
 
 # =====================================================================
-# Admin Dashboard — admin.example.com
+# Admin Dashboard — admin.vodafonefiji.cloud
 # Restrict by IP / VPN / basic auth in production (this app handles
 # voucher management and user creation).
 # =====================================================================
 server {
     listen 80;
     listen [::]:80;
-    server_name admin.example.com;
+    server_name admin.vodafonefiji.cloud;
 
     root /var/www/uso-portal/voucher-validation/frontend/build;
     index index.html;
