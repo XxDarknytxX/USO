@@ -187,26 +187,26 @@ function PortalGate() {
   // No session → "Connect to WiFi" page
   if (gate === 'no-session') {
     return (
-      <div className="min-h-screen min-h-[100dvh] flex items-center justify-center px-4 font-sans">
-        <div className="w-full max-w-md text-center animate-enter">
-          <div className="flex justify-center mb-8">
+      <div className="min-h-screen min-h-[100dvh] flex items-center justify-center px-5 font-sans">
+        <div className="w-full max-w-sm text-center animate-enter">
+          <div className="flex justify-center mb-7">
             <img
               src="/images/logo.png"
               alt="Vodafone"
-              className="h-12 w-auto opacity-60"
+              className="h-8 w-auto opacity-80"
               onError={(e) => { e.target.style.display = 'none'; e.target.nextElementSibling.style.display = 'flex'; }}
             />
-            <div className="hidden items-center gap-1.5 text-vf/60 font-bold text-lg">
-              <FaWifi className="text-sm" /> vodafone
+            <div className="hidden items-center gap-1.5 text-vf font-extrabold text-lg">
+              <FaWifi className="text-base" /> vodafone
             </div>
           </div>
-          <div className="bg-card/80 backdrop-blur-sm border border-edge rounded-3xl p-8 sm:p-10">
-            <div className="w-20 h-20 rounded-2xl bg-vf/10 border border-vf/20 flex items-center justify-center mx-auto mb-6">
-              <FaWifi className="text-3xl text-vf" />
+          <div className="bg-card/70 backdrop-blur-sm border border-edge rounded-2xl p-7 sm:p-8">
+            <div className="w-16 h-16 rounded-2xl bg-vf/10 border border-vf/15 flex items-center justify-center mx-auto mb-5">
+              <FaWifi className="text-2xl text-vf" />
             </div>
-            <h1 className="text-2xl sm:text-3xl font-bold text-ink mb-3">Connect to WiFi</h1>
-            <p className="text-sm sm:text-base text-ink-3 leading-relaxed">
-              Please connect to the <span className="text-vf font-semibold">Vodafone WiFi</span> network to access data plans.
+            <h1 className="text-[22px] sm:text-[24px] font-bold text-ink tracking-tight mb-2">Connect to WiFi</h1>
+            <p className="text-[13.5px] sm:text-sm text-ink-3 leading-relaxed">
+              Join the <span className="text-vf font-semibold">Vodafone WiFi</span> network to browse and buy data plans.
             </p>
           </div>
         </div>

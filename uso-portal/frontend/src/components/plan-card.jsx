@@ -121,24 +121,20 @@ function PlansModal({ selectedCategory, categoryPlans, loading, onClose, onBuy, 
         onClick={(e) => e.stopPropagation()}
       >
         <div
-          className="rounded-3xl overflow-hidden
-                     shadow-[0_32px_80px_-16px_rgba(0,0,0,0.8)]"
+          className="rounded-2xl overflow-hidden
+                     shadow-[0_32px_80px_-16px_rgba(0,0,0,0.85)]"
           style={{
-            background: t.modalBg || 'rgba(24,24,27,0.98)',
+            background: t.modalBg || 'rgba(20,20,23,0.98)',
             borderWidth: '1px',
             borderStyle: 'solid',
             borderColor: t.modalBorder || 'rgba(255,255,255,0.08)',
           }}
         >
           {/* Themed accent bar at top */}
-          <div className={`h-[3px] bg-gradient-to-r ${t.accentBar}`} />
+          <div className={`h-[2px] bg-gradient-to-r ${t.accentBar}`} />
 
-          {/* Large themed glow at top-left corner of modal */}
-          <div className="absolute top-0 left-0 w-[500px] h-[300px] rounded-full blur-[100px] pointer-events-none opacity-80"
-            style={{ background: t.glowRaw || t.raw }}
-          />
-          {/* Secondary glow at top-right — subtler */}
-          <div className="absolute top-0 right-0 w-[300px] h-[200px] rounded-full blur-[90px] pointer-events-none opacity-40"
+          {/* Single soft ambient glow at the top — refined, not heavy */}
+          <div className="absolute -top-12 left-1/2 -translate-x-1/2 w-[420px] h-[220px] rounded-full blur-[90px] pointer-events-none opacity-50"
             style={{ background: t.glowRaw || t.raw }}
           />
 
@@ -223,10 +219,10 @@ export default function PlanCard({ plan, onBuy, index = 0, isModal = false, them
 
   return (
     <div
-      className="group relative flex flex-col overflow-hidden bg-card/80 backdrop-blur-sm border border-edge rounded-3xl
-                 transition-all duration-300 hover:border-edge-hover hover:bg-card
+      className="group relative flex flex-col overflow-hidden bg-card/70 backdrop-blur-sm border border-edge rounded-2xl
+                 transition-all duration-300 hover:border-vf/35 hover:bg-card hover:-translate-y-0.5
                  animate-enter"
-      style={{ animationDelay: `${index * 100}ms` }}
+      style={{ animationDelay: `${index * 70}ms` }}
     >
       {/* Subtle gradient tint on hover */}
       <div className="absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity duration-500 pointer-events-none"
@@ -244,28 +240,28 @@ export default function PlanCard({ plan, onBuy, index = 0, isModal = false, them
       )}
 
       {/* Content */}
-      <div className="relative p-7 sm:p-8 flex flex-col h-full">
+      <div className="relative p-6 flex flex-col h-full">
 
         {/* Icon */}
-        <div className={`w-14 h-14 rounded-2xl ${t.iconBg} border
-                        flex items-center justify-center shrink-0 mb-6
-                        transition-transform duration-300 group-hover:scale-110`}>
-          <Icon className={`${t.iconText} text-xl`} />
+        <div className={`w-11 h-11 rounded-xl ${t.iconBg} border
+                        flex items-center justify-center shrink-0 mb-5
+                        transition-transform duration-300 group-hover:scale-105`}>
+          <Icon className={`${t.iconText} text-lg`} />
         </div>
 
         {/* Name */}
-        <h3 className="text-xl font-bold text-ink mb-2">{plan.name}</h3>
+        <h3 className="text-[18px] font-bold text-ink mb-2">{plan.name}</h3>
 
         {/* Description */}
         {plan.description && (
-          <p className="text-sm text-ink-4 leading-relaxed mb-6 line-clamp-3 flex-1">{plan.description}</p>
+          <p className="text-[13px] text-ink-4 leading-relaxed mb-5 line-clamp-3 flex-1">{plan.description}</p>
         )}
-        {!plan.description && <div className="flex-1 mb-6" />}
+        {!plan.description && <div className="flex-1 mb-5" />}
 
         {/* Price */}
-        <div className="mb-6">
+        <div className="mb-5">
           <div className="flex items-baseline gap-1.5">
-            <span className="text-3xl font-extrabold text-ink tracking-tight">{plan.price}</span>
+            <span className="text-[28px] font-extrabold text-ink tracking-tight">{plan.price}</span>
             <span className="text-sm text-ink-5 font-medium">/ {plan.duration || 'day'}</span>
           </div>
         </div>
@@ -275,7 +271,7 @@ export default function PlanCard({ plan, onBuy, index = 0, isModal = false, them
           onClick={buy}
           disabled={busy}
           className={`w-full flex items-center justify-center gap-2.5 rounded-xl text-sm font-semibold
-                      py-3.5 transition-all duration-200 outline-none cursor-pointer
+                      py-3 transition-all duration-200 outline-none cursor-pointer
             ${busy
               ? 'bg-white/5 text-ink-5 cursor-not-allowed'
               : `${t.btnBg} text-white active:scale-[0.97]`
