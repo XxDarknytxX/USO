@@ -59,11 +59,9 @@ case "$TARGET" in
 esac
 
 log "Starting/reloading PM2 apps"
-if pm2 jlist 2>/dev/null | grep -q '"name":"uso-portal"\|"name":"voucher-validation"'; then
-  pm2 reload deploy/ecosystem.config.cjs --update-env
-else
-  pm2 start deploy/ecosystem.config.cjs
-fi
+# startOrReload starts any new per-site instances (from deploy/sites.json) and
+# zero-downtime-reloads the ones already running.
+pm2 startOrReload deploy/ecosystem.config.cjs --update-env
 
 log "Persisting PM2 process list"
 pm2 save

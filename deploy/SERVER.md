@@ -28,16 +28,29 @@ _Last updated: 2026-06-03._
 
 ## 2. Apps & ports
 
-| App | PM2 name (id) | Backend port | Frontend build served by nginx |
+**One USO Portal instance per site** (a PM2 process each, generated from
+`deploy/sites.json`) + one shared admin. All USO instances run the same code and
+share the same frontend build; they differ only by `PORT` / `CORS_ORIGIN` /
+`MPAISA_RETURN_URL` (M-PAiSA creds + VV API are shared, from
+`uso-portal/backend/.env`).
+
+| App | PM2 name | Backend port | Serves |
 |---|---|---|---|
-| USO Portal (captive payment) | `uso-portal` (0) | `127.0.0.1:5000` | `/var/www/uso-portal/uso-portal/frontend/build` |
-| Voucher Validation (admin) | `voucher-validation` (1) | `127.0.0.1:4001` | `/var/www/uso-portal/voucher-validation/frontend/build` |
+| USO Portal — site1 | `uso-site1` | `127.0.0.1:5001` | `site1.vodafonefiji.cloud` + `portal.vodafonefiji.cloud` |
+| USO Portal — site2 | `uso-site2` | `127.0.0.1:5002` | `site2.vodafonefiji.cloud` |
+| USO Portal — siteN | `uso-siteN` | `127.0.0.1:500N` | added via `deploy/sites.json` |
+| Voucher Validation (admin) | `voucher-validation` | `127.0.0.1:4001` | the single admin/API |
+
+Shared frontend build: `/var/www/uso-portal/uso-portal/frontend/build`. nginx
+routes each domain's `/api` + `/payment` to its instance via the host→port map
+in `/etc/nginx/conf.d/uso-site-map.conf` (generated from `sites.json` by
+`deploy/sync-sites.sh`).
 
 ```bash
 pm2 ls                       # status
-pm2 logs uso-portal          # USO backend logs
+pm2 logs uso-site1           # one site's backend logs
 pm2 logs voucher-validation  # VV backend logs
-pm2 restart uso-portal voucher-validation
+pm2 restart all              # or: pm2 restart uso-site1 uso-site2 voucher-validation
 ```
 
 ---
@@ -159,13 +172,23 @@ wildcard means **no per-site entry is ever needed**:
   `connectivitycheck.gstatic.com`, `*.msftconnecttest.com`) — those are what
   trigger the portal to appear.
 
-### Add a new site (3 … 30) — no server changes
-1. `cd Resources/sites && ./new-site.sh 3` → `site3.zip` (captive HTML, outside the repo).
-2. Ruijie Cloud (uso_3 project): upload `site3.zip` as Custom HTML. The
-   `*.vodafonefiji.cloud` allowlist entry already covers the domain.
-3. Admin → **Network → Add site** (name `uso_3`, hostname `site3.vodafonefiji.cloud`, its groupId) → switch to it → **Sync** → add its plans (use site-prefixed plan keys, e.g. `s3-daily-1gb`; plan keys are globally unique).
+### Add a new site (3 … 30) — its own instance
+DNS + cert + the wildcard vhost already cover any `siteN.vodafonefiji.cloud`, so
+a new site is: a manifest entry → its PM2 instance → its nginx route → content.
 
-Wildcard DNS + wildcard cert + wildcard nginx + host-aware backend mean steps above are all that's needed.
+1. **Captive HTML** (your machine): `cd Resources/sites && ./new-site.sh 3` → `site3.zip`.
+2. **Manifest** — add to `deploy/sites.json` under `uso`:
+   `{ "name": "site3", "host": "site3.vodafonefiji.cloud", "port": 5003, "groupId": "<ruijie group>" }`
+   (next free port; `groupId` optional). Commit + push.
+3. **On the server**:
+   ```bash
+   cd /var/www/uso-portal && git pull
+   bash deploy/deploy-app.sh uso        # starts uso-site3 on :5003
+   sudo bash deploy/sync-sites.sh       # routes site3.vodafonefiji.cloud → :5003 + reloads nginx
+   ```
+4. **Ruijie Cloud** (uso_3 project): upload `site3.zip` as Custom HTML. The
+   `*.vodafonefiji.cloud` allowlist entry already covers the domain.
+5. **Admin** → **Network → Add site** (name `uso_3`, hostname `site3.vodafonefiji.cloud`, its groupId) → switch to it → **Sync** → add its plans (site-prefixed plan keys, e.g. `s3-daily-1gb`; plan keys are globally unique).
 
 ---
 

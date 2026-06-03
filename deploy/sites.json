@@ -1,0 +1,7 @@
+{
+  "_comment": "Source of truth for per-site USO Portal instances. Add a site here, then run deploy/sync-sites.sh (regenerates the nginx host->port map) + bash deploy/deploy-app.sh uso (starts the instance). Shared values (M-PAiSA creds, VV API URL/secret) live in uso-portal/backend/.env; only the per-site overrides below differ. groupId is optional (the backend resolves the site from its Host); set it to pin the instance explicitly.",
+  "uso": [
+    { "name": "site1", "host": "site1.vodafonefiji.cloud", "port": 5001, "groupId": null },
+    { "name": "site2", "host": "site2.vodafonefiji.cloud", "port": 5002, "groupId": "7847952" }
+  ]
+}
