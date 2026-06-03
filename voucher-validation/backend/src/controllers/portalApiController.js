@@ -130,7 +130,7 @@ export function makePortalApiController(pool) {
 
         // Check plan config exists and is active
         const [configRows] = await conn.query(
-          'SELECT id FROM portal_plan_configs WHERE id = ? AND is_active = 1',
+          'SELECT id, group_id FROM portal_plan_configs WHERE id = ? AND is_active = 1',
           [planConfigId]
         );
         if (configRows.length === 0) {
@@ -159,11 +159,19 @@ export function makePortalApiController(pool) {
           });
         }
 
-        // Find an available voucher using FOR UPDATE to prevent race conditions
+        // Find an available voucher (FOR UPDATE to prevent races). Scope to the
+        // plan's site (group_id) too, so a site's purchase can only claim THAT
+        // site's vouchers — even if two sites happen to share a user_group_id.
+        // Ruijie keeps projects isolated (a voucher only auths a device whose
+        // session is in the same project), so a cross-site voucher wouldn't work.
+        const planGroupId = configRows[0].group_id || null;
+        const groupClause = planGroupId ? 'AND v.group_id = ? COLLATE utf8mb4_0900_ai_ci' : '';
+        const voucherParams = planGroupId ? [userGroupId, planGroupId] : [userGroupId];
         const [vouchers] = await conn.query(
           `SELECT v.id, v.uuid, v.voucher_code
            FROM vouchers v
            WHERE v.user_group_id = ? COLLATE utf8mb4_0900_ai_ci
+             ${groupClause}
              AND v.status = '1'
              AND v.disable_status = 0
              AND v.id NOT IN (
@@ -173,7 +181,7 @@ export function makePortalApiController(pool) {
            ORDER BY v.create_time ASC
            LIMIT 1
            FOR UPDATE`,
-          [userGroupId]
+          voucherParams
         );
 
         if (vouchers.length === 0) {
@@ -310,14 +318,16 @@ export function makePortalApiController(pool) {
         //   '1' = Unused (not yet activated)
         //   '2' = In-use  (active / connected)
         //   '3' = Expired
+        const statusStr = String(v.status);
         const isDisabled = Number(disableStatus) === 1;
-        const isExpired = v.status === '3' || (expiryMs !== null && expiryMs < now);
+        const isExpired = statusStr === '3' || (expiryMs !== null && expiryMs < now);
         // Also treat as inactive if data quota or time is fully consumed
         const dataExhausted = v.quota > 0 && remainingQuota <= 0;
         const timeExhausted = v.time_period > 0 && remainingTime <= 0;
         // Usable only if unused/in-use, not expired, not exhausted, not disabled.
+        // (String() so a numeric DB status still matches '1'/'2'.)
         const isActive =
-          (v.status === '1' || v.status === '2') &&
+          (statusStr === '1' || statusStr === '2') &&
           !isExpired && !dataExhausted && !timeExhausted && !isDisabled;
 
         return {
@@ -351,11 +361,25 @@ export function makePortalApiController(pool) {
           return send.ok(res, cached.data);
         }
 
-        // 2. Try live fetch from Ruijie Cloud API
+        // Look up the voucher's site (Ruijie group) + admin disable flag once.
+        // Multi-site: a voucher lives in ONE Ruijie project, so we must query
+        // THAT project's live list — the default (env) group won't contain
+        // another site's voucher, which left its status/stats stale before this.
+        let voucherGroupId = null;
+        let localDisable = 0;
+        try {
+          const [dr] = await pool.query('SELECT group_id, disable_status FROM vouchers WHERE voucher_code = ? LIMIT 1', [code]);
+          if (dr[0]) {
+            voucherGroupId = dr[0].group_id || null;
+            localDisable = Number(dr[0].disable_status) || 0;
+          }
+        } catch { /* ignore */ }
+
+        // 2. Try live fetch from Ruijie Cloud API (scoped to the voucher's project)
         let liveVoucher = null;
         try {
-          log(`Fetching live voucher data from Ruijie Cloud for: ${code}`);
-          const allVouchers = await ruijie.getAllVouchers();
+          log(`Fetching live voucher data from Ruijie Cloud for: ${code} (group=${voucherGroupId || 'default'})`);
+          const allVouchers = await ruijie.getAllVouchers(voucherGroupId ? { groupId: voucherGroupId } : {});
           const match = allVouchers.find(
             v => (v.voucherCode || v.codeNo || '').toLowerCase() === code.toLowerCase()
           );
@@ -397,11 +421,6 @@ export function makePortalApiController(pool) {
         //    Ruijie's list doesn't carry the admin "disabled" flag, so merge
         //    it from the local DB before deciding usability.
         if (liveVoucher) {
-          let localDisable = 0;
-          try {
-            const [dr] = await pool.query('SELECT disable_status FROM vouchers WHERE voucher_code = ? LIMIT 1', [code]);
-            if (dr[0]) localDisable = Number(dr[0].disable_status) || 0;
-          } catch { /* ignore */ }
           const responseData = buildResponse(liveVoucher, localDisable);
           liveVoucherCache.set(code, { data: responseData, timestamp: Date.now() });
           return send.ok(res, responseData);
