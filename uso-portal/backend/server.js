@@ -14,14 +14,25 @@ if (trustProxy) {
   app.set('trust proxy', Number.isFinite(n) ? n : trustProxy);
 }
 
-// CORS — allowlist via env. Comma-separated, e.g. "https://portal.example.com,https://www.example.com".
-// If unset, allows all origins (dev convenience).
+// CORS — allow the env allowlist PLUS any vodafonefiji.cloud site. Multi-site:
+// site1…siteN.vodafonefiji.cloud all hit this one backend, so new sites must
+// work without editing CORS_ORIGIN. Comma-separated env is still honoured.
 const corsOrigins = (process.env.CORS_ORIGIN || '').split(',').map(s => s.trim()).filter(Boolean);
+const isAllowedOrigin = (origin) => {
+  if (!origin) return true;                       // same-origin / server-to-server (no Origin header)
+  if (corsOrigins.includes(origin)) return true;  // explicit env allowlist
+  try {
+    const { hostname } = new URL(origin);
+    // any vodafonefiji.cloud host (apex or subdomain) → every current/future site
+    if (hostname === 'vodafonefiji.cloud' || hostname.endsWith('.vodafonefiji.cloud')) return true;
+    if (hostname === 'localhost' || hostname === '127.0.0.1') return true;
+  } catch { /* malformed origin */ }
+  return false;
+};
 app.use(cors({
-  origin: corsOrigins.length === 0 ? true : (origin, cb) => {
-    if (!origin || corsOrigins.includes(origin)) return cb(null, true);
-    cb(new Error(`Origin ${origin} not allowed by CORS`));
-  },
+  origin: (origin, cb) => isAllowedOrigin(origin)
+    ? cb(null, true)
+    : cb(new Error(`Origin ${origin} not allowed by CORS`)),
   credentials: true,
 }));
 
