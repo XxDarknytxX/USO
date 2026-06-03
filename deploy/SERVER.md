@@ -182,7 +182,7 @@ Wildcard DNS + wildcard cert + wildcard nginx + host-aware backend mean steps ab
 
 ## 10. Known issues / TODO
 
-- **M-PAiSA return URL** — `MPAISA_RETURN_URL` in `uso-portal/backend/.env` is still the old dev-tunnel and is single-value; per-site return is part of the paused payment work.
+- **M-PAiSA return URL** — `MPAISA_RETURN_URL` = `https://portal.vodafonefiji.cloud/payment-result` (all sites return here; the callback recovers the session server-side by transaction ID, so auth completes regardless of which site paid). To instead return customers to the **site they paid from** (better cancel→retry UX), set `MPAISA_RETURN_USE_HOST=true` in `uso-portal/backend/.env` — but **only after M-PAiSA accepts those return domains** (register `*.vodafonefiji.cloud` or each site), or it rejects the handshake.
 - **iOS captive payment** — the WiFi pop-up (CNA) can stall on the M-PAiSA hand-off; paused. See `payment` notes / the self-diagnosing hand-off screen.
 - **Rotate the Cloudflare token** (shared in chat during setup) — see §5.
 - **Stale LAN alias** `172.26.70.9` in nginx `server_name` — optional cleanup.

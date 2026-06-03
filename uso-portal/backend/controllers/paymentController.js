@@ -177,7 +177,24 @@ const initiatePayment = async (req, res) => {
   const voucherCode = req.body.voucherCode || null;
   const sessionId = String(req.body.sessionId || '').trim();
   const clientMac = String(req.body.clientMac || '').trim() || null;
-  const urlNoScheme = process.env.MPAISA_RETURN_URL.replace(/^https?:\/\//, '');
+  // M-PAiSA return URL. Default: MPAISA_RETURN_URL as-is (all sites return to
+  // that host, e.g. portal.vodafonefiji.cloud — the callback recovers the
+  // session server-side by transaction ID, so auth still completes).
+  // Set MPAISA_RETURN_USE_HOST=true to instead return the customer to the SITE
+  // they paid from (site1/site2.vodafonefiji.cloud), keeping the env's path —
+  // better for the cancel→retry flow (correct plans on the right site).
+  // Enable ONLY after M-PAiSA accepts those return domains (register
+  // *.vodafonefiji.cloud / each site) or it will reject the handshake.
+  const envReturnNoScheme = (process.env.MPAISA_RETURN_URL || '').replace(/^https?:\/\//, '');
+  let urlNoScheme = envReturnNoScheme;
+  if (/^(1|true|yes)$/i.test(process.env.MPAISA_RETURN_USE_HOST || '')) {
+    const reqHost = (req.headers.host || '').split(':')[0].trim().toLowerCase();
+    if (reqHost.endsWith('vodafonefiji.cloud')) {
+      const slash = envReturnNoScheme.indexOf('/');
+      const returnPath = slash >= 0 ? envReturnNoScheme.slice(slash) : '/payment-result';
+      urlNoScheme = `${reqHost}${returnPath}`;
+    }
+  }
   const clientInfo = getClientInfo(req);
 
   // Validate required fields
