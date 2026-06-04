@@ -15,6 +15,7 @@ import { makePortalConfigRouter } from "./routes/portalConfig.js";
 import { makePortalRouter } from "./routes/portal.js";
 import { makeNetworkController } from "./controllers/networkController.js";
 import { makeNetworkRouter } from "./routes/network.js";
+import { startCollector } from "./services/networkCollector.js";
 
 const app = express();
 
@@ -88,3 +89,8 @@ const port = process.env.PORT || 4001;
 app.listen(port, () => {
   console.log(`Voucher Validation API listening on http://localhost:${port}`);
 });
+
+// Background: collect per-village network status for the Overview dashboard.
+// Interval via NETWORK_COLLECT_INTERVAL_MIN (default 5 min); set 0 to disable.
+const collectMin = Number(process.env.NETWORK_COLLECT_INTERVAL_MIN ?? 5);
+if (collectMin > 0) startCollector(pool, { intervalMs: collectMin * 60 * 1000 });

@@ -444,6 +444,45 @@ class RuijieService {
     }
   }
 
+  /**
+   * Gateway total usage today (Ruijie Cloud API §2.9.2):
+   *   GET /service/api/open/v1/dev/eg/appflow/data-day/appgroup
+   *   Query: group_id, sn, intfName=all, start_time/end_time (YYYYMMDD), size
+   * Sums upDownFlow across application groups → total bytes through the WAN today.
+   */
+  async getGatewayUsage(sn, groupId, _retried = false) {
+    if (!sn) return { bytes: null };
+    try {
+      const accessToken = await this.getAccessToken();
+      const gid = groupId || this.groupId;
+      const d = new Date();
+      const ymd = `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}`;
+      const url = new URL(this.buildUrl('/open/v1/dev/eg/appflow/data-day/appgroup'));
+      url.searchParams.append('access_token', accessToken);
+      url.searchParams.append('group_id', String(gid));
+      url.searchParams.append('sn', sn);
+      url.searchParams.append('intfName', 'all');
+      url.searchParams.append('start_time', ymd);
+      url.searchParams.append('end_time', ymd);
+      url.searchParams.append('size', '1000');
+      const response = await fetch(url.toString(), {
+        method: 'GET',
+        headers: { 'Content-Type': 'application/json' },
+      });
+      const data = await response.json().catch(() => ({}));
+      if (this.isTokenExpired(data) && !_retried) {
+        this.invalidateToken();
+        return this.getGatewayUsage(sn, groupId, true);
+      }
+      const list = Array.isArray(data?.list) ? data.list : [];
+      const bytes = list.reduce((s, x) => s + Number(x.upDownFlow || 0), 0);
+      return { ok: data?.code === 0, bytes: list.length ? bytes : null };
+    } catch (error) {
+      console.error('Failed to fetch gateway usage:', error.message);
+      return { bytes: null };
+    }
+  }
+
   /** Normalize a raw maint/devices record into a stable shape. */
   _normalizeDevice(d = {}) {
     const pick = (...keys) => {

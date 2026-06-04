@@ -136,6 +136,37 @@ export async function getPool() {
       INDEX idx_active (is_active),
       INDEX idx_sort (sort_order)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
+
+    // Latest network status snapshot per project (one row each) — written by the
+    // background overview collector, read by GET /api/network/overview.
+    `CREATE TABLE IF NOT EXISTS network_status (
+      project_id INT PRIMARY KEY,
+      gateway_online BOOLEAN NULL,
+      internet_up BOOLEAN NULL,
+      aps_total INT NOT NULL DEFAULT 0,
+      aps_online INT NOT NULL DEFAULT 0,
+      switches_total INT NOT NULL DEFAULT 0,
+      switches_online INT NOT NULL DEFAULT 0,
+      clients INT NOT NULL DEFAULT 0,
+      usage_bytes BIGINT NULL,
+      public_ip VARCHAR(64) NULL,
+      cloud_sync BOOLEAN NOT NULL DEFAULT FALSE,
+      checked_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
+
+    // Time series of status samples — for uptime % and usage trends.
+    `CREATE TABLE IF NOT EXISTS network_status_history (
+      id BIGINT AUTO_INCREMENT PRIMARY KEY,
+      project_id INT NOT NULL,
+      gateway_online BOOLEAN NULL,
+      internet_up BOOLEAN NULL,
+      aps_total INT NOT NULL DEFAULT 0,
+      aps_online INT NOT NULL DEFAULT 0,
+      clients INT NOT NULL DEFAULT 0,
+      usage_bytes BIGINT NULL,
+      checked_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      INDEX idx_proj_time (project_id, checked_at)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
   ];
 
   for (const sql of tableCreations) {

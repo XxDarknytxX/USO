@@ -3,6 +3,7 @@
 // per-project device health + topology pulled from the Ruijie Cloud Open API.
 
 import RuijieService from "../services/ruijieService.js";
+import { fetchProjectHealth } from "../services/networkHealth.js";
 
 const send = {
   ok: (res, data = {}) => res.json(data),
@@ -125,77 +126,94 @@ export function makeNetworkController(pool) {
       }
     },
 
-    // GET /api/network/projects/:id/health
-    // Returns device health + a derived topology (internet → gateway → APs).
+    // GET /api/network/projects/:id/health — live, per project (Ruijie Cloud).
     getProjectHealth: async (req, res) => {
       try {
         const [rows] = await pool.query("SELECT * FROM network_projects WHERE id = ?", [req.params.id]);
         const project = rows[0];
         if (!project) return send.notFound(res, "Project not found");
-
-        const opts = {
-          groupId: project.ruijie_group_id,
-          tenantId: project.ruijie_tenant_id,
-        };
-        const { cloudSync, devices, error, reason } = await ruijie.getDevices(opts);
-
-        // Pull current online clients and attach per-AP counts.
-        let clientTotal = 0;
-        if (cloudSync) {
-          const { total, byDeviceSn } = await ruijie.getClients(opts);
-          clientTotal = total;
-          for (const d of devices) {
-            const k = String(d.sn || '').toUpperCase();
-            if (byDeviceSn[k] != null) d.clientCount = byDeviceSn[k];
-          }
-        }
-
-        const gateways = devices.filter((d) => d.type === "gateway");
-        const aps = devices.filter((d) => d.type === "ap");
-        const switches = devices.filter((d) => d.type === "switch");
-        const others = devices.filter((d) => d.type === "other");
-
-        const onlineCount = (arr) => arr.filter((d) => d.online).length;
-        const onlineGw = gateways.find((g) => g.online);
-
-        const summary = {
-          totalDevices: devices.length,
-          onlineDevices: onlineCount(devices),
-          offlineDevices: devices.length - onlineCount(devices),
-          apTotal: aps.length,
-          apOnline: onlineCount(aps),
-          gatewayTotal: gateways.length,
-          gatewayOnline: onlineCount(gateways),
-          switchTotal: switches.length,
-          switchOnline: onlineCount(switches),
-          clients: clientTotal || aps.reduce((s, a) => s + (a.clientCount || 0), 0),
-        };
-
-        // Internet status from the gateway's real WAN port (Ruijie API 2.6.4).
-        // Fall back to "is a gateway online" only if the WAN query is unavailable.
-        let internet = {
-          up: gateways.length > 0 ? gateways.some((g) => g.online) : null,
-          publicIp: onlineGw?.publicIp || null,
-        };
-        if (cloudSync && onlineGw) {
-          const wan = await ruijie.getGatewayInterfaces(onlineGw.sn);
-          if (wan && wan.internetUp !== null && wan.internetUp !== undefined) {
-            internet = { up: wan.internetUp, publicIp: wan.wanIp || onlineGw.publicIp || null };
-            onlineGw.publicIp = wan.wanIp || onlineGw.publicIp;
-            onlineGw.wanUp = wan.internetUp;
-          }
-        }
-
+        const h = await fetchProjectHealth(ruijie, project);
         return send.ok(res, {
           project: mapProject(project),
-          cloudSync,
-          // surfaced so the UI can explain an empty result (scope not enabled, etc.)
-          notice: cloudSync ? null : reason || error || "Device data unavailable",
-          summary,
-          internet,
-          topology: { internet, gateways, aps, switches, others },
-          devices,
+          cloudSync: h.cloudSync,
+          notice: h.cloudSync ? null : h.reason,
+          summary: h.summary,
+          internet: h.internet,
+          usageBytes: h.usageBytes,
+          topology: h.topology,
+          devices: h.devices,
         });
+      } catch (e) {
+        console.error(e);
+        return send.serverErr(res);
+      }
+    },
+
+    // GET /api/network/overview — all villages, from the collector snapshots.
+    // ?uptimeHours=24 sets the window for the uptime %.
+    getOverview: async (req, res) => {
+      try {
+        const uptimeHours = Math.min(720, Math.max(1, Number(req.query.uptimeHours) || 24));
+        const [projects] = await pool.query(
+          "SELECT * FROM network_projects WHERE is_active = 1 ORDER BY sort_order, name"
+        );
+        const [statusRows] = await pool.query("SELECT * FROM network_status");
+        const statusByProject = {};
+        for (const s of statusRows) statusByProject[s.project_id] = s;
+
+        // Uptime % per project = share of history samples with internet up, in window.
+        const [uptimeRows] = await pool.query(
+          `SELECT project_id,
+                  COUNT(*) AS samples,
+                  SUM(CASE WHEN internet_up = 1 THEN 1 ELSE 0 END) AS up_samples
+             FROM network_status_history
+            WHERE checked_at >= DATE_SUB(NOW(), INTERVAL ? HOUR)
+            GROUP BY project_id`,
+          [uptimeHours]
+        );
+        const upByProject = {};
+        for (const u of uptimeRows) upByProject[u.project_id] = u;
+
+        const sites = projects.map((p) => {
+          const s = statusByProject[p.id] || {};
+          const u = upByProject[p.id];
+          const uptimePct =
+            u && u.samples > 0 ? Math.round((u.up_samples / u.samples) * 1000) / 10 : null;
+          return {
+            id: p.id,
+            name: p.name,
+            hostname: p.hostname,
+            groupId: p.ruijie_group_id,
+            online: s.internet_up == null ? null : !!s.internet_up,
+            gatewayOnline: s.gateway_online == null ? null : !!s.gateway_online,
+            internetUp: s.internet_up == null ? null : !!s.internet_up,
+            apsOnline: Number(s.aps_online ?? 0),
+            apsTotal: Number(s.aps_total ?? 0),
+            clients: Number(s.clients ?? 0),
+            usageBytes: s.usage_bytes == null ? null : Number(s.usage_bytes),
+            publicIp: s.public_ip || null,
+            cloudSync: !!s.cloud_sync,
+            uptimePct,
+            checkedAt: s.checked_at || null,
+          };
+        });
+
+        const sum = (f) => sites.reduce((a, v) => a + (f(v) || 0), 0);
+        const summary = {
+          villagesTotal: sites.length,
+          villagesUp: sites.filter((v) => v.online === true).length,
+          villagesDown: sites.filter((v) => v.online === false).length,
+          villagesUnknown: sites.filter((v) => v.online == null).length,
+          apsOnline: sum((v) => v.apsOnline),
+          apsTotal: sum((v) => v.apsTotal),
+          clients: sum((v) => v.clients),
+          usageBytes: sum((v) => v.usageBytes),
+        };
+        const lastCollected = sites.reduce(
+          (m, v) => (v.checkedAt && (!m || v.checkedAt > m) ? v.checkedAt : m),
+          null
+        );
+        return send.ok(res, { summary, sites, uptimeHours, lastCollected });
       } catch (e) {
         console.error(e);
         return send.serverErr(res);

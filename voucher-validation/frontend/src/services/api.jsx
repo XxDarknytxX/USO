@@ -99,6 +99,10 @@ export const portalConfigApi = {
 // Network monitoring API helpers
 export const networkApi = {
   projects: () => api("/network/projects"),
+  overview: (params = {}) => {
+    const qs = new URLSearchParams(params).toString();
+    return api(`/network/overview${qs ? `?${qs}` : ""}`);
+  },
   discoverGroups: () => api("/network/discover"),
   createProject: (body) => api("/network/projects", { method: "POST", body }),
   updateProject: (id, body) => api(`/network/projects/${id}`, { method: "PUT", body }),
