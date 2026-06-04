@@ -334,8 +334,11 @@ const initiatePayment = async (req, res) => {
     const hsUrl = process.env.MPAISA_BASE_URL + 'API/?' + query;
 
     // API Guide v1.3: the handshake is authenticated with a Bearer token from
-    // generateAuth. Best-effort — proceeds without if the gateway doesn't need it.
-    const mpToken = await mpaisaGetToken();
+    // generateAuth. Opt-in (MPAISA_USE_AUTH=true) so this never changes the
+    // request on the legacy gateway — enable it when on payments.m-paisa.com.
+    const mpToken = /^(1|true|yes)$/i.test(process.env.MPAISA_USE_AUTH || '')
+      ? await mpaisaGetToken()
+      : null;
 
     log('>>>> HS  GET', hsUrl, mpToken ? '(Bearer)' : '(no token)');
 
@@ -349,8 +352,8 @@ const initiatePayment = async (req, res) => {
 
     // New gateway renames fields (paymentspage / authdigestv2 / requestID);
     // the older one used destinationurl / tokenv2. Accept either.
-    const paymentsPage = data?.paymentspage || paymentsPage;
-    const mpRequestId = mpRequestId ?? data?.requestid;
+    const paymentsPage = data?.paymentspage || data?.destinationurl;
+    const mpRequestId = data?.requestID ?? data?.requestid;
     const authDigest = data?.authdigestv2 || data?.tokenv2 || data?.authdigest;
 
     if (data && paymentsPage && mpRequestId && data.response === 101) {
