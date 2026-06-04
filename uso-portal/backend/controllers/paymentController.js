@@ -29,7 +29,8 @@ let _mpToken = { value: null, expiresAt: 0 };
 const mpaisaGetToken = async () => {
   if (_mpToken.value && Date.now() < _mpToken.expiresAt - 30000) return _mpToken.value;
   try {
-    const url = (process.env.MPAISA_BASE_URL || '') + 'API/generateAuth';
+    // Trailing slash required — the gateway 308-redirects API/generateAuth → API/generateAuth/
+    const url = (process.env.MPAISA_BASE_URL || '') + 'API/generateAuth/';
     const { data } = await axios.post(
       url,
       { clientId: process.env.MPAISA_CLIENT_ID, clientSecret: process.env.MPAISA_SECRET_KEY },
