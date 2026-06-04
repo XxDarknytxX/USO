@@ -314,6 +314,33 @@ class RuijieService {
         }
       }
 
+      // Reyee gateways (EG/EGW) sometimes aren't returned under
+      // common_type=Gateway on the "AP/Switch list" endpoint. If no gateway
+      // came back, retry with product_type=EGW (2.6.1.1 alternate param).
+      const hasGateway = merged.some((d) =>
+        /gateway|egw|router|\beg\b/i.test(`${d.commonType || ''} ${d.productType || ''} ${d.productClass || ''}`)
+      );
+      if (!hasGateway) {
+        try {
+          const url = new URL(this.buildUrl('/maint/devices'));
+          url.searchParams.append('access_token', accessToken);
+          url.searchParams.append('group_id', String(gid));
+          url.searchParams.append('product_type', 'EGW');
+          url.searchParams.append('page', '0');
+          url.searchParams.append('per_page', String(PER_PAGE));
+          if (tid) url.searchParams.append('tenantId', String(tid));
+          const response = await fetch(url.toString(), { method: 'GET', headers: { 'Content-Type': 'application/json' } });
+          const data = await response.json().catch(() => ({}));
+          const list = data?.deviceList || data?.data?.deviceList || [];
+          for (const d of list) merged.push({ ...d, commonType: d.commonType || 'Gateway' });
+          if (list.length) anyOk = true;
+          console.log(`getDevices EGW-fallback group ${gid}: ${list.length} gateway(s) (code=${data?.code} msg=${data?.msg ?? ''})`);
+        } catch (e) { console.warn('getDevices EGW fallback failed:', e.message); }
+      }
+
+      const counts = merged.reduce((m, d) => { const t = d.commonType || '?'; m[t] = (m[t] || 0) + 1; return m; }, {});
+      console.log(`getDevices group ${gid}: ${merged.length} device(s)`, JSON.stringify(counts));
+
       if (!anyOk) {
         return { cloudSync: false, devices: [], reason: lastMsg || 'Device API returned no data' };
       }
@@ -365,6 +392,50 @@ class RuijieService {
     } catch (error) {
       console.error('Failed to fetch clients:', error.message);
       return { total: 0, byDeviceSn: {} };
+    }
+  }
+
+  /**
+   * Gateway port / WAN status (Ruijie Cloud API §2.6.4):
+   *   GET /service/api/gateway/intf/info/{sn}?access_token=
+   *   Response: { code, data:[{ type:"WAN"|"LAN", linestatus, ipAddr, ... }] }
+   * The WAN port's linestatus is the REAL "internet up" indicator that the
+   * Ruijie Cloud topology shows — not just "is the gateway online".
+   */
+  async getGatewayInterfaces(sn, _retried = false) {
+    if (!sn) return null;
+    try {
+      const accessToken = await this.getAccessToken();
+      const url = new URL(this.buildUrl(`/gateway/intf/info/${encodeURIComponent(sn)}`));
+      url.searchParams.append('access_token', accessToken);
+      const response = await fetch(url.toString(), {
+        method: 'GET',
+        headers: { 'Content-Type': 'application/json' },
+      });
+      const data = await response.json().catch(() => ({}));
+      if (this.isTokenExpired(data) && !_retried) {
+        this.invalidateToken();
+        return this.getGatewayInterfaces(sn, true);
+      }
+      const okCode = data?.code === 0 || data?.code === 200 || data?.code === undefined;
+      if (!response.ok || !okCode) {
+        console.warn(`getGatewayInterfaces ${sn}: code=${data?.code} msg=${data?.msg}`);
+        return { ok: false, internetUp: null, wanIp: null };
+      }
+      const ports = Array.isArray(data?.data) ? data.data : [];
+      const isUp = (p) => p && (p.linestatus === true || String(p.linestatus) === 'true');
+      // Prefer an up WAN port; else any WAN port.
+      const wanPorts = ports.filter((p) => String(p.type).toUpperCase() === 'WAN');
+      const wan = wanPorts.find(isUp) || wanPorts[0] || null;
+      return {
+        ok: true,
+        internetUp: wan ? isUp(wan) : null,
+        wanIp: wan?.ipAddr || null,
+        ports,
+      };
+    } catch (error) {
+      console.error('Failed to fetch gateway interfaces:', error.message);
+      return null;
     }
   }
 

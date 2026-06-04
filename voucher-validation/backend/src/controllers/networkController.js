@@ -170,12 +170,20 @@ export function makeNetworkController(pool) {
           clients: clientTotal || aps.reduce((s, a) => s + (a.clientCount || 0), 0),
         };
 
-        const internet = {
-          // We infer internet reachability from the gateway: if a gateway is
-          // online and reporting a public IP, the WAN/uplink is up.
+        // Internet status from the gateway's real WAN port (Ruijie API 2.6.4).
+        // Fall back to "is a gateway online" only if the WAN query is unavailable.
+        let internet = {
           up: gateways.length > 0 ? gateways.some((g) => g.online) : null,
           publicIp: onlineGw?.publicIp || null,
         };
+        if (cloudSync && onlineGw) {
+          const wan = await ruijie.getGatewayInterfaces(onlineGw.sn);
+          if (wan && wan.internetUp !== null && wan.internetUp !== undefined) {
+            internet = { up: wan.internetUp, publicIp: wan.wanIp || onlineGw.publicIp || null };
+            onlineGw.publicIp = wan.wanIp || onlineGw.publicIp;
+            onlineGw.wanUp = wan.internetUp;
+          }
+        }
 
         return send.ok(res, {
           project: mapProject(project),
