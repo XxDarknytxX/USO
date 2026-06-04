@@ -19,6 +19,64 @@ const generateTransactionId = () => {
   return crypto.randomInt(100000000, 999999999).toString();   // 9-digit, never starts with 0
 };
 
+// ── M-PAiSA Payment Gateway (API Guide v1.3) ──────────────────────────────
+// Credentials are unchanged: MPAISA_CLIENT_ID (clientId) + MPAISA_SECRET_KEY
+// (clientSecret / merchant secret). Base + return URL stay env-driven.
+
+// generateAuth → Bearer token (valid ~10 min), cached. Best-effort: if the
+// gateway endpoint doesn't require/expose it, the handshake proceeds without.
+let _mpToken = { value: null, expiresAt: 0 };
+const mpaisaGetToken = async () => {
+  if (_mpToken.value && Date.now() < _mpToken.expiresAt - 30000) return _mpToken.value;
+  try {
+    const url = (process.env.MPAISA_BASE_URL || '') + 'API/generateAuth';
+    const { data } = await axios.post(
+      url,
+      { clientId: process.env.MPAISA_CLIENT_ID, clientSecret: process.env.MPAISA_SECRET_KEY },
+      { timeout: 10000, headers: { 'Content-Type': 'application/json' } }
+    );
+    if (data && data.token) {
+      _mpToken = { value: data.token, expiresAt: data.expiresAt || Date.now() + (data.expiresIn || 600) * 1000 };
+      log('>>>> M-PAiSA auth token acquired (merchant:', data.merchantName || '—', ')');
+      return _mpToken.value;
+    }
+    log('XXXX M-PAiSA generateAuth returned no token:', JSON.stringify(data));
+  } catch (e) {
+    log('XXXX M-PAiSA generateAuth failed (continuing without Bearer):', e.response?.status || e.message);
+  }
+  return null;
+};
+
+// SHA-256 digests (authdigestv2 / tokenv2). The guide is inconsistent about
+// whether requestID is part of the digest, so compute both forms and accept
+// either. Hex, upper-case (matches the guide's examples).
+const mpaisaDigests = ({ tID, amt, iDet, rID, rCode }) => {
+  const secret = process.env.MPAISA_SECRET_KEY || '';
+  const h = (s) => crypto.createHash('sha256').update(s).digest('hex').toUpperCase();
+  return [
+    h(`${tID}${amt}${iDet}${rID ?? ''}${secret}${rCode}`), // with requestID (§4.3.3/4.3.4)
+    h(`${tID}${amt}${iDet}${secret}${rCode}`),             // without requestID (§3.2/§4.3.1)
+  ];
+};
+const mpaisaTokenMatches = (received, parts) =>
+  !!received && mpaisaDigests(parts).includes(String(received).toUpperCase());
+
+// Transaction Status Checker (§4.2.4): GET {base}requeststatus/?rID&tID&cID
+const mpaisaCheckStatus = async ({ rID, tID, cID }) => {
+  try {
+    const token = await mpaisaGetToken();
+    const url = (process.env.MPAISA_BASE_URL || '') + 'requeststatus/?' + qs({ rID, tID, cID });
+    const { data } = await axios.get(url, {
+      timeout: 10000,
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    });
+    return data || null;
+  } catch (e) {
+    log('XXXX M-PAiSA status check failed:', e.response?.status || e.message);
+    return null;
+  }
+};
+
 // Safe JSON parse — never throws
 const safeJsonParse = (str) => {
   if (!str) return null;
@@ -275,18 +333,45 @@ const initiatePayment = async (req, res) => {
     const query = qs({ url: urlNoScheme, tID, amt, cID, iDet });
     const hsUrl = process.env.MPAISA_BASE_URL + 'API/?' + query;
 
-    log('>>>> HS  GET', hsUrl);
+    // API Guide v1.3: the handshake is authenticated with a Bearer token from
+    // generateAuth. Best-effort — proceeds without if the gateway doesn't need it.
+    const mpToken = await mpaisaGetToken();
 
-    const { data, status } = await axios.get(hsUrl, { timeout: 10000 });
+    log('>>>> HS  GET', hsUrl, mpToken ? '(Bearer)' : '(no token)');
+
+    const { data, status } = await axios.get(hsUrl, {
+      timeout: 10000,
+      headers: mpToken ? { Authorization: `Bearer ${mpToken}` } : {},
+    });
 
     log('     ↳ status', status);
     log('     ↳ full response', JSON.stringify(data, null, 2));
 
-    if (data && data.destinationurl && data.requestID && data.response === 101) {
+    // New gateway renames fields (paymentspage / authdigestv2 / requestID);
+    // the older one used destinationurl / tokenv2. Accept either.
+    const paymentsPage = data?.paymentspage || paymentsPage;
+    const mpRequestId = mpRequestId ?? data?.requestid;
+    const authDigest = data?.authdigestv2 || data?.tokenv2 || data?.authdigest;
+
+    if (data && paymentsPage && mpRequestId && data.response === 101) {
+      // Session authentication (§4.3.1): verify the handshake digest before
+      // sending the customer on. Log-only by default; set
+      // MPAISA_VERIFY_TOKEN=enforce to hard-fail once the formula is confirmed.
+      if (authDigest) {
+        if (mpaisaTokenMatches(authDigest, { tID, amt, iDet, rID: mpRequestId, rCode: data.response })) {
+          log('     ↳ authdigest verified ✓');
+        } else {
+          log('XXXX M-PAiSA authdigest mismatch — got', authDigest, 'expected one of',
+            mpaisaDigests({ tID, amt, iDet, rID: mpRequestId, rCode: data.response }));
+          if (/^enforce$/i.test(process.env.MPAISA_VERIFY_TOKEN || '')) {
+            return res.status(502).json({ ok: false, error: 'Payment authentication failed (digest mismatch).' });
+          }
+        }
+      }
       // Update transaction with M-PAiSA request details
       await TransactionDB.updatePaymentStatus(tID, {
         status: 'payment_initiated',
-        requestId: data.requestID,
+        requestId: mpRequestId,
         responseCode: null,
         customerPhone: null,
         paymentResponse: data,
@@ -302,8 +387,8 @@ const initiatePayment = async (req, res) => {
         userGroupId: selectedPlan.userGroupId,
         amount: parseFloat(amt),
         eventData: {
-          requestId: data.requestID,
-          destinationUrl: data.destinationurl,
+          requestId: mpRequestId,
+          destinationUrl: paymentsPage,
           mpaisaResponseCode: data.response,
           clientIp: clientInfo.clientIp,
           userAgent: clientInfo.userAgent,
@@ -313,20 +398,20 @@ const initiatePayment = async (req, res) => {
       });
 
       // Send user to M-PAiSA
-      const paymentUrl = `${data.destinationurl}?` + qs({
+      const paymentUrl = `${paymentsPage}?` + qs({
         url: urlNoScheme,
         tID,
         amt,
         cID,
         iDet,
-        rID: data.requestID
+        rID: mpRequestId
       });
 
       return res.json({
         ok: true,
         paymentUrl,
         transactionId: tID,
-        requestId: data.requestID,
+        requestId: mpRequestId,
         planId,
         planName: selectedPlan.name,
         voucherCode,
@@ -339,7 +424,7 @@ const initiatePayment = async (req, res) => {
     // Update transaction with failed handshake
     await TransactionDB.updatePaymentStatus(tID, {
       status: 'handshake_failed',
-      requestId: data?.requestID || null,
+      requestId: mpRequestId || null,
       responseCode: String(data?.response || 'unknown'),
       customerPhone: null,
       paymentResponse: data,
@@ -357,8 +442,8 @@ const initiatePayment = async (req, res) => {
       eventData: {
         expectedResponseCode: 101,
         actualResponseCode: data?.response,
-        hasDestinationUrl: !!data?.destinationurl,
-        hasRequestId: !!data?.requestID,
+        hasDestinationUrl: !!paymentsPage,
+        hasRequestId: !!mpRequestId,
         fullResponse: data,
         clientIp: clientInfo.clientIp,
         userAgent: clientInfo.userAgent,
@@ -372,8 +457,8 @@ const initiatePayment = async (req, res) => {
       mpaisaResponse: data,
       expectedResponse: 101,
       actualResponse: data?.response,
-      hasDestinationUrl: !!data?.destinationurl,
-      hasRequestID: !!data?.requestID
+      hasDestinationUrl: !!paymentsPage,
+      hasRequestID: !!mpRequestId
     });
 
   } catch (error) {
@@ -468,6 +553,35 @@ const paymentCallback = async (req, res) => {
     // Use the stored transaction ID for all downstream operations
     // (callback may have arrived with stripped leading zeros)
     tID = transaction.id;
+
+    // §4.3.2 Transaction Verification — recompute tokenv2 (SHA-256 of the txn
+    // details + merchant secret) and compare against the redirect. Guards against
+    // redirect tampering. Log-only by default; MPAISA_VERIFY_TOKEN=enforce rejects
+    // a mismatched redirect once the formula is confirmed in the logs.
+    const recvToken = req.query.tokenv2 || req.query.tokenV2 || null;
+    if (recvToken) {
+      const parts = {
+        tID: req.query.tID,
+        amt: Number(transaction.amount).toFixed(2),
+        iDet: transaction.plan_id,
+        rID: rID || transaction.request_id || transaction.mpaisa_request_id,
+        rCode,
+      };
+      if (mpaisaTokenMatches(recvToken, parts)) {
+        log(`>>>> tokenv2 verified ✓ for ${tID}`);
+      } else {
+        log(`XXXX tokenv2 MISMATCH for ${tID} — got ${recvToken} expected one of`, mpaisaDigests(parts));
+        vvClient.sendAuditLog({
+          eventType: 'token_mismatch',
+          transactionId: tID,
+          sessionId: transaction.session_id,
+          eventData: { received: recvToken, rCode, rID, message: 'M-PAiSA tokenv2 verification failed' },
+        });
+        if (/^enforce$/i.test(process.env.MPAISA_VERIFY_TOKEN || '')) {
+          return res.status(400).json({ ok: false, error: 'Payment verification failed (token mismatch).' });
+        }
+      }
+    }
 
     // Check if already processed (idempotency) — duplicate callbacks from React
     // re-renders are normal and don't need logging
