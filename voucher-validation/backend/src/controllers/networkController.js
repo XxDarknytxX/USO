@@ -145,7 +145,8 @@ export function makeNetworkController(pool) {
           const { total, byDeviceSn } = await ruijie.getClients(opts);
           clientTotal = total;
           for (const d of devices) {
-            if (byDeviceSn[d.sn] != null) d.clientCount = byDeviceSn[d.sn];
+            const k = String(d.sn || '').toUpperCase();
+            if (byDeviceSn[k] != null) d.clientCount = byDeviceSn[k];
           }
         }
 

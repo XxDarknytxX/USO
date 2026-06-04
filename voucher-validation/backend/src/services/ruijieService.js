@@ -386,9 +386,14 @@ class RuijieService {
       const byDeviceSn = {};
       for (const c of list) {
         const sn = c.linkedDevice || c.sn;
-        if (sn) byDeviceSn[sn] = (byDeviceSn[sn] || 0) + 1;
+        if (sn) {
+          const key = String(sn).toUpperCase();   // match APs case-insensitively
+          byDeviceSn[key] = (byDeviceSn[key] || 0) + 1;
+        }
       }
-      return { total: Number(data?.totalCount ?? list.length), byDeviceSn };
+      const total = Number(data?.totalCount ?? list.length);
+      console.log(`getClients group ${gid}: total=${total} list=${list.length} linkedTo=${JSON.stringify(Object.keys(byDeviceSn).slice(0, 8))} (code=${data?.code} msg=${data?.msg ?? ''})`);
+      return { total, byDeviceSn };
     } catch (error) {
       console.error('Failed to fetch clients:', error.message);
       return { total: 0, byDeviceSn: {} };
