@@ -19,6 +19,42 @@ const periodOf = (cat) => CAT_PERIOD[cat] || 'plan';
 const titleCase = (s = '') => s.charAt(0).toUpperCase() + s.slice(1);
 const priceNum = (p) => parseFloat(String(p).replace(/[^0-9.]/g, '')) || 0;
 
+// Plan `data` is stored raw — e.g. "8192 / 10080s" means 8192 MB of data and
+// 10080 min of validity. Customers should just see the data figure ("8 GB");
+// the validity is already conveyed by "Valid for a <period>". These helpers
+// normalise whatever's in the field (bare MB number, "8 GB", "Unlimited", …).
+const dataToGB = (raw) => {
+  const s = String(raw ?? '').trim();
+  if (!s) return null;
+  if (/unlimited/i.test(s)) return Infinity;
+  const m = s.match(/\d+(?:\.\d+)?/); // first number = the data quota
+  if (!m) return null;
+  const n = parseFloat(m[0]);
+  if (!isFinite(n) || n <= 0) return null;
+  if (/tb/i.test(s)) return n * 1024;
+  if (/gb/i.test(s)) return n;
+  return n / 1024; // a bare number is megabytes
+};
+const gbLabel = (g) =>
+  g === Infinity ? 'Unlimited data'
+    : g >= 1 ? `${Number.isInteger(g) ? g : g.toFixed(1)} GB`
+    : `${Math.round(g * 1024)} MB`;
+const formatData = (raw) => {
+  const g = dataToGB(raw);
+  return g == null ? null : gbLabel(g);
+};
+// A single line summarising the data span across a category's plans.
+const dataRangeLabel = (ps = []) => {
+  const gbs = ps.map((p) => dataToGB(p.data)).filter((n) => n != null && n !== Infinity);
+  if (ps.some((p) => dataToGB(p.data) === Infinity) && !gbs.length) return 'Unlimited high-speed data';
+  if (!gbs.length) return 'High-speed data included';
+  const lo = Math.min(...gbs), hi = Math.max(...gbs);
+  const num = (g) => (Number.isInteger(g) ? `${g}` : g.toFixed(1));
+  return lo === hi
+    ? `${gbLabel(hi)} of high-speed data`
+    : `${num(lo)}–${num(hi)} GB of high-speed data`;
+};
+
 export default function MainPage() {
   const [plans, setPlans] = useState([]);
   const [plansLoading, setPlansLoading] = useState(true);
@@ -77,9 +113,9 @@ export default function MainPage() {
         count: ps.length,
         hasPopular: ps.some((p) => p.popular),
         points: [
-          `${ps.length} plan${ps.length > 1 ? 's' : ''} to choose from`,
+          dataRangeLabel(ps),
           `Valid for a ${periodOf(c)}`,
-          'Unlimited calls & texts',
+          'Instant activation, no contracts',
         ],
         plans: ps,
       };
@@ -337,12 +373,17 @@ function PlansModal({ category, featured, onClose, onBuy, onError }) {
           style={{ background: 'radial-gradient(circle, rgba(230,0,0,0.20), transparent 70%)' }} />
 
         {/* Header */}
-        <div className="relative flex items-center justify-between px-5 sm:px-7 py-4 sm:py-5 border-b border-white/[0.06] shrink-0">
-          <div>
-            <p className="text-ink-4 text-[12px] mb-0.5">{category.count} plan{category.count !== 1 ? 's' : ''} available</p>
-            <h2 className="text-[22px] sm:text-[26px] font-extrabold text-ink capitalize leading-tight tracking-tight">
+        <div className="relative flex items-start justify-between gap-4 px-5 sm:px-8 pt-5 pb-4 sm:pt-7 sm:pb-6 border-b border-white/[0.06] shrink-0">
+          <div className="min-w-0">
+            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-vf/15 border border-vf/25 text-vf text-[11px] font-semibold mb-2.5">
+              <FaWifi className="text-[9px]" /> {category.count} {category.count === 1 ? 'plan' : 'plans'} available
+            </span>
+            <h2 className="text-[23px] sm:text-[28px] font-extrabold text-ink capitalize leading-[1.1] tracking-tight">
               {category.name} plans
             </h2>
+            <p className="text-ink-4 text-[12.5px] sm:text-[13.5px] mt-1.5 leading-relaxed max-w-md">
+              {category.desc}
+            </p>
           </div>
           <button
             onClick={close}
@@ -355,14 +396,24 @@ function PlansModal({ category, featured, onClose, onBuy, onError }) {
 
         {/* Body */}
         <div className="relative p-4 sm:p-6 lg:p-7 overflow-y-auto">
-          <div className={`grid gap-4 sm:gap-5
+          <div className={`grid gap-4 sm:gap-5 items-stretch
             ${plans.length >= 3 ? 'sm:grid-cols-2 lg:grid-cols-3'
               : plans.length === 2 ? 'sm:grid-cols-2'
-              : 'grid-cols-1'}`}>
+              : 'grid-cols-1 max-w-sm mx-auto'}`}>
             {plans.map((plan) => (
               <ModalPlanCard key={plan.id} plan={plan} popular={Boolean(plan.popular)} onBuy={onBuy} onError={onError} />
             ))}
           </div>
+        </div>
+
+        {/* Trust footer */}
+        <div className="relative shrink-0 px-5 sm:px-8 py-3.5 border-t border-white/[0.06] flex flex-wrap items-center justify-center gap-x-2 gap-y-1 text-ink-5 text-[11.5px]">
+          <FaLock className="text-[9px] text-ink-4" />
+          <span>Secured by M-PAiSA</span>
+          <span className="text-ink-5/50">·</span>
+          <span>Instant activation</span>
+          <span className="text-ink-5/50">·</span>
+          <span>No setup fees</span>
         </div>
       </div>
     </div>
@@ -373,12 +424,19 @@ function PlansModal({ category, featured, onClose, onBuy, onError }) {
 function ModalPlanCard({ plan, popular, onBuy, onError }) {
   const [busy, setBusy] = useState(false);
   const period = periodOf(plan.category);
-  const dataLabel = plan.data ? String(plan.data) : null;
-  const features = [
-    ...(Array.isArray(plan.features) ? plan.features : []),
+  const dataLabel = formatData(plan.data);
+
+  // These are prepaid data plans — never advertise calls/texts, even if a stale
+  // feature snuck into the DB. Prefer real admin-set features, then sensible,
+  // accurate defaults; de-dupe and cap the list.
+  const adminFeatures = (Array.isArray(plan.features) ? plan.features : [])
+    .filter((f) => f && !/unlimited\s*(calls?|texts?|sms|minutes?|talk)/i.test(f));
+  const features = [...new Set([
+    ...adminFeatures,
     `Valid for one ${period}`,
-    'Unlimited calls & texts',
-  ].filter(Boolean).slice(0, 5);
+    'Instant activation',
+    'No contracts or setup fees',
+  ])].slice(0, 4);
 
   const buy = async () => {
     setBusy(true);
@@ -388,75 +446,79 @@ function ModalPlanCard({ plan, popular, onBuy, onError }) {
   };
 
   return (
-    <div className={`group relative flex flex-col rounded-2xl p-6 sm:p-7 overflow-hidden transition-all duration-300 hover:-translate-y-0.5
+    <div className={`group relative flex flex-col rounded-2xl overflow-hidden transition-all duration-300 hover:-translate-y-1
       ${popular
-        ? 'border border-vf/45 bg-gradient-to-b from-vf/[0.13] via-white/[0.02] to-transparent shadow-[0_26px_64px_-30px_rgba(230,0,0,0.6)]'
-        : 'border border-edge bg-white/[0.02] hover:bg-white/[0.035] hover:border-edge-hover'}`}>
+        ? 'border border-vf/50 bg-gradient-to-b from-vf/[0.15] via-vf/[0.03] to-transparent shadow-[0_30px_70px_-32px_rgba(230,0,0,0.65)]'
+        : 'border border-edge bg-white/[0.02] hover:bg-white/[0.04] hover:border-edge-hover'}`}>
+
+      {/* Popular ribbon */}
       {popular && (
-        <span className="absolute top-5 right-5 inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-vf text-white text-[10px] font-bold uppercase tracking-wider shadow-lg shadow-vf/30">
-          <FaStar className="text-[8px]" /> Popular
-        </span>
-      )}
-
-      {/* Name + blurb */}
-      <h3 className={`text-[19px] font-bold text-ink mb-1 tracking-tight ${popular ? 'pr-20' : ''}`}>{plan.name}</h3>
-      <p className="text-ink-4 text-[12.5px] leading-relaxed mb-5 line-clamp-2 min-h-[36px]">
-        {plan.description || `Stay connected for a full ${period}.`}
-      </p>
-
-      {/* Price */}
-      <div className="flex items-end gap-1.5 mb-5">
-        <span className="text-[40px] font-extrabold text-vf leading-[0.85] tracking-tight">{plan.price}</span>
-        <span className="text-ink-4 text-[13px] mb-1">/ {period}</span>
-      </div>
-
-      {/* Data highlight */}
-      {dataLabel && (
-        <div className="mb-5 flex items-center gap-3 rounded-xl bg-white/[0.04] border border-edge px-3.5 py-2.5">
-          <span className="w-8 h-8 rounded-lg bg-vf/15 flex items-center justify-center shrink-0">
-            <FaBolt className="text-vf text-[12px]" />
-          </span>
-          <div className="leading-tight">
-            <div className="text-ink font-bold text-[15px]">{dataLabel}</div>
-            <div className="text-ink-4 text-[11px]">high-speed data included</div>
-          </div>
+        <div className="flex items-center justify-center gap-1.5 h-8 bg-vf text-white text-[10.5px] font-bold uppercase tracking-[0.14em] shrink-0">
+          <FaStar className="text-[9px]" /> Most popular
         </div>
       )}
 
-      {/* Divider */}
-      <div className="h-px bg-white/[0.07] mb-5" />
+      <div className="flex flex-col flex-1 p-6 sm:p-7">
+        {/* Name + blurb */}
+        <h3 className="text-[20px] font-bold text-ink tracking-tight">{plan.name}</h3>
+        <p className="text-ink-4 text-[12.5px] leading-relaxed mt-1 mb-5 line-clamp-2 min-h-[34px]">
+          {plan.description || `Stay connected for a full ${period}.`}
+        </p>
 
-      {/* Features */}
-      <ul className="space-y-3 flex-1 mb-6">
-        {features.map((f, i) => (
-          <li key={i} className="flex items-start gap-2.5 text-[13px] text-ink-2">
-            <span className="mt-[1px] w-[18px] h-[18px] rounded-full bg-vf/15 flex items-center justify-center shrink-0">
-              <FaCheck className="text-vf text-[8px]" />
+        {/* Data hero — the headline for a data plan */}
+        {dataLabel && (
+          <div className="mb-5 flex items-center gap-3.5 rounded-2xl border border-vf/20 bg-gradient-to-br from-vf/[0.12] to-white/[0.015] px-4 py-3.5">
+            <span className="w-10 h-10 rounded-xl bg-vf/20 border border-vf/30 flex items-center justify-center shrink-0">
+              <FaBolt className="text-vf text-[15px]" />
             </span>
-            <span className="leading-snug">{f}</span>
-          </li>
-        ))}
-      </ul>
-
-      <button
-        onClick={buy}
-        disabled={busy}
-        className={`w-full flex items-center justify-center gap-2 rounded-xl text-sm font-semibold py-3.5 transition-all duration-200 outline-none
-          ${busy
-            ? 'bg-white/5 text-ink-5 cursor-not-allowed'
-            : popular
-              ? 'bg-vf hover:bg-vf-hover text-white shadow-lg shadow-vf/25 active:scale-[0.98]'
-              : 'bg-white/[0.06] hover:bg-white/[0.12] text-ink border border-edge active:scale-[0.98]'}`}
-      >
-        {busy ? (
-          <>
-            <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-            Processing…
-          </>
-        ) : (
-          <>Get this plan <FaArrowRight className="text-[10px] transition-transform duration-200 group-hover:translate-x-0.5" /></>
+            <div className="leading-none">
+              <div className="text-ink font-extrabold text-[26px] tracking-tight">{dataLabel}</div>
+              <div className="text-ink-4 text-[11.5px] mt-1.5">high-speed data included</div>
+            </div>
+          </div>
         )}
-      </button>
+
+        {/* Price */}
+        <div className="flex items-baseline gap-1.5 mb-5">
+          <span className="text-[34px] font-extrabold text-vf leading-none tracking-tight">{plan.price}</span>
+          <span className="text-ink-4 text-[13px]">/ {period}</span>
+        </div>
+
+        {/* Divider */}
+        <div className="h-px bg-white/[0.07] mb-5" />
+
+        {/* Features */}
+        <ul className="space-y-2.5 flex-1 mb-6">
+          {features.map((f, i) => (
+            <li key={i} className="flex items-start gap-2.5 text-[13px] text-ink-2">
+              <span className="mt-[1px] w-[18px] h-[18px] rounded-full bg-vf/15 flex items-center justify-center shrink-0">
+                <FaCheck className="text-vf text-[8px]" />
+              </span>
+              <span className="leading-snug">{f}</span>
+            </li>
+          ))}
+        </ul>
+
+        <button
+          onClick={buy}
+          disabled={busy}
+          className={`w-full flex items-center justify-center gap-2 rounded-xl text-sm font-semibold py-3.5 transition-all duration-200 outline-none
+            ${busy
+              ? 'bg-white/5 text-ink-5 cursor-not-allowed'
+              : popular
+                ? 'bg-vf hover:bg-vf-hover text-white shadow-lg shadow-vf/25 active:scale-[0.98]'
+                : 'bg-white/[0.06] hover:bg-white/[0.12] text-ink border border-edge active:scale-[0.98]'}`}
+        >
+          {busy ? (
+            <>
+              <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+              Processing…
+            </>
+          ) : (
+            <>Get this plan <FaArrowRight className="text-[10px] transition-transform duration-200 group-hover:translate-x-0.5" /></>
+          )}
+        </button>
+      </div>
     </div>
   );
 }
