@@ -1,6 +1,7 @@
 // src/pages/Login.jsx
-// Split-screen login. Left rail is a saturated brand panel; right side is the
-// form — pure neutral surface. Reads as a serious operations console.
+// One continuous red→neutral sweep (login-canvas) across the whole viewport —
+// no hard split. The form floats in a glass card that blurs the gradient behind
+// it, the Service Desk "blur-in" feel.
 
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
@@ -42,89 +43,66 @@ export default function Login() {
   }
 
   return (
-    <div className="min-h-screen flex bg-[var(--surface)] text-[var(--text-primary)]">
-      {/* -------- Left brand panel -------- */}
-      <aside
-        className="hidden lg:flex lg:w-[44%] xl:w-[40%] relative overflow-hidden text-white"
+    <div className="min-h-screen relative flex flex-col lg:flex-row overflow-hidden login-canvas">
+      {/* Texture + glow overlays over the sweep */}
+      <div
+        className="pointer-events-none absolute inset-0 opacity-[0.08]"
         style={{
-          background:
-            "linear-gradient(155deg, #7a0a0a 0%, #c20000 38%, #e60000 100%)",
+          backgroundImage:
+            "radial-gradient(circle at 1px 1px, rgba(255,255,255,0.55) 1px, transparent 0)",
+          backgroundSize: "30px 30px",
         }}
-      >
-        {/* Subtle grid mesh */}
-        <div
-          className="absolute inset-0 opacity-[0.10]"
-          style={{
-            backgroundImage:
-              "radial-gradient(circle at 1px 1px, rgba(255,255,255,0.6) 1px, transparent 0)",
-            backgroundSize: "28px 28px",
-          }}
-        />
-        {/* Soft glow */}
-        <div className="absolute -top-32 -left-24 w-[480px] h-[480px] rounded-full bg-white/10 blur-3xl" />
-        <div className="absolute -bottom-40 -right-20 w-[420px] h-[420px] rounded-full bg-black/30 blur-3xl" />
+      />
+      <div className="pointer-events-none absolute -top-40 -left-28 w-[560px] h-[560px] rounded-full bg-white/10 blur-3xl" />
+      <div className="pointer-events-none absolute -bottom-48 left-[30%] w-[480px] h-[480px] rounded-full bg-black/25 blur-3xl" />
 
-        <div className="relative z-10 flex flex-col justify-between p-14 w-full">
-          {/* Logo */}
-          <div className="flex items-center gap-3">
-            <span
-              className="w-10 h-10 rounded-lg flex items-center justify-center bg-white/15 backdrop-blur border border-white/15"
-            >
-              <Ticket size={18} strokeWidth={2} />
-            </span>
-            <div className="flex flex-col">
-              <span className="text-[15px] font-semibold tracking-tight">
-                Voucher Manager
+      {/* -------- Left brand copy (over the red end of the sweep) -------- */}
+      <aside className="hidden lg:flex lg:w-[46%] xl:w-[42%] relative z-10 flex-col justify-between p-14 text-white">
+        <div className="flex items-center gap-3">
+          <span className="w-10 h-10 rounded-xl flex items-center justify-center bg-white/15 backdrop-blur border border-white/20">
+            <Ticket size={18} strokeWidth={2} />
+          </span>
+          <div className="flex flex-col">
+            <span className="text-[15px] font-semibold tracking-tight">Voucher Manager</span>
+            <span className="text-[12px] font-medium text-white/70">Vodafone Fiji · USO Portal</span>
+          </div>
+        </div>
+
+        <div className="space-y-6 max-w-md">
+          <h1 className="text-[44px] xl:text-[52px] font-semibold tracking-[-0.025em] leading-[1.04]">
+            Operations
+            <br />
+            <span className="text-white/60">for the field,</span>
+            <br />
+            not the boardroom.
+          </h1>
+          <p className="text-[14px] leading-relaxed text-white/75 max-w-sm">
+            Generate codes, monitor sessions, and audit the entire payment-to-internet
+            journey across the Vodafone captive portal — all from one console.
+          </p>
+          <div className="flex flex-wrap gap-1.5 pt-1">
+            {["Ruijie Cloud sync", "M-PAiSA telemetry", "Signed audit trail"].map((feat) => (
+              <span
+                key={feat}
+                className="px-2.5 h-7 inline-flex items-center text-[11px] font-medium rounded-lg border border-white/20 bg-white/10 text-white/90 backdrop-blur-sm"
+              >
+                {feat}
               </span>
-              <span className="text-[12px] font-medium text-white/65">
-                Vodafone Fiji · USO Portal
-              </span>
-            </div>
+            ))}
           </div>
+        </div>
 
-          {/* Center */}
-          <div className="space-y-6 max-w-md">
-            <h1 className="text-[44px] xl:text-[52px] font-semibold tracking-[-0.025em] leading-[1.04]">
-              Operations
-              <br />
-              <span className="text-white/65">for the field,</span>
-              <br />
-              not the boardroom.
-            </h1>
-            <p className="text-[14px] leading-relaxed text-white/70 max-w-sm">
-              Generate codes, monitor sessions, and audit the entire payment-to-internet
-              journey across the Vodafone captive portal — all from one console.
-            </p>
-
-            <div className="flex flex-wrap gap-1.5 pt-1">
-              {[
-                "Ruijie Cloud sync",
-                "M-PAiSA telemetry",
-                "Signed audit trail",
-              ].map((feat) => (
-                <span
-                  key={feat}
-                  className="px-2.5 h-7 inline-flex items-center text-[11px] font-medium rounded border border-white/15 bg-white/5 text-white/85"
-                >
-                  {feat}
-                </span>
-              ))}
-            </div>
-          </div>
-
-          {/* Bottom */}
-          <div className="flex items-center gap-2 text-[11px] font-medium text-white/45">
-            <ShieldCheck size={13} />
-            <span>Secured · JWT · TLS 1.3</span>
-          </div>
+        <div className="flex items-center gap-2 text-[11px] font-medium text-white/55">
+          <ShieldCheck size={13} />
+          <span>Secured · JWT · TLS 1.3</span>
         </div>
       </aside>
 
-      {/* -------- Right form panel -------- */}
-      <section className="flex-1 flex items-center justify-center px-6 py-12">
-        <div className="w-full max-w-[400px]">
+      {/* -------- Right form (glass card floating on the neutral end) -------- */}
+      <section className="flex-1 relative z-10 flex items-center justify-center px-6 py-12">
+        <div className="w-full max-w-[410px] rounded-2xl border border-[var(--border-strong)] surface-glass shadow-[var(--shadow-elevated)] p-7 sm:p-9 animate-scale-in">
           {/* Mobile logo */}
-          <div className="lg:hidden flex items-center gap-3 mb-10">
+          <div className="lg:hidden flex items-center gap-3 mb-8">
             <span className="brand-mark">
               <Ticket size={15} />
             </span>
@@ -132,16 +110,12 @@ export default function Login() {
               <h2 className="text-[15px] font-semibold text-[var(--text-primary)] tracking-tight">
                 Voucher Manager
               </h2>
-              <p className="text-[12px] font-medium text-[var(--text-tertiary)]">
-                Vodafone Fiji
-              </p>
+              <p className="text-[12px] font-medium text-[var(--text-tertiary)]">Vodafone Fiji</p>
             </div>
           </div>
 
           <div className="mb-8">
-            <span className="text-[12px] font-medium text-[var(--text-tertiary)] block mb-2">
-              Sign in
-            </span>
+            <span className="text-label text-[var(--text-tertiary)] block mb-2">Sign in</span>
             <h1 className="text-[24px] font-semibold tracking-tight text-[var(--text-primary)]">
               Welcome back.
             </h1>
@@ -197,12 +171,7 @@ export default function Login() {
             </Field>
 
             {err && (
-              <div
-                className={
-                  "flex items-start gap-2 px-3 py-2.5 rounded-md " +
-                  "bg-[var(--danger-soft)] border border-[var(--brand-soft-hover)]"
-                }
-              >
+              <div className="flex items-start gap-2 px-3 py-2.5 rounded-lg bg-[var(--danger-soft)] border border-[var(--border-accent)]">
                 <span className="w-1.5 h-1.5 rounded-full bg-[var(--brand)] mt-[7px] shrink-0" />
                 <p className="text-[12.5px] text-[var(--danger-fg)] font-medium leading-relaxed">
                   {err}
@@ -222,7 +191,7 @@ export default function Login() {
             </Button>
           </form>
 
-          <p className="mt-10 text-center text-[12.5px] font-medium text-[var(--text-tertiary)]">
+          <p className="mt-9 text-center text-[12.5px] font-medium text-[var(--text-tertiary)]">
             Voucher Manager · v1.0
           </p>
         </div>
