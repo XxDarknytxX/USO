@@ -15,3 +15,22 @@ export {
   EmptyState,
   Kbd,
 } from "./Surface";
+
+/* --- Service Desk primitives (dashboards + reskin) --- */
+export { default as PageHeader, SectionHeader } from "./PageHeader";
+export { default as Tabs } from "./Tabs";
+export { GlassCard, StatCard, Panel } from "./StatCard";
+export {
+  default as Skeleton,
+  SkeletonText,
+  SkeletonKpis,
+  SkeletonCard,
+  SkeletonTable,
+} from "./Skeleton";
+export {
+  CHART_COLORS,
+  CHART_SERIES,
+  useChartTheme,
+  ChartTooltip,
+  ChartGradient,
+} from "./chart";
