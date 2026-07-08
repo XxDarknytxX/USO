@@ -1,6 +1,70 @@
 // src/services/ruijieService.js
 import fetch from 'node-fetch';
 
+// ── Process-wide Ruijie Cloud request limiter ────────────────────────────
+// Ruijie Cloud rate-limits aggressively — a burst of calls returns
+// { msg: "Too many requests" } (or HTTP 429). EVERY RuijieService instance
+// (network controller, background collector, voucher + portal controllers)
+// routes its calls through this ONE shared gate, so requests are serialized,
+// spaced ≥ MIN_GAP apart, and a rate-limit reply backs off + retries instead
+// of surfacing "Too many requests" to the UI.
+const RUIJIE_MIN_GAP_MS = 220;   // min spacing between successive calls
+const RUIJIE_MAX_RETRIES = 3;    // extra attempts on a rate-limit reply
+const _limiter = { chain: Promise.resolve(), lastAt: 0 };
+
+function _rateLimited(status, body) {
+  if (status === 429) return true;
+  const msg = (body?.msg ?? body?.message ?? '').toString().toLowerCase();
+  return /too many|request limited|too frequent|rate.?limit|限流|频繁/.test(msg);
+}
+
+// Drop-in replacement for fetch(): one call at a time, spaced, and
+// rate-limit-aware. Reads the body once (no clone/tee) and returns a
+// Response-like object ({ ok, status, statusText, headers, json(), text() })
+// so callers keep using response.ok / await response.json() unchanged.
+// NOTE: this MUST call the real node-fetch `fetch` internally, never itself.
+function ruijieFetch(url, options) {
+  const run = _limiter.chain.then(async () => {
+    let attempt = 0;
+    for (;;) {
+      const wait = Math.max(0, _limiter.lastAt + RUIJIE_MIN_GAP_MS - Date.now());
+      if (wait) await new Promise((r) => setTimeout(r, wait));
+
+      let status, statusText, ok, headers, text = '';
+      try {
+        const res = await fetch(url, options);
+        ({ status, statusText, ok, headers } = res);
+        text = await res.text();
+      } finally {
+        _limiter.lastAt = Date.now();
+      }
+
+      let body = null;
+      try { body = text ? JSON.parse(text) : null; } catch { /* non-JSON body */ }
+
+      // Ruijie signals rate-limiting via HTTP 429 or a 200 body whose msg says
+      // "Too many requests" — back off + retry instead of surfacing it.
+      const limited = status === 429 || _rateLimited(status, body);
+      if (!limited || attempt >= RUIJIE_MAX_RETRIES) {
+        return {
+          ok, status, statusText, headers,
+          json: async () => JSON.parse(text),   // throws on non-JSON, like Response.json()
+          text: async () => text,
+        };
+      }
+
+      const ra = Number(headers?.get?.('retry-after'));
+      const backoff = Number.isFinite(ra) && ra > 0 ? ra * 1000 : 800 * 2 ** attempt;
+      console.warn(`[ruijie] rate-limited (attempt ${attempt + 1}/${RUIJIE_MAX_RETRIES}) — waiting ${backoff}ms`);
+      await new Promise((r) => setTimeout(r, backoff));
+      attempt++;
+    }
+  });
+  // Keep the shared chain alive even if this call rejects.
+  _limiter.chain = run.then(() => {}, () => {});
+  return run;
+}
+
 class RuijieService {
   constructor() {
     this.baseUrl = process.env.RUIJIE_API_BASE_URL;
@@ -27,7 +91,7 @@ class RuijieService {
         `/oauth20/client/access_token?token=d63dss0a81e4415a889ac5b78fsc904a`
       );
 
-      const response = await fetch(tokenUrl, {
+      const response = await ruijieFetch(tokenUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ appid: this.appId, secret: this.appSecret }),
@@ -85,7 +149,7 @@ class RuijieService {
       url.searchParams.append('pageSize', String(pageSize));
       if (tid) url.searchParams.append('tenantId', String(tid));
 
-      const response = await fetch(url.toString(), {
+      const response = await ruijieFetch(url.toString(), {
         method: 'GET',
         headers: { 'Content-Type': 'application/json' },
       });
@@ -142,7 +206,7 @@ class RuijieService {
       url.searchParams.append('access_token', accessToken);
       url.searchParams.append('depth', 'DEVICE');
 
-      const response = await fetch(url.toString(), {
+      const response = await ruijieFetch(url.toString(), {
         method: 'GET',
         headers: { 'Content-Type': 'application/json' },
       });
@@ -195,7 +259,15 @@ class RuijieService {
    * Check if an API response indicates an expired/invalid token.
    */
   isTokenExpired(data) {
-    return data?.code === 3 || (data?.msg || '').toLowerCase().includes('login timeout');
+    // Per the Ruijie Cloud manual §Appendix: code 3 = "Token is invalid",
+    // code 4 = "Token is overdued" (expired). Both mean re-auth. (The 30-day
+    // token also silently expires after 30 min of inactivity → code 4.)
+    const code = data?.code;
+    const msg = (data?.msg || '').toLowerCase();
+    return code === 3 || code === 4
+      || msg.includes('login timeout')
+      || msg.includes('token is invalid')
+      || msg.includes('overdue');
   }
 
   async getUserGroups(opts = {}, _retried = false) {
@@ -207,7 +279,7 @@ class RuijieService {
       url.searchParams.append('pageIndex', '0');
       url.searchParams.append('pageSize', '100');
 
-      const response = await fetch(url.toString(), {
+      const response = await ruijieFetch(url.toString(), {
         method: 'GET',
         headers: { 'Content-Type': 'application/json' },
       });
@@ -287,7 +359,7 @@ class RuijieService {
           url.searchParams.append('per_page', String(PER_PAGE));
           if (tid) url.searchParams.append('tenantId', String(tid));
 
-          const response = await fetch(url.toString(), {
+          const response = await ruijieFetch(url.toString(), {
             method: 'GET',
             headers: { 'Content-Type': 'application/json' },
           });
@@ -329,7 +401,7 @@ class RuijieService {
           url.searchParams.append('page', '0');
           url.searchParams.append('per_page', String(PER_PAGE));
           if (tid) url.searchParams.append('tenantId', String(tid));
-          const response = await fetch(url.toString(), { method: 'GET', headers: { 'Content-Type': 'application/json' } });
+          const response = await ruijieFetch(url.toString(), { method: 'GET', headers: { 'Content-Type': 'application/json' } });
           const data = await response.json().catch(() => ({}));
           const list = data?.deviceList || data?.data?.deviceList || [];
           for (const d of list) merged.push({ ...d, commonType: d.commonType || 'Gateway' });
@@ -371,7 +443,7 @@ class RuijieService {
       url.searchParams.append('page_size', '1000');
       if (tid) url.searchParams.append('tenantId', String(tid));
 
-      const response = await fetch(url.toString(), {
+      const response = await ruijieFetch(url.toString(), {
         method: 'GET',
         headers: { 'Content-Type': 'application/json' },
       });
@@ -413,7 +485,7 @@ class RuijieService {
       const accessToken = await this.getAccessToken();
       const url = new URL(this.buildUrl(`/gateway/intf/info/${encodeURIComponent(sn)}`));
       url.searchParams.append('access_token', accessToken);
-      const response = await fetch(url.toString(), {
+      const response = await ruijieFetch(url.toString(), {
         method: 'GET',
         headers: { 'Content-Type': 'application/json' },
       });
@@ -465,7 +537,7 @@ class RuijieService {
       url.searchParams.append('start_time', ymd);
       url.searchParams.append('end_time', ymd);
       url.searchParams.append('size', '1000');
-      const response = await fetch(url.toString(), {
+      const response = await ruijieFetch(url.toString(), {
         method: 'GET',
         headers: { 'Content-Type': 'application/json' },
       });
@@ -576,7 +648,7 @@ class RuijieService {
       if (payload.phone) body.phone = payload.phone;
       if (payload.comment) body.comment = payload.comment;
 
-      const response = await fetch(url.toString(), {
+      const response = await ruijieFetch(url.toString(), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
@@ -613,7 +685,7 @@ class RuijieService {
         userGroupId: payload.userGroupId,
       };
 
-      const response = await fetch(url.toString(), {
+      const response = await ruijieFetch(url.toString(), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
@@ -638,7 +710,7 @@ class RuijieService {
         url.searchParams.append('tenantId', process.env.RUIJIE_TENANT_ID);
       }
 
-      const response = await fetch(url.toString(), {
+      const response = await ruijieFetch(url.toString(), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ uuid, ...payload }),
@@ -661,7 +733,7 @@ class RuijieService {
         url.searchParams.append('tenantId', process.env.RUIJIE_TENANT_ID);
       }
 
-      const response = await fetch(url.toString(), {
+      const response = await ruijieFetch(url.toString(), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ uuids }),
@@ -684,7 +756,7 @@ class RuijieService {
         url.searchParams.append('tenantId', process.env.RUIJIE_TENANT_ID);
       }
 
-      const response = await fetch(url.toString(), {
+      const response = await ruijieFetch(url.toString(), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ uuid }),
@@ -707,7 +779,7 @@ class RuijieService {
         url.searchParams.append('tenantId', process.env.RUIJIE_TENANT_ID);
       }
 
-      const response = await fetch(url.toString(), {
+      const response = await ruijieFetch(url.toString(), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ uuid }),

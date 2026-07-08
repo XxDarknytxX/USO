@@ -24,6 +24,16 @@ const mapProject = (r) => ({
   createdAt: r.created_at,
 });
 
+// Live health is expensive (~6–7 Ruijie Cloud calls per project). Opening the
+// Network diagram / a site dashboard used to hit Ruijie live every time,
+// bursting past its rate limit. Cache the assembled result per project and
+// collapse concurrent requests into one in-flight fetch. Good data is cached
+// longer than a failed (rate-limited) one so we recover quickly.
+const _healthCache = new Map();     // projectId -> { ts, payload }
+const _healthInflight = new Map();  // projectId -> Promise<payload>
+const HEALTH_TTL_OK_MS = 45_000;
+const HEALTH_TTL_FAIL_MS = 15_000;
+
 export function makeNetworkController(pool) {
   const ruijie = new RuijieService();
 
@@ -126,23 +136,46 @@ export function makeNetworkController(pool) {
       }
     },
 
-    // GET /api/network/projects/:id/health — live, per project (Ruijie Cloud).
+    // GET /api/network/projects/:id/health — per project (Ruijie Cloud), served
+    // through a short-TTL cache + in-flight dedup so repeated diagram opens and
+    // dashboard refreshes don't burst Ruijie into a rate limit.
     getProjectHealth: async (req, res) => {
       try {
         const [rows] = await pool.query("SELECT * FROM network_projects WHERE id = ?", [req.params.id]);
         const project = rows[0];
         if (!project) return send.notFound(res, "Project not found");
-        const h = await fetchProjectHealth(ruijie, project);
-        return send.ok(res, {
-          project: mapProject(project),
-          cloudSync: h.cloudSync,
-          notice: h.cloudSync ? null : h.reason,
-          summary: h.summary,
-          internet: h.internet,
-          usageBytes: h.usageBytes,
-          topology: h.topology,
-          devices: h.devices,
-        });
+
+        const key = String(project.id);
+        const cached = _healthCache.get(key);
+        if (cached) {
+          const ttl = cached.payload.cloudSync ? HEALTH_TTL_OK_MS : HEALTH_TTL_FAIL_MS;
+          if (Date.now() - cached.ts < ttl) return send.ok(res, cached.payload);
+        }
+
+        // Collapse concurrent requests for the same project into one fetch.
+        let inflight = _healthInflight.get(key);
+        if (!inflight) {
+          inflight = fetchProjectHealth(ruijie, project)
+            .then((h) => {
+              const payload = {
+                project: mapProject(project),
+                cloudSync: h.cloudSync,
+                notice: h.cloudSync ? null : h.reason,
+                summary: h.summary,
+                internet: h.internet,
+                usageBytes: h.usageBytes,
+                topology: h.topology,
+                devices: h.devices,
+              };
+              _healthCache.set(key, { ts: Date.now(), payload });
+              return payload;
+            })
+            .finally(() => _healthInflight.delete(key));
+          _healthInflight.set(key, inflight);
+        }
+
+        const payload = await inflight;
+        return send.ok(res, payload);
       } catch (e) {
         console.error(e);
         return send.serverErr(res);
