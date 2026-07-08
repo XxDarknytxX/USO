@@ -24,23 +24,23 @@ import {
   Sparkles,
 } from "lucide-react";
 
-import Button, { IconButton } from "../components/ui/Button";
-import Modal from "../components/ui/Modal";
-import ConfirmDialog from "../components/ui/ConfirmDialog";
 import {
+  Button,
+  IconButton,
+  Modal,
+  ConfirmDialog,
   Field,
   Input,
   Select,
   Textarea,
   Toggle,
   TagInput,
-} from "../components/ui/Field";
-import {
-  Card,
   Badge,
   Section,
   EmptyState,
-} from "../components/ui/Surface";
+  PageHeader,
+  Panel,
+} from "../components/ui";
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -197,50 +197,43 @@ export default function PortalConfigPage() {
   const hasFilters = !!categoryFilter;
 
   return (
-    <div className="page-shell">
+    <div className="p-4 sm:p-6 lg:p-8">
       {/* Header */}
-      <header className="page-header">
-        <div className="flex items-start gap-3 min-w-0">
-          <span className="brand-mark mt-0.5">
-            <Globe size={16} strokeWidth={2} />
-          </span>
-          <div className="min-w-0">
-            <div className="page-eyebrow">Portal · Configuration</div>
-            <h1 className="page-title">Portal Plans</h1>
-            <p className="page-subtitle">
-              {plans.length} plan{plans.length !== 1 && "s"} configured
-            </p>
-          </div>
-        </div>
-
-        <div className="flex items-center gap-2.5">
-          <FilterPicker value={categoryFilter} onChange={setCategoryFilter} />
-          {hasFilters && (
-            <Button
-              variant="ghost"
-              size="sm"
-              iconLeft={<X size={13} />}
-              onClick={() => setCategoryFilter("")}
-            >
-              Clear
-            </Button>
-          )}
-          {isAdmin && (
-            <Button
-              variant="primary"
-              size="md"
-              iconLeft={<Plus size={14} />}
-              onClick={handleCreate}
-            >
-              New Plan
-            </Button>
-          )}
-        </div>
-      </header>
+      <PageHeader
+        eyebrow="Portal"
+        title="Portal Plans"
+        subtitle={`${plans.length} plan${plans.length !== 1 ? "s" : ""} configured`}
+        icon={<Globe size={20} />}
+        actions={
+          <>
+            <FilterPicker value={categoryFilter} onChange={setCategoryFilter} />
+            {hasFilters && (
+              <Button
+                variant="ghost"
+                size="sm"
+                iconLeft={<X size={13} />}
+                onClick={() => setCategoryFilter("")}
+              >
+                Clear
+              </Button>
+            )}
+            {isAdmin && (
+              <Button
+                variant="primary"
+                size="md"
+                iconLeft={<Plus size={14} />}
+                onClick={handleCreate}
+              >
+                New Plan
+              </Button>
+            )}
+          </>
+        }
+      />
 
       {/* Table */}
-      <div className="flex-1 min-h-0 px-8 pb-8 pt-5">
-        <Card className="h-full flex flex-col overflow-hidden">
+      <div className="mt-6">
+        <Panel padding={false}>
           {loading ? (
             <LoadingTable />
           ) : plans.length === 0 ? (
@@ -266,10 +259,10 @@ export default function PortalConfigPage() {
               }
             />
           ) : (
-            <div className="flex-1 min-h-0 overflow-auto">
+            <div className="overflow-x-auto">
               <table className="w-full text-[13px]">
-                <thead className="sticky top-0 z-10 bg-[var(--surface-sunken)]/95 backdrop-blur">
-                  <tr className="text-left text-[12px] font-medium text-[var(--text-tertiary)]">
+                <thead className="bg-[var(--surface-sunken)]/95 backdrop-blur">
+                  <tr className="text-label text-left">
                     <Th>Key</Th>
                     <Th>Name</Th>
                     <Th>Category</Th>
@@ -280,16 +273,11 @@ export default function PortalConfigPage() {
                     {isAdmin && <Th className="text-right pr-5">·</Th>}
                   </tr>
                 </thead>
-                <tbody>
-                  {plans.map((plan, i) => (
+                <tbody className="divide-y divide-[var(--border-default)]">
+                  {plans.map((plan) => (
                     <tr
                       key={plan._id || plan.id}
-                      className={
-                        "transition-colors hover:bg-[var(--surface-hover)] " +
-                        (i !== 0
-                          ? "border-t border-[var(--border-subtle)]"
-                          : "")
-                      }
+                      className="transition-colors hover:bg-[var(--bg-surface)]"
                     >
                       <Td>
                         <span className="font-mono text-[12.5px] text-[var(--text-secondary)] tabular">
@@ -383,7 +371,7 @@ export default function PortalConfigPage() {
               </table>
             </div>
           )}
-        </Card>
+        </Panel>
       </div>
 
       {/* Create / Edit Modal */}

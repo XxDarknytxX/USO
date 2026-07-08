@@ -26,7 +26,7 @@ import {
 
 import { portalAuditApi } from "../services/api";
 import Pagination from "../components/shared/Pagination";
-import { Badge, EmptyState } from "../components/ui";
+import { Badge, EmptyState, PageHeader, Panel } from "../components/ui";
 
 const STATUS_OPTIONS = [
   { value: "", label: "All statuses" },
@@ -148,44 +148,30 @@ export default function TransactionFlowPage() {
   };
 
   return (
-    <div className="page-shell">
-      <div className="page-header">
-        <div className="flex items-center gap-3 min-w-0">
-          <span className="brand-mark">
-            <GitBranch size={15} />
-          </span>
-          <div className="flex flex-col min-w-0">
-            <span className="page-eyebrow">Captive portal</span>
-            <h1 className="page-title">Transaction Flows</h1>
-            <p className="page-subtitle">
-              {total.toLocaleString()} transaction{total !== 1 ? "s" : ""} — every step from
-              payment to internet access.
-            </p>
-          </div>
-        </div>
-      </div>
+    <div className="p-4 sm:p-6 lg:p-8">
+      <PageHeader
+        eyebrow="Portal"
+        title="Txn Flows"
+        subtitle={`${total.toLocaleString()} transaction${total !== 1 ? "s" : ""} — every step from payment to internet access.`}
+        icon={<GitBranch size={20} />}
+      />
 
-      <div className="px-8 py-5 space-y-4">
+      <div className="mt-6 space-y-4">
         {/* Filters */}
-        <div
-          className={
-            "rounded-lg p-4 space-y-3 " +
-            "bg-[var(--surface-raised)] border border-[var(--border-default)] " +
-            "shadow-[var(--elev-1)]"
-          }
-        >
-          <div className="flex items-center gap-2 text-[12px] font-medium text-[var(--text-secondary)]">
-            <Filter size={12} className="text-[var(--text-quaternary)]" />
-            Filters
-            {hasFilters && (
+        <Panel
+          title="Filters"
+          icon={<Filter size={15} />}
+          actions={
+            hasFilters ? (
               <button
                 onClick={clearFilters}
-                className="ml-auto inline-flex items-center gap-1 text-[11.5px] text-[var(--brand)] hover:text-[var(--brand-hover)] transition-colors"
+                className="inline-flex items-center gap-1 text-[11.5px] text-[var(--accent)] hover:opacity-80 transition-opacity"
               >
                 <RotateCcw size={11} /> Clear all
               </button>
-            )}
-          </div>
+            ) : null
+          }
+        >
           <div className="flex flex-wrap items-end gap-3">
             <FilterSearch
               label="Transaction ID"
@@ -244,14 +230,14 @@ export default function TransactionFlowPage() {
               />
             </FilterField>
           </div>
-        </div>
+        </Panel>
 
         {/* List */}
         {loading ? (
           <div
             className={
               "rounded-lg p-4 space-y-2 " +
-              "bg-[var(--surface-raised)] border border-[var(--border-default)]"
+              "surface-card border border-[var(--border-default)]"
             }
           >
             {Array.from({ length: 6 }).map((_, i) => (
@@ -259,19 +245,13 @@ export default function TransactionFlowPage() {
             ))}
           </div>
         ) : transactions.length === 0 ? (
-          <div
-            className={
-              "rounded-md " +
-              "bg-[var(--surface-raised)] border border-[var(--border-default)] " +
-              "shadow-[var(--elev-1)]"
-            }
-          >
+          <Panel padding={false}>
             <EmptyState
               icon={GitBranch}
               title="No transactions"
               description={hasFilters ? "Try clearing filters." : "Transactions will appear as the portal processes payments."}
             />
-          </div>
+          </Panel>
         ) : (
           <div className="space-y-2">
             {transactions.map((txn) => (
@@ -293,7 +273,7 @@ export default function TransactionFlowPage() {
           <div
             className={
               "rounded-lg overflow-hidden " +
-              "bg-[var(--surface-raised)] border border-[var(--border-default)]"
+              "surface-card border border-[var(--border-default)]"
             }
           >
             <Pagination
@@ -317,13 +297,12 @@ function TransactionCard({ txn, isExpanded, onToggle }) {
     <div
       className={
         "rounded-lg overflow-hidden transition-colors " +
-        "bg-[var(--surface-raised)] border border-[var(--border-default)] " +
-        "shadow-[var(--elev-1)]"
+        "surface-card border border-[var(--border-default)] hover:border-[var(--border-hover)]"
       }
     >
       <button
         onClick={onToggle}
-        className="w-full text-left px-4 py-3 flex items-center gap-3 hover:bg-[var(--surface-hover)] transition-colors"
+        className="w-full text-left px-4 py-3 flex items-center gap-3 hover:bg-[var(--bg-surface)] transition-colors"
       >
         <span
           className={

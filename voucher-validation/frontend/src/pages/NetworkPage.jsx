@@ -34,6 +34,9 @@ import {
   Badge,
   Card,
   EmptyState,
+  PageHeader,
+  StatCard,
+  Panel,
 } from "../components/ui";
 
 export default function NetworkPage() {
@@ -84,33 +87,27 @@ export default function NetworkPage() {
 
   // ---- Project grid ----
   return (
-    <div className="page-shell">
-      <div className="page-header">
-        <div className="flex items-center gap-3 min-w-0">
-          <span className="brand-mark">
-            <Network size={15} />
-          </span>
-          <div className="flex flex-col min-w-0">
-            <span className="page-eyebrow">Monitoring</span>
-            <h1 className="page-title">Network</h1>
-            <p className="page-subtitle">
-              {projects.length} project{projects.length !== 1 ? "s" : ""} · live device health from Ruijie Cloud
-            </p>
-          </div>
-        </div>
-        {isAdmin && (
-          <Button
-            variant="primary"
-            size="md"
-            onClick={() => setShowAdd(true)}
-            iconLeft={<Plus size={14} />}
-          >
-            Add project
-          </Button>
-        )}
-      </div>
+    <div className="p-4 sm:p-6 lg:p-8">
+      <PageHeader
+        eyebrow="Infrastructure"
+        title="Network"
+        subtitle={`${projects.length} project${projects.length !== 1 ? "s" : ""} · live device health from Ruijie Cloud`}
+        icon={<Network size={20} />}
+        actions={
+          isAdmin && (
+            <Button
+              variant="primary"
+              size="md"
+              onClick={() => setShowAdd(true)}
+              iconLeft={<Plus size={14} />}
+            >
+              Add project
+            </Button>
+          )
+        }
+      />
 
-      <div className="px-8 py-6">
+      <div className="mt-6">
         {loading ? (
           <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
             {Array.from({ length: 3 }).map((_, i) => (
@@ -183,29 +180,29 @@ export default function NetworkPage() {
 /* ------------ Project card ------------------------------------------------ */
 function ProjectCard({ project, isAdmin, onOpen, onDelete }) {
   return (
-    <Card className="group hover:border-[var(--brand)] transition-colors cursor-pointer relative">
+    <Card className="group hover:border-[var(--border-hover)] hover:shadow-[var(--shadow-card-hover)] transition-all cursor-pointer relative">
       <button
         onClick={onOpen}
         className="w-full text-left p-5 focus-ring rounded-lg"
         aria-label={`Open ${project.name}`}
       >
         <div className="flex items-start gap-3">
-          <span className="shrink-0 h-10 w-10 rounded-lg inline-flex items-center justify-center bg-[var(--brand-soft)] text-[var(--brand-fg-on-soft)]">
+          <span className="shrink-0 h-10 w-10 rounded-lg inline-flex items-center justify-center bg-[var(--accent)]/10 text-[var(--accent)] border border-[var(--accent)]/15">
             <Globe size={18} />
           </span>
           <div className="min-w-0 flex-1">
-            <h3 className="text-[14px] font-semibold text-[var(--text-primary)] tracking-tight truncate">
+            <h3 className="text-[14px] font-semibold text-[var(--fg-primary)] tracking-tight truncate">
               {project.name}
             </h3>
             {project.hostname && (
-              <p className="text-[12px] text-[var(--text-tertiary)] font-mono truncate">
+              <p className="text-[12px] text-[var(--fg-muted)] font-mono truncate">
                 {project.hostname}
               </p>
             )}
           </div>
           <ChevronRight
             size={16}
-            className="text-[var(--text-quaternary)] group-hover:text-[var(--brand)] transition-colors shrink-0 mt-1"
+            className="text-[var(--fg-muted)] group-hover:text-[var(--accent)] transition-colors shrink-0 mt-1"
           />
         </div>
 
@@ -230,7 +227,7 @@ function ProjectCard({ project, isAdmin, onOpen, onDelete }) {
               e.stopPropagation();
               onDelete();
             }}
-            className="hover:text-[var(--brand)] hover:bg-[var(--brand-soft)]"
+            className="hover:text-[var(--accent)] hover:bg-[var(--accent)]/10"
           >
             <Trash2 size={14} />
           </IconButton>
@@ -400,33 +397,36 @@ function ProjectDetail({ project, onBack }) {
   const topo = data?.topology;
 
   return (
-    <div className="page-shell">
-      <div className="page-header">
-        <div className="flex items-center gap-3 min-w-0">
-          <IconButton size="md" onClick={onBack} title="Back to projects">
-            <ArrowLeft size={16} />
-          </IconButton>
-          <span className="brand-mark">
-            <Globe size={15} />
-          </span>
-          <div className="flex flex-col min-w-0">
-            <span className="page-eyebrow">Network · {project.name}</span>
-            <h1 className="page-title">{project.hostname || project.name}</h1>
-            <p className="page-subtitle">Access points, gateway, and internet health.</p>
-          </div>
-        </div>
-        <Button
-          variant="secondary"
-          size="md"
-          onClick={() => load(true)}
-          loading={refreshing}
-          iconLeft={!refreshing && <RefreshCw size={14} />}
-        >
-          Refresh
-        </Button>
-      </div>
+    <div className="p-4 sm:p-6 lg:p-8">
+      <PageHeader
+        eyebrow={`Network · ${project.name}`}
+        title={project.hostname || project.name}
+        subtitle="Access points, gateway, and internet health."
+        icon={<Globe size={20} />}
+        actions={
+          <>
+            <Button
+              variant="ghost"
+              size="md"
+              onClick={onBack}
+              iconLeft={<ArrowLeft size={14} />}
+            >
+              Back
+            </Button>
+            <Button
+              variant="secondary"
+              size="md"
+              onClick={() => load(true)}
+              loading={refreshing}
+              iconLeft={!refreshing && <RefreshCw size={14} />}
+            >
+              Refresh
+            </Button>
+          </>
+        }
+      />
 
-      <div className="px-8 py-6 space-y-6">
+      <div className="mt-6 space-y-6">
         {loading ? (
           <div className="space-y-6">
             <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
@@ -502,28 +502,23 @@ function ProjectDetail({ project, onBack }) {
 }
 
 /* ------------ Stat tile --------------------------------------------------- */
+const STAT_TONE_COLOR = {
+  success: "emerald",
+  danger: "rose",
+  warning: "amber",
+  brand: "accent",
+  neutral: "slate",
+};
+
 function StatTile({ icon, label, value, sub, tone = "neutral" }) {
-  const valueColor =
-    tone === "success"
-      ? "text-[var(--success-fg)]"
-      : tone === "danger"
-        ? "text-[var(--brand)]"
-        : tone === "warning"
-          ? "text-[var(--warning-fg)]"
-          : tone === "brand"
-            ? "text-[var(--text-primary)]"
-            : "text-[var(--text-primary)]";
   return (
-    <div className="rounded-lg p-4 bg-[var(--surface-raised)] border border-[var(--border-default)] shadow-[var(--elev-1)]">
-      <div className="flex items-center gap-2 mb-2">
-        <span className="h-7 w-7 rounded-md inline-flex items-center justify-center bg-[var(--surface-sunken)] text-[var(--text-tertiary)] border border-[var(--border-subtle)]">
-          {icon}
-        </span>
-        <span className="text-[11.5px] font-medium text-[var(--text-tertiary)]">{label}</span>
-      </div>
-      <p className={`text-[20px] font-semibold tracking-tight ${valueColor}`}>{value}</p>
-      {sub && <p className="text-[11.5px] text-[var(--text-quaternary)] mt-0.5">{sub}</p>}
-    </div>
+    <StatCard
+      icon={icon}
+      label={label}
+      value={value}
+      sub={sub}
+      color={STAT_TONE_COLOR[tone] || "slate"}
+    />
   );
 }
 
@@ -534,12 +529,8 @@ function Topology({ internet, topo }) {
   const switches = topo?.switches || [];
 
   return (
-    <div className="rounded-lg p-6 bg-[var(--surface-raised)] border border-[var(--border-default)] shadow-[var(--elev-1)]">
-      <h3 className="text-[13px] font-semibold text-[var(--text-primary)] tracking-tight mb-5">
-        Topology
-      </h3>
-
-      <div className="flex flex-col items-center">
+    <Panel title="Topology" icon={<Network size={15} />}>
+      <div className="flex flex-col items-center pt-1">
         {/* Internet */}
         <TopoNode
           icon={<Cloud size={18} />}
@@ -605,7 +596,7 @@ function Topology({ internet, topo }) {
           </>
         )}
       </div>
-    </div>
+    </Panel>
   );
 }
 
@@ -660,40 +651,40 @@ const TYPE_LABEL = { gateway: "Gateway", ap: "Access point", switch: "Switch", o
 
 function DeviceTable({ devices }) {
   return (
-    <div className="rounded-lg bg-[var(--surface-raised)] border border-[var(--border-default)] shadow-[var(--elev-1)] overflow-hidden">
-      <div className="px-5 py-3 border-b border-[var(--border-subtle)]">
-        <h3 className="text-[13px] font-semibold text-[var(--text-primary)] tracking-tight">
-          Devices <span className="text-[var(--text-quaternary)] font-normal">· {devices.length}</span>
-        </h3>
-      </div>
+    <Panel
+      title="Devices"
+      subtitle={`${devices.length} total`}
+      icon={<Server size={15} />}
+      padding={false}
+    >
       {devices.length === 0 ? (
         <EmptyState icon={Server} title="No devices reporting" description="Devices appear here once Ruijie Cloud reports them." />
       ) : (
         <div className="overflow-x-auto">
           <table className="w-full text-[13px]">
             <thead>
-              <tr className="bg-[var(--surface-sunken)] text-left text-[12px] font-medium text-[var(--text-tertiary)]">
-                <th className="px-5 py-2.5 font-medium">Device</th>
-                <th className="px-5 py-2.5 font-medium">Type</th>
-                <th className="px-5 py-2.5 font-medium">Status</th>
-                <th className="px-5 py-2.5 font-medium">Model</th>
-                <th className="px-5 py-2.5 font-medium">Mgmt IP</th>
-                <th className="px-5 py-2.5 font-medium">Clients</th>
-                <th className="px-5 py-2.5 font-medium">Firmware</th>
+              <tr className="text-left border-b border-[var(--border-default)]">
+                <th className="text-label px-5 py-3">Device</th>
+                <th className="text-label px-5 py-3">Type</th>
+                <th className="text-label px-5 py-3">Status</th>
+                <th className="text-label px-5 py-3">Model</th>
+                <th className="text-label px-5 py-3">Mgmt IP</th>
+                <th className="text-label px-5 py-3">Clients</th>
+                <th className="text-label px-5 py-3">Firmware</th>
               </tr>
             </thead>
-            <tbody>
+            <tbody className="divide-y divide-[var(--border-default)]">
               {devices.map((d) => (
-                <tr key={d.sn} className="border-t border-[var(--border-subtle)] hover:bg-[var(--surface-hover)] transition-colors">
+                <tr key={d.sn} className="hover:bg-[var(--bg-surface)] transition-colors">
                   <td className="px-5 py-2.5">
                     <div className="flex flex-col">
-                      <span className="text-[13px] font-medium text-[var(--text-primary)] truncate max-w-[200px]">
+                      <span className="text-[13px] font-medium text-[var(--fg-primary)] truncate max-w-[200px]">
                         {d.name}
                       </span>
-                      <span className="text-[11px] text-[var(--text-quaternary)] font-mono">{d.sn}</span>
+                      <span className="text-[11px] text-[var(--fg-muted)] font-mono">{d.sn}</span>
                     </div>
                   </td>
-                  <td className="px-5 py-2.5 text-[12.5px] text-[var(--text-secondary)]">
+                  <td className="px-5 py-2.5 text-[12.5px] text-[var(--fg-secondary)]">
                     {TYPE_LABEL[d.type] || "Device"}
                   </td>
                   <td className="px-5 py-2.5">
@@ -701,18 +692,18 @@ function DeviceTable({ devices }) {
                       {d.online ? "Online" : "Offline"}
                     </Badge>
                   </td>
-                  <td className="px-5 py-2.5 text-[12.5px] font-mono text-[var(--text-secondary)]">{d.model}</td>
-                  <td className="px-5 py-2.5 text-[12.5px] font-mono text-[var(--text-secondary)]">{d.mgmtIp}</td>
-                  <td className="px-5 py-2.5 text-[12.5px] font-mono text-[var(--text-secondary)]">
+                  <td className="px-5 py-2.5 text-[12.5px] font-mono text-[var(--accent)]">{d.model}</td>
+                  <td className="px-5 py-2.5 text-[12.5px] font-mono text-[var(--fg-secondary)]">{d.mgmtIp}</td>
+                  <td className="px-5 py-2.5 text-[12.5px] font-mono text-[var(--fg-secondary)]">
                     {d.type === "ap" ? d.clientCount : "—"}
                   </td>
-                  <td className="px-5 py-2.5 text-[12px] font-mono text-[var(--text-tertiary)]">{d.firmware}</td>
+                  <td className="px-5 py-2.5 text-[12px] font-mono text-[var(--fg-muted)]">{d.firmware}</td>
                 </tr>
               ))}
             </tbody>
           </table>
         </div>
       )}
-    </div>
+    </Panel>
   );
 }

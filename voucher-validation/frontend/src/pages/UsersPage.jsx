@@ -25,6 +25,9 @@ import {
   IconButton,
   Badge,
   EmptyState,
+  PageHeader,
+  Panel,
+  SkeletonTable,
 } from "../components/ui";
 
 function generatePassword(len = 14) {
@@ -73,77 +76,60 @@ export default function UsersPage() {
   }
 
   return (
-    <div className="page-shell">
+    <div className="p-4 sm:p-6 lg:p-8">
       {/* ----- Header ----- */}
-      <div className="page-header">
-        <div className="flex items-center gap-3 min-w-0">
-          <span className="brand-mark">
-            <Users size={15} />
-          </span>
-          <div className="flex flex-col min-w-0">
-            <span className="page-eyebrow">Access</span>
-            <h1 className="page-title">User Management</h1>
-            <p className="page-subtitle">
-              {users.length.toLocaleString()} account{users.length !== 1 ? "s" : ""} with
-              console access.
-            </p>
-          </div>
-        </div>
-
-        <Button
-          variant="primary"
-          size="md"
-          onClick={() => setShowCreate(true)}
-          iconLeft={<UserPlus size={14} />}
-        >
-          Add user
-        </Button>
-      </div>
+      <PageHeader
+        eyebrow="Access"
+        title="User Management"
+        subtitle={`${users.length.toLocaleString()} account${
+          users.length !== 1 ? "s" : ""
+        } with console access.`}
+        icon={<Users size={20} />}
+        actions={
+          <Button
+            variant="primary"
+            size="md"
+            onClick={() => setShowCreate(true)}
+            iconLeft={<UserPlus size={14} />}
+          >
+            Add user
+          </Button>
+        }
+      />
 
       {/* ----- Table ----- */}
-      <div className="flex-1 min-h-0 px-8 py-5">
-        <div
-          className={
-            "h-full flex flex-col rounded-lg " +
-            "bg-[var(--surface-raised)] border border-[var(--border-default)] " +
-            "shadow-[var(--elev-1)] overflow-hidden"
-          }
-        >
-          {loading ? (
-            <div className="p-4 space-y-2">
-              {Array.from({ length: 5 }).map((_, i) => (
-                <div key={i} className="h-12 rounded skeleton" />
-              ))}
-            </div>
-          ) : users.length === 0 ? (
+      <div className="mt-6">
+        {loading ? (
+          <Panel padding>
+            <SkeletonTable rows={5} cols={4} />
+          </Panel>
+        ) : users.length === 0 ? (
+          <Panel padding>
             <EmptyState
               icon={Users}
               title="No users found"
               description="Add a teammate to give them console access."
             />
-          ) : (
-            <div className="flex-1 min-h-0 overflow-auto">
+          </Panel>
+        ) : (
+          <Panel padding={false}>
+            <div className="overflow-x-auto">
               <table className="w-full text-[13px]">
-                <thead className="sticky top-0 z-10">
-                  <tr
-                    className={
-                      "bg-[var(--surface-sunken)] text-left " +
-                      "text-[12px] font-medium text-[var(--text-tertiary)]"
-                    }
-                  >
-                    <th className="px-5 py-2.5 font-medium">User</th>
-                    <th className="px-5 py-2.5 font-medium">Role</th>
-                    <th className="px-5 py-2.5 font-medium">Joined</th>
-                    <th className="px-5 py-2.5 font-medium text-right">
+                <thead>
+                  <tr className="text-left border-b border-[var(--border-default)]">
+                    <th className="text-label px-5 py-3">User</th>
+                    <th className="text-label px-5 py-3">Role</th>
+                    <th className="text-label px-5 py-3">Joined</th>
+                    <th className="text-label px-5 py-3 text-right">
                       Actions
                     </th>
                   </tr>
                 </thead>
-                <tbody>
+                <tbody className="divide-y divide-[var(--border-default)]">
                   {users.map((u) => (
                     <tr
                       key={u.id}
-                      className="border-t border-[var(--border-subtle)] hover:bg-[var(--surface-hover)] transition-colors"
+                      className="hover:bg-[var(--bg-surface)] transition-colors"
                     >
                       <td className="px-5 py-3">
                         <div className="flex items-center gap-2.5">
@@ -209,8 +195,8 @@ export default function UsersPage() {
                 </tbody>
               </table>
             </div>
-          )}
-        </div>
+          </Panel>
+        )}
       </div>
 
       {/* ----- Modals ----- */}

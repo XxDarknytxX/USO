@@ -184,9 +184,7 @@ export default function VoucherDetailModal({
         <div className="relative px-7 pt-6 pb-5 border-b border-[var(--border-subtle)]">
           <div className="flex items-start justify-between gap-4">
             <div className="min-w-0 flex-1">
-              <span className="text-[12px] font-medium text-[var(--text-tertiary)] block mb-1">
-                Voucher
-              </span>
+              <span className="text-label block mb-1.5">Voucher</span>
               <button
                 onClick={copyCode}
                 title="Copy code"
@@ -376,7 +374,7 @@ export default function VoucherDetailModal({
                   {events.map((evt) => (
                     <div
                       key={evt.id}
-                      className="flex items-start gap-2.5 p-2.5 rounded-md bg-[var(--surface-sunken)] border border-[var(--border-subtle)]"
+                      className="flex items-start gap-2.5 p-2.5 surface-card"
                     >
                       <span className="w-1.5 h-1.5 rounded-full bg-[var(--brand)] mt-[7px] shrink-0" />
                       <div className="min-w-0 flex-1">
@@ -417,8 +415,7 @@ export default function VoucherDetailModal({
               {rawOpen && (
                 <pre
                   className={
-                    "mt-2 px-3 py-2.5 rounded-md text-[11px] " +
-                    "bg-[var(--surface-sunken)] border border-[var(--border-subtle)] " +
+                    "mt-2 px-3 py-2.5 text-[11px] surface-card " +
                     "text-[var(--text-tertiary)] overflow-auto max-h-56 " +
                     "font-mono leading-relaxed"
                   }
@@ -480,25 +477,25 @@ export default function VoucherDetailModal({
 
 /* ------------ Stat card -------------------------------------------------- */
 function StatCard({ icon, label, value, pct: percent }) {
+  const near = percent !== undefined && percent >= 90;
   return (
-    <div
-      className={
-        "rounded-lg p-3 bg-[var(--surface-sunken)] border border-[var(--border-subtle)]"
-      }
-    >
-      <div className="flex items-center gap-1.5 text-[var(--text-tertiary)] mb-1.5">
-        {icon}
-        <span className="text-[12.5px] font-medium">
-          {label}
+    <div className="surface-card p-3.5">
+      <div className="flex items-center justify-between gap-2 mb-2.5">
+        <span className="text-label truncate">{label}</span>
+        <span className="w-7 h-7 rounded-md flex items-center justify-center bg-[var(--brand)]/10 text-[var(--brand)] border border-[var(--border-default)] shrink-0">
+          {icon}
         </span>
       </div>
-      <p className="text-[13px] font-semibold text-[var(--text-primary)] font-mono">
+      <p className="text-[14px] font-semibold text-[var(--text-primary)] font-mono tabular-nums leading-none">
         {value}
       </p>
       {percent !== undefined && (
-        <div className="mt-2 h-1 bg-[var(--surface-raised)] rounded-full overflow-hidden">
+        <div className="mt-2.5 h-1.5 bg-[var(--surface-hover)] rounded-full overflow-hidden">
           <div
-            className="h-full bg-[var(--brand)] rounded-full transition-[width] duration-500"
+            className={
+              "h-full rounded-full transition-[width] duration-500 " +
+              (near ? "bg-[var(--brand)]" : "bg-[var(--accent)]")
+            }
             style={{ width: `${Math.min(percent, 100)}%` }}
           />
         </div>
@@ -553,18 +550,12 @@ function EditableField({
 /* ------------ Timestamp tile --------------------------------------------- */
 function TimeField({ icon, label, value }) {
   return (
-    <div
-      className={
-        "rounded-lg p-3 bg-[var(--surface-sunken)] border border-[var(--border-subtle)]"
-      }
-    >
-      <div className="flex items-center gap-1 text-[var(--text-quaternary)] mb-1">
+    <div className="surface-card p-3.5">
+      <div className="flex items-center gap-1.5 text-[var(--text-quaternary)] mb-1.5">
         {icon}
-        <span className="text-[12px] font-medium">
-          {label}
-        </span>
+        <span className="text-label">{label}</span>
       </div>
-      <p className="text-[12.5px] text-[var(--text-secondary)] font-mono">
+      <p className="text-[12.5px] text-[var(--text-secondary)] font-mono tabular-nums">
         {value ? new Date(Number(value)).toLocaleString() : "—"}
       </p>
     </div>

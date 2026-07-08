@@ -17,7 +17,7 @@ import {
 
 import { portalAuditApi } from "../services/api";
 import Pagination from "../components/shared/Pagination";
-import { Badge, EmptyState } from "../components/ui";
+import { Badge, EmptyState, PageHeader, Panel } from "../components/ui";
 
 const EVENT_TYPES = [
   "payment_initiated",
@@ -150,42 +150,30 @@ export default function PortalAuditLogPage() {
   const toggleRow = (id) => setExpandedRow((p) => (p === id ? null : id));
 
   return (
-    <div className="page-shell">
-      <div className="page-header">
-        <div className="flex items-center gap-3 min-w-0">
-          <span className="brand-mark">
-            <FileText size={15} />
-          </span>
-          <div className="flex flex-col min-w-0">
-            <span className="page-eyebrow">Captive portal</span>
-            <h1 className="page-title">Portal Audit Logs</h1>
-            <p className="page-subtitle">{total.toLocaleString()} events</p>
-          </div>
-        </div>
-      </div>
+    <div className="p-4 sm:p-6 lg:p-8">
+      <PageHeader
+        eyebrow="Portal"
+        title="Portal Logs"
+        subtitle={`${total.toLocaleString()} events`}
+        icon={<FileText size={20} />}
+      />
 
-      <div className="px-8 py-5 space-y-4">
+      <div className="mt-6 space-y-4">
         {/* Filters */}
-        <div
-          className={
-            "rounded-lg p-4 space-y-3 " +
-            "bg-[var(--surface-raised)] border border-[var(--border-default)] " +
-            "shadow-[var(--elev-1)]"
-          }
-        >
-          <div className="flex items-center gap-2 text-[12px] font-medium text-[var(--text-secondary)]">
-            <Filter size={12} className="text-[var(--text-quaternary)]" />
-            Filters
-            {hasFilters && (
+        <Panel
+          title="Filters"
+          icon={<Filter size={15} />}
+          actions={
+            hasFilters ? (
               <button
                 onClick={clearFilters}
-                className="ml-auto inline-flex items-center gap-1 text-[11.5px] text-[var(--brand)] hover:text-[var(--brand-hover)] transition-colors"
+                className="inline-flex items-center gap-1 text-[11.5px] text-[var(--accent)] hover:text-[var(--brand-hover)] transition-colors"
               >
                 <RotateCcw size={11} /> Clear all
               </button>
-            )}
-          </div>
-
+            ) : null
+          }
+        >
           <div className="flex flex-wrap items-end gap-3">
             <FilterField label="Event type">
               <select
@@ -249,16 +237,10 @@ export default function PortalAuditLogPage() {
               />
             </FilterField>
           </div>
-        </div>
+        </Panel>
 
         {/* Table */}
-        <div
-          className={
-            "rounded-md " +
-            "bg-[var(--surface-raised)] border border-[var(--border-default)] " +
-            "shadow-[var(--elev-1)] overflow-hidden"
-          }
-        >
+        <Panel padding={false}>
           {loading ? (
             <div className="p-4 space-y-2">
               {Array.from({ length: 8 }).map((_, i) => (
@@ -275,19 +257,19 @@ export default function PortalAuditLogPage() {
             <div className="overflow-x-auto">
               <table className="w-full text-[13px]">
                 <thead>
-                  <tr className="bg-[var(--surface-sunken)] text-left text-[12px] font-medium text-[var(--text-tertiary)]">
+                  <tr className="bg-[var(--bg-surface)] text-left text-label border-b border-[var(--border-default)]">
                     <th className="px-3 py-2.5 w-8" />
-                    <th className="px-3 py-2.5 font-medium">Timestamp</th>
-                    <th className="px-3 py-2.5 font-medium">Event</th>
-                    <th className="px-3 py-2.5 font-medium">Transaction</th>
-                    <th className="px-3 py-2.5 font-medium">Plan</th>
-                    <th className="px-3 py-2.5 font-medium">Voucher</th>
-                    <th className="px-3 py-2.5 font-medium">Amount</th>
-                    <th className="px-3 py-2.5 font-medium">Phone</th>
-                    <th className="px-3 py-2.5 font-medium">Source</th>
+                    <th className="px-3 py-2.5">Timestamp</th>
+                    <th className="px-3 py-2.5">Event</th>
+                    <th className="px-3 py-2.5">Transaction</th>
+                    <th className="px-3 py-2.5">Plan</th>
+                    <th className="px-3 py-2.5">Voucher</th>
+                    <th className="px-3 py-2.5">Amount</th>
+                    <th className="px-3 py-2.5">Phone</th>
+                    <th className="px-3 py-2.5">Source</th>
                   </tr>
                 </thead>
-                <tbody>
+                <tbody className="divide-y divide-[var(--border-default)]">
                   {logs.map((log) => (
                     <LogRow
                       key={log.id}
@@ -307,7 +289,7 @@ export default function PortalAuditLogPage() {
             total={total}
             onPageChange={setPage}
           />
-        </div>
+        </Panel>
       </div>
     </div>
   );
@@ -318,7 +300,7 @@ function LogRow({ log, isExpanded, onToggle }) {
     <>
       <tr
         onClick={onToggle}
-        className="border-t border-[var(--border-subtle)] hover:bg-[var(--surface-hover)] cursor-pointer transition-colors"
+        className="hover:bg-[var(--bg-surface)] cursor-pointer transition-colors"
       >
         <td className="px-3 py-2.5 text-[var(--text-quaternary)]">
           {isExpanded ? <ChevronUp size={13} /> : <ChevronDown size={13} />}

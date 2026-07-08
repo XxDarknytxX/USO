@@ -110,7 +110,7 @@ export default function VoucherCreateForm({ groupId, siteName, onClose, onCreate
             {loadingGroups ? (
               <ProfileSkeleton />
             ) : userGroups.length === 0 ? (
-              <div className="border border-[var(--border-subtle)] rounded-md bg-[var(--surface-sunken)]">
+              <div className="border border-[var(--border-subtle)] rounded-lg bg-[var(--surface-sunken)]">
                 <EmptyState
                   icon={Inbox}
                   title="No profiles found"
@@ -185,10 +185,10 @@ export default function VoucherCreateForm({ groupId, siteName, onClose, onCreate
                       type="button"
                       onClick={() => setQuantity(n)}
                       className={
-                        "px-2 h-7 text-[12px] font-mono rounded transition-colors " +
+                        "px-2 h-7 text-[12px] font-mono rounded-md transition-colors focus-ring " +
                         (active
                           ? "bg-[var(--brand-soft)] text-[var(--brand-fg-on-soft)] border border-[var(--brand-soft-hover)]"
-                          : "bg-transparent text-[var(--text-tertiary)] border border-transparent hover:bg-[var(--surface-hover)] hover:text-[var(--text-primary)]")
+                          : "bg-transparent text-[var(--text-tertiary)] border border-[var(--border-default)] hover:bg-[var(--surface-hover)] hover:text-[var(--text-primary)] hover:border-[var(--border-strong)]")
                       }
                     >
                       {n}
@@ -246,7 +246,7 @@ function ProfileCard({ group, selected, onSelect }) {
       onClick={onSelect}
       whileTap={{ scale: 0.99 }}
       className={
-        "group text-left p-3 rounded-md border transition-[border-color,background-color,box-shadow] duration-150 " +
+        "group text-left p-3.5 rounded-lg border transition-[border-color,background-color,box-shadow] duration-150 focus-ring " +
         (selected
           ? "border-[var(--brand)] bg-[var(--brand-soft)] shadow-[0_0_0_3px_var(--brand-soft)]"
           : "border-[var(--border-default)] bg-[var(--surface-raised)] hover:border-[var(--border-strong)] hover:bg-[var(--surface-hover)]")
@@ -325,7 +325,7 @@ function ProfileSkeleton() {
       {Array.from({ length: 4 }).map((_, i) => (
         <div
           key={i}
-          className="h-[78px] rounded-md border border-[var(--border-subtle)] bg-[var(--surface-sunken)] skeleton"
+          className="h-[78px] rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-sunken)] skeleton"
         />
       ))}
       <div className="col-span-full flex items-center justify-center gap-2 text-[12px] text-[var(--text-tertiary)] py-1">

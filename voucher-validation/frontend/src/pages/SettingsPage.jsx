@@ -6,7 +6,7 @@ import { Settings, Server, Eye, EyeOff } from "lucide-react";
 import toast from "react-hot-toast";
 
 import { settingsApi } from "../services/api";
-import { Button, Card, CardHeader, CardBody, Badge } from "../components/ui";
+import { Button, Panel, Badge, PageHeader } from "../components/ui";
 
 export default function SettingsPage() {
   const [settings, setSettings] = useState([]);
@@ -45,32 +45,21 @@ export default function SettingsPage() {
   ];
 
   return (
-    <div className="page-shell">
-      <div className="page-header">
-        <div className="flex items-center gap-3 min-w-0">
-          <span className="brand-mark">
-            <Settings size={15} />
-          </span>
-          <div className="flex flex-col min-w-0">
-            <span className="page-eyebrow">Console</span>
-            <h1 className="page-title">Settings</h1>
-            <p className="page-subtitle">
-              Environment configuration and runtime status.
-            </p>
-          </div>
-        </div>
-      </div>
+    <div className="p-4 sm:p-6 lg:p-8">
+      <PageHeader
+        eyebrow="System"
+        title="Settings"
+        subtitle="Environment configuration and runtime status."
+        icon={<Settings size={20} />}
+      />
 
-      <div className="px-8 py-6 max-w-3xl space-y-5">
+      <div className="mt-6 max-w-3xl space-y-5">
         {/* System info */}
-        <Card>
-          <CardHeader>
-            <div className="flex items-center gap-2">
-              <Server size={14} className="text-[var(--text-quaternary)]" />
-              <h3 className="text-[13px] font-semibold text-[var(--text-primary)] tracking-tight">
-                System information
-              </h3>
-            </div>
+        <Panel
+          title="System information"
+          icon={<Server size={15} />}
+          padding={false}
+          actions={
             <Button
               variant="ghost"
               size="xs"
@@ -79,76 +68,62 @@ export default function SettingsPage() {
             >
               {showSecrets ? "Hide" : "Show"} details
             </Button>
-          </CardHeader>
-          <CardBody>
-            <div className="flex flex-col">
-              {envVars.map(({ label, value }, i) => (
-                <div
-                  key={label}
-                  className={
-                    "flex items-center justify-between py-2.5 " +
-                    (i > 0 ? "border-t border-[var(--border-subtle)]" : "")
-                  }
-                >
-                  <span className="text-[12.5px] text-[var(--text-secondary)]">
-                    {label}
-                  </span>
-                  <span className="text-[12.5px] font-mono text-[var(--text-primary)]">
-                    {value}
-                  </span>
-                </div>
-              ))}
-              <div className="flex items-center justify-between py-2.5 border-t border-[var(--border-subtle)]">
-                <span className="text-[12.5px] text-[var(--text-secondary)]">Status</span>
-                <Badge
-                  tone="success"
-                  icon={
-                    <span className="w-1.5 h-1.5 rounded-full bg-[var(--success-fg)]" />
-                  }
-                >
-                  Operational
-                </Badge>
+          }
+        >
+          <div className="flex flex-col divide-y divide-[var(--border-default)]">
+            {envVars.map(({ label, value }) => (
+              <div
+                key={label}
+                className="flex items-center justify-between px-5 py-3 hover:bg-[var(--bg-surface)] transition-colors"
+              >
+                <span className="text-[12.5px] text-[var(--fg-secondary)]">
+                  {label}
+                </span>
+                <span className="text-[12.5px] font-mono text-[var(--fg-primary)]">
+                  {value}
+                </span>
               </div>
+            ))}
+            <div className="flex items-center justify-between px-5 py-3">
+              <span className="text-[12.5px] text-[var(--fg-secondary)]">Status</span>
+              <Badge
+                tone="success"
+                icon={
+                  <span className="w-1.5 h-1.5 rounded-full bg-[var(--success-fg)]" />
+                }
+              >
+                Operational
+              </Badge>
             </div>
-          </CardBody>
-        </Card>
+          </div>
+        </Panel>
 
         {/* App settings */}
         {settings.length > 0 && (
-          <Card>
-            <CardHeader>
-              <h3 className="text-[13px] font-semibold text-[var(--text-primary)] tracking-tight">
-                Application settings
-              </h3>
-            </CardHeader>
-            <CardBody>
-              <div className="flex flex-col">
-                {settings.map((s, i) => (
-                  <div
-                    key={s.setting_key}
-                    className={
-                      "flex items-center justify-between py-2.5 " +
-                      (i > 0 ? "border-t border-[var(--border-subtle)]" : "")
-                    }
-                  >
-                    <div>
-                      <p className="text-[12.5px] font-medium text-[var(--text-primary)]">
-                        {s.setting_key}
+          <Panel title="Application settings" padding={false}>
+            <div className="flex flex-col divide-y divide-[var(--border-default)]">
+              {settings.map((s) => (
+                <div
+                  key={s.setting_key}
+                  className="flex items-center justify-between px-5 py-3 hover:bg-[var(--bg-surface)] transition-colors"
+                >
+                  <div>
+                    <p className="text-[12.5px] font-medium text-[var(--fg-primary)]">
+                      {s.setting_key}
+                    </p>
+                    {s.description && (
+                      <p className="text-[11.5px] text-[var(--fg-muted)] mt-0.5">
+                        {s.description}
                       </p>
-                      {s.description && (
-                        <p className="text-[11.5px] text-[var(--text-tertiary)] mt-0.5">
-                          {s.description}
-                        </p>
-                      )}
-                    </div>
-                    <span className="text-[12.5px] font-mono text-[var(--text-secondary)]">
-                      {s.setting_value}
-                    </span>
+                    )}
                   </div>
-                ))}
-              </div>
-            </CardBody>
-          </Card>
+                  <span className="text-[12.5px] font-mono text-[var(--fg-secondary)]">
+                    {s.setting_value}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </Panel>
         )}
       </div>
     </div>
