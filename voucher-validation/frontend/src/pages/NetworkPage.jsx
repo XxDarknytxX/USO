@@ -24,6 +24,8 @@ import {
 
 import { networkApi } from "../services/api";
 import { useAuth } from "../hooks/useAuth";
+import { useSite } from "../hooks/useSite";
+import SiteMultiSelect from "../components/layout/SiteMultiSelect";
 import {
   Modal,
   Field,
@@ -41,6 +43,7 @@ import {
 
 export default function NetworkPage() {
   const { isAdmin } = useAuth();
+  const { isSiteVisible } = useSite();
   const [projects, setProjects] = useState([]);
   const [loading, setLoading] = useState(true);
   const [selected, setSelected] = useState(null); // project object
@@ -75,6 +78,9 @@ export default function NetworkPage() {
     }
   }
 
+  // Only show the villages selected in the Overview multi-select.
+  const shownProjects = projects.filter((p) => isSiteVisible(p.id));
+
   // ---- Detail view ----
   if (selected) {
     return (
@@ -91,19 +97,22 @@ export default function NetworkPage() {
       <PageHeader
         eyebrow="Infrastructure"
         title="Network"
-        subtitle={`${projects.length} project${projects.length !== 1 ? "s" : ""} · live device health from Ruijie Cloud`}
+        subtitle={`${shownProjects.length} of ${projects.length} project${projects.length !== 1 ? "s" : ""} · live device health from Ruijie Cloud`}
         icon={<Network size={20} />}
         actions={
-          isAdmin && (
-            <Button
-              variant="primary"
-              size="md"
-              onClick={() => setShowAdd(true)}
-              iconLeft={<Plus size={14} />}
-            >
-              Add project
-            </Button>
-          )
+          <>
+            <SiteMultiSelect />
+            {isAdmin && (
+              <Button
+                variant="primary"
+                size="md"
+                onClick={() => setShowAdd(true)}
+                iconLeft={<Plus size={14} />}
+              >
+                Add project
+              </Button>
+            )}
+          </>
         }
       />
 
@@ -129,9 +138,17 @@ export default function NetworkPage() {
               }
             />
           </div>
+        ) : shownProjects.length === 0 ? (
+          <div className="rounded-lg bg-[var(--surface-raised)] border border-[var(--border-default)]">
+            <EmptyState
+              icon={Network}
+              title="No villages selected"
+              description="Use the village filter above to choose which networks to show."
+            />
+          </div>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-            {projects.map((p) => (
+            {shownProjects.map((p) => (
               <ProjectCard
                 key={p.id}
                 project={p}

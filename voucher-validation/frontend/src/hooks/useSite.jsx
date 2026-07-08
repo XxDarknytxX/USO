@@ -1,27 +1,40 @@
 // src/hooks/useSite.jsx
 // Global "current site" (village) context. Each site is a Ruijie project
-// (groupId). The switcher drives the whole app's scope:
-//   • activeSiteId === null  → GLOBAL scope ("All Villages"); dashboards
-//     aggregate and voucher endpoints omit groupId (backend = all sites).
-//   • activeSiteId === <id>  → one village; everything rescopes to it.
-// The choice persists in localStorage ("all" or the numeric id).
+// (groupId). Two independent controls:
+//   • activeSiteId — the dashboard/voucher SCOPE. null → global ("All Villages");
+//     an id → that village; everything rescopes to it.
+//   • visibleSiteIds — a DISPLAY FILTER for the Overview board + Network tab:
+//     which villages to show. null → all; an array → that subset.
+// Both persist in localStorage.
 
 import { createContext, useContext, useState, useEffect, useCallback } from "react";
 import { networkApi } from "../services/api";
 
 const SiteContext = createContext(null);
 const STORAGE_KEY = "vv:activeSiteId";
+const VISIBLE_KEY = "vv:visibleSiteIds";
 
-function readStored() {
+function readActive() {
   const v = localStorage.getItem(STORAGE_KEY);
   if (v == null || v === "all") return null;
   const n = Number(v);
   return Number.isNaN(n) ? null : n;
 }
+function readVisible() {
+  try {
+    const raw = localStorage.getItem(VISIBLE_KEY);
+    if (!raw) return null;
+    const arr = JSON.parse(raw);
+    return Array.isArray(arr) ? arr : null;
+  } catch {
+    return null;
+  }
+}
 
 export function SiteProvider({ children }) {
   const [sites, setSites] = useState([]);
-  const [activeSiteId, setActiveSiteIdState] = useState(readStored);
+  const [activeSiteId, setActiveSiteIdState] = useState(readActive);
+  const [visibleSiteIds, setVisibleState] = useState(readVisible); // null = all
   const [loading, setLoading] = useState(true);
 
   const load = useCallback(async () => {
@@ -30,9 +43,13 @@ export function SiteProvider({ children }) {
       const data = await networkApi.projects();
       const list = data.projects || [];
       setSites(list);
-      // Keep the chosen village if it still exists; otherwise fall back to
-      // global (All Villages). Never auto-pin the first site.
       setActiveSiteIdState((cur) => (cur && list.some((s) => s.id === cur) ? cur : null));
+      // Prune the visible set to sites that still exist; empty → treat as all.
+      setVisibleState((cur) => {
+        if (cur == null) return null;
+        const kept = cur.filter((id) => list.some((s) => s.id === id));
+        return kept.length && kept.length < list.length ? kept : null;
+      });
     } catch {
       setSites([]);
     } finally {
@@ -50,9 +67,39 @@ export function SiteProvider({ children }) {
     localStorage.setItem(STORAGE_KEY, next == null ? "all" : String(next));
   }, []);
 
+  // Persist visible selection. Passing null (or a full set) means "all".
+  const setVisibleSiteIds = useCallback(
+    (ids) => {
+      const all = sites.map((s) => s.id);
+      let next = ids == null ? null : ids.filter((id) => all.includes(id));
+      if (next && (next.length === 0 || next.length === all.length)) next = null;
+      setVisibleState(next);
+      if (next == null) localStorage.removeItem(VISIBLE_KEY);
+      else localStorage.setItem(VISIBLE_KEY, JSON.stringify(next));
+    },
+    [sites]
+  );
+
+  const isSiteVisible = useCallback(
+    (id) => visibleSiteIds == null || visibleSiteIds.includes(id),
+    [visibleSiteIds]
+  );
+
+  const toggleVisibleSite = useCallback(
+    (id) => {
+      const all = sites.map((s) => s.id);
+      const current = visibleSiteIds == null ? all : visibleSiteIds;
+      const next = current.includes(id) ? current.filter((x) => x !== id) : [...current, id];
+      setVisibleSiteIds(next);
+    },
+    [sites, visibleSiteIds, setVisibleSiteIds]
+  );
+
   const activeSite = sites.find((s) => s.id === activeSiteId) || null;
   const activeGroupId = activeSite?.ruijieGroupId || null;
   const isGlobal = activeSiteId == null;
+  const visibleSites = visibleSiteIds == null ? sites : sites.filter((s) => visibleSiteIds.includes(s.id));
+  const allVisible = visibleSiteIds == null;
 
   return (
     <SiteContext.Provider
@@ -63,6 +110,13 @@ export function SiteProvider({ children }) {
         activeGroupId,
         isGlobal,
         setActiveSiteId,
+        // display filter
+        visibleSiteIds,
+        visibleSites,
+        allVisible,
+        isSiteVisible,
+        setVisibleSiteIds,
+        toggleVisibleSite,
         loading,
         reload: load,
       }}
@@ -82,6 +136,12 @@ export function useSite() {
       activeGroupId: null,
       isGlobal: true,
       setActiveSiteId: () => {},
+      visibleSiteIds: null,
+      visibleSites: [],
+      allVisible: true,
+      isSiteVisible: () => true,
+      setVisibleSiteIds: () => {},
+      toggleVisibleSite: () => {},
       loading: false,
       reload: () => {},
     };
