@@ -103,6 +103,10 @@ export const networkApi = {
     const qs = new URLSearchParams(params).toString();
     return api(`/network/overview${qs ? `?${qs}` : ""}`);
   },
+  trend: (params = {}) => {
+    const qs = new URLSearchParams(params).toString();
+    return api(`/network/overview/history${qs ? `?${qs}` : ""}`);
+  },
   discoverGroups: () => api("/network/discover"),
   createProject: (body) => api("/network/projects", { method: "POST", body }),
   updateProject: (id, body) => api(`/network/projects/${id}`, { method: "PUT", body }),

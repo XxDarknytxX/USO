@@ -15,6 +15,9 @@ export function makeNetworkRouter(controller) {
   // All-villages overview dashboard (from collector snapshots)
   router.get("/overview", controller.getOverview);
 
+  // Time-bucketed trend (clients / usage / uptime) for dashboards
+  router.get("/overview/history", controller.getTrend);
+
   // Discover Ruijie network groups for the "add site" picker (admin)
   router.get("/discover", requireAdmin, controller.discoverGroups);
 

@@ -219,5 +219,53 @@ export function makeNetworkController(pool) {
         return send.serverErr(res);
       }
     },
+
+    // GET /api/network/overview/history?hours=24&groupId=XXXX
+    // Time-bucketed trend from network_status_history. Omit groupId for the
+    // global (all-villages) trend; pass it for a single village. Read-only.
+    getTrend: async (req, res) => {
+      try {
+        const hours = Math.min(720, Math.max(1, Number(req.query.hours) || 24));
+        const groupId = req.query.groupId ? String(req.query.groupId) : null;
+        const bucketFmt = hours <= 168 ? "%Y-%m-%d %H:00:00" : "%Y-%m-%d 00:00:00";
+        const params = [hours];
+        let projFilter = "";
+        if (groupId) {
+          projFilter =
+            "AND h.project_id = (SELECT id FROM network_projects WHERE ruijie_group_id = ? LIMIT 1)";
+          params.push(groupId);
+        }
+        const [rows] = await pool.query(
+          `SELECT bucket,
+                  ROUND(SUM(clients)) AS clients,
+                  SUM(usage_bytes)    AS usageBytes,
+                  ROUND(AVG(up) * 100, 1) AS internetPct
+             FROM (
+               SELECT DATE_FORMAT(h.checked_at, '${bucketFmt}') AS bucket,
+                      h.project_id,
+                      AVG(h.clients)     AS clients,
+                      MAX(h.usage_bytes) AS usage_bytes,
+                      AVG(h.internet_up) AS up
+                 FROM network_status_history h
+                WHERE h.checked_at >= DATE_SUB(NOW(), INTERVAL ? HOUR)
+                  ${projFilter}
+                GROUP BY bucket, h.project_id
+             ) t
+            GROUP BY bucket
+            ORDER BY bucket ASC`,
+          params
+        );
+        const points = rows.map((r) => ({
+          t: r.bucket,
+          clients: Number(r.clients ?? 0),
+          usageBytes: r.usageBytes == null ? null : Number(r.usageBytes),
+          internetPct: r.internetPct == null ? null : Number(r.internetPct),
+        }));
+        return send.ok(res, { points, hours, groupId });
+      } catch (e) {
+        console.error(e);
+        return send.serverErr(res);
+      }
+    },
   };
 }

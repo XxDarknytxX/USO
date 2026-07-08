@@ -5,7 +5,7 @@ import AppLayout from "./components/layout/AppLayout";
 import { getAuthRole } from "./hooks/useAuth";
 
 const Login = lazy(() => import("./pages/Login"));
-const Dashboard = lazy(() => import("./pages/Dashboard"));
+const DashboardRouter = lazy(() => import("./pages/DashboardRouter"));
 const OverviewPage = lazy(() => import("./pages/OverviewPage"));
 const VouchersPage = lazy(() => import("./pages/VouchersPage"));
 const SyncPage = lazy(() => import("./pages/SyncPage"));
@@ -48,7 +48,7 @@ export default function App() {
               </ProtectedRoute>
             }
           >
-            <Route path="/dashboard" element={<Dashboard />} />
+            <Route path="/dashboard" element={<DashboardRouter />} />
             <Route path="/overview" element={<OverviewPage />} />
             <Route path="/vouchers" element={<VouchersPage />} />
             <Route path="/vouchers/:uuid" element={<VouchersPage />} />
