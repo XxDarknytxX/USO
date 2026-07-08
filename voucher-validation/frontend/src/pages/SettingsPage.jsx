@@ -2,16 +2,18 @@
 // System information + read-only app settings.
 
 import { useEffect, useState } from "react";
-import { Settings, Server, Eye, EyeOff } from "lucide-react";
+import { Settings, Server, Eye, EyeOff, MapPin, Check, Globe2 } from "lucide-react";
 import toast from "react-hot-toast";
 
 import { settingsApi } from "../services/api";
+import { useSite } from "../hooks/useSite";
 import { Button, Panel, Badge, PageHeader } from "../components/ui";
 
 export default function SettingsPage() {
   const [settings, setSettings] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showSecrets, setShowSecrets] = useState(false);
+  const { sites, isSiteVisible, toggleVisibleSite, setVisibleSiteIds, allVisible, visibleSites } = useSite();
 
   useEffect(() => {
     loadSettings();
@@ -96,6 +98,62 @@ export default function SettingsPage() {
               </Badge>
             </div>
           </div>
+        </Panel>
+
+        {/* All Villages scope */}
+        <Panel
+          title="All Villages scope"
+          subtitle="Choose which villages are included when the scope is set to “All Villages” — this drives the Dashboard, Overview and Network tab."
+          icon={<Globe2 size={15} />}
+          padding={false}
+          actions={
+            <div className="flex items-center gap-1">
+              <Button variant="ghost" size="xs" onClick={() => setVisibleSiteIds(null)}>Select all</Button>
+              <Button variant="ghost" size="xs" onClick={() => setVisibleSiteIds([])}>Clear</Button>
+            </div>
+          }
+        >
+          <div className="flex flex-col divide-y divide-[var(--border-default)]">
+            {sites.length === 0 ? (
+              <div className="px-5 py-4 text-[12.5px] text-[var(--fg-muted)]">
+                No villages yet — add them under Network.
+              </div>
+            ) : (
+              sites.map((s) => {
+                const on = isSiteVisible(s.id);
+                return (
+                  <button
+                    key={s.id}
+                    onClick={() => toggleVisibleSite(s.id)}
+                    className="flex items-center gap-3 px-5 py-3 text-left hover:bg-[var(--bg-surface)] transition-colors"
+                  >
+                    <span
+                      className={
+                        "shrink-0 h-[18px] w-[18px] rounded flex items-center justify-center border transition-colors " +
+                        (on
+                          ? "bg-[var(--accent)] border-[var(--accent)] text-white"
+                          : "border-[var(--border-strong)] text-transparent")
+                      }
+                    >
+                      <Check size={12} strokeWidth={3} />
+                    </span>
+                    <MapPin size={14} className="shrink-0 text-[var(--fg-muted)]" />
+                    <div className="min-w-0 flex-1">
+                      <p className="text-[12.5px] font-medium text-[var(--fg-primary)] truncate">{s.name}</p>
+                      {s.hostname && (
+                        <p className="text-[11px] font-mono text-[var(--fg-muted)] truncate">{s.hostname}</p>
+                      )}
+                    </div>
+                  </button>
+                );
+              })
+            )}
+          </div>
+          {sites.length > 0 && (
+            <div className="px-5 py-2.5 border-t border-[var(--border-default)] text-[11.5px] text-[var(--fg-muted)]">
+              {allVisible ? `All ${sites.length} villages` : `${visibleSites.length} of ${sites.length} villages`} in the All Villages scope.
+            </div>
+          )}
         </Panel>
 
         {/* App settings */}

@@ -9,7 +9,6 @@ import { Globe, RefreshCw, Users, Activity, CheckCircle2, XCircle } from "lucide
 import { networkApi } from "../services/api";
 import { PageHeader, StatCard, Panel, Button } from "../components/ui";
 import { useSite } from "../hooks/useSite";
-import SiteMultiSelect from "../components/layout/SiteMultiSelect";
 
 const fmtBytes = (b) => {
   if (b == null) return "—";
@@ -31,7 +30,7 @@ export default function OverviewPage() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const navigate = useNavigate();
-  const { isSiteVisible } = useSite();
+  const { isInScope } = useSite();
   const timer = useRef(null);
 
   const load = useCallback(async (isRefresh = false) => {
@@ -53,9 +52,9 @@ export default function OverviewPage() {
     return () => clearInterval(timer.current);
   }, [load]);
 
-  // Filter to the villages selected in the multi-select, and recompute the
-  // summary KPIs from just that subset so the board reflects the selection.
-  const sites = (data?.sites || []).filter((v) => isSiteVisible(v.id));
+  // Follow the scope switcher: a single village → just that one; All Villages →
+  // the configured scope set (Settings). Recompute the summary from the subset.
+  const sites = (data?.sites || []).filter((v) => isInScope(v.id));
   const sum = (f) => sites.reduce((a, v) => a + (Number(f(v)) || 0), 0);
   const s = data
     ? {
@@ -75,18 +74,15 @@ export default function OverviewPage() {
         subtitle={`Every village at a glance${data?.lastCollected ? ` · updated ${timeAgo(data.lastCollected)}` : ""}`}
         icon={<Globe size={20} />}
         actions={
-          <>
-            <SiteMultiSelect />
-            <Button
-              variant="secondary"
-              size="sm"
-              onClick={() => load(true)}
-              disabled={refreshing}
-              iconLeft={<RefreshCw size={14} className={refreshing ? "animate-spin" : ""} />}
-            >
-              Refresh
-            </Button>
-          </>
+          <Button
+            variant="secondary"
+            size="sm"
+            onClick={() => load(true)}
+            disabled={refreshing}
+            iconLeft={<RefreshCw size={14} className={refreshing ? "animate-spin" : ""} />}
+          >
+            Refresh
+          </Button>
         }
       />
 
@@ -123,7 +119,7 @@ export default function OverviewPage() {
                 {loading ? (
                   <tr><td colSpan={8} className="px-4 py-10 text-center text-[var(--fg-muted)]">Loading…</td></tr>
                 ) : sites.length === 0 ? (
-                  <tr><td colSpan={8} className="px-4 py-10 text-center text-[var(--fg-muted)]">{(data?.sites?.length ?? 0) > 0 ? "No villages selected — use the filter to show some." : "No villages yet — add sites under Network."}</td></tr>
+                  <tr><td colSpan={8} className="px-4 py-10 text-center text-[var(--fg-muted)]">{(data?.sites?.length ?? 0) > 0 ? "No villages in the current scope — adjust the All Villages scope in Settings." : "No villages yet — add sites under Network."}</td></tr>
                 ) : sites.map((v) => (
                   <tr
                     key={v.id}

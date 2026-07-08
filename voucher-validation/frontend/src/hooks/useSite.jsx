@@ -85,6 +85,14 @@ export function SiteProvider({ children }) {
     [visibleSiteIds]
   );
 
+  // Effective scope for the Overview board + Network tab: when a single village
+  // is picked in the switcher, only that one; otherwise the configured
+  // "All Villages" set (isSiteVisible).
+  const isInScope = useCallback(
+    (id) => (activeSiteId != null ? id === activeSiteId : isSiteVisible(id)),
+    [activeSiteId, isSiteVisible]
+  );
+
   const toggleVisibleSite = useCallback(
     (id) => {
       const all = sites.map((s) => s.id);
@@ -115,6 +123,7 @@ export function SiteProvider({ children }) {
         visibleSites,
         allVisible,
         isSiteVisible,
+        isInScope,
         setVisibleSiteIds,
         toggleVisibleSite,
         loading,
@@ -140,6 +149,7 @@ export function useSite() {
       visibleSites: [],
       allVisible: true,
       isSiteVisible: () => true,
+      isInScope: () => true,
       setVisibleSiteIds: () => {},
       toggleVisibleSite: () => {},
       loading: false,
