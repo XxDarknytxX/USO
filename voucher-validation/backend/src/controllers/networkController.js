@@ -4,6 +4,7 @@
 
 import RuijieService from "../services/ruijieService.js";
 import { fetchProjectHealth } from "../services/networkHealth.js";
+import { getHealthSnapshot } from "../services/networkHealthStore.js";
 
 const send = {
   ok: (res, data = {}) => res.json(data),
@@ -136,46 +137,57 @@ export function makeNetworkController(pool) {
       }
     },
 
-    // GET /api/network/projects/:id/health — per project (Ruijie Cloud), served
-    // through a short-TTL cache + in-flight dedup so repeated diagram opens and
-    // dashboard refreshes don't burst Ruijie into a rate limit.
+    // GET /api/network/projects/:id/health
+    // Served from the background collector's snapshot (refreshed every ~5 min)
+    // so opening the diagram never hits Ruijie Cloud live — Ruijie rate-limits
+    // hard. Only when no snapshot exists yet (cold start, before the first
+    // collector cycle) do we do ONE gated live fetch, cached + deduped.
     getProjectHealth: async (req, res) => {
       try {
         const [rows] = await pool.query("SELECT * FROM network_projects WHERE id = ?", [req.params.id]);
         const project = rows[0];
         if (!project) return send.notFound(res, "Project not found");
 
+        const buildPayload = (h) => ({
+          project: mapProject(project),
+          cloudSync: h.cloudSync,
+          notice: h.cloudSync ? null : h.reason,
+          summary: h.summary,
+          internet: h.internet,
+          usageBytes: h.usageBytes,
+          topology: h.topology,
+          devices: h.devices,
+        });
+
+        // Preferred path: the collector snapshot. Zero live Ruijie calls.
+        const snap = getHealthSnapshot(project.id);
+        if (snap) {
+          return send.ok(res, {
+            ...buildPayload(snap.health),
+            source: "collector",
+            collectedAt: new Date(snap.ts).toISOString(),
+          });
+        }
+
+        // Cold-start fallback: one gated live fetch, cached + in-flight-deduped.
         const key = String(project.id);
         const cached = _healthCache.get(key);
         if (cached) {
           const ttl = cached.payload.cloudSync ? HEALTH_TTL_OK_MS : HEALTH_TTL_FAIL_MS;
           if (Date.now() - cached.ts < ttl) return send.ok(res, cached.payload);
         }
-
-        // Collapse concurrent requests for the same project into one fetch.
         let inflight = _healthInflight.get(key);
         if (!inflight) {
           inflight = fetchProjectHealth(ruijie, project)
             .then((h) => {
-              const payload = {
-                project: mapProject(project),
-                cloudSync: h.cloudSync,
-                notice: h.cloudSync ? null : h.reason,
-                summary: h.summary,
-                internet: h.internet,
-                usageBytes: h.usageBytes,
-                topology: h.topology,
-                devices: h.devices,
-              };
+              const payload = { ...buildPayload(h), source: "live", collectedAt: new Date().toISOString() };
               _healthCache.set(key, { ts: Date.now(), payload });
               return payload;
             })
             .finally(() => _healthInflight.delete(key));
           _healthInflight.set(key, inflight);
         }
-
-        const payload = await inflight;
-        return send.ok(res, payload);
+        return send.ok(res, await inflight);
       } catch (e) {
         console.error(e);
         return send.serverErr(res);

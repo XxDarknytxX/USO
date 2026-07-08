@@ -106,7 +106,7 @@ export default function NetworkPage() {
       <PageHeader
         eyebrow="Infrastructure"
         title="Network"
-        subtitle={`${shownProjects.length} of ${projects.length} project${projects.length !== 1 ? "s" : ""} · live device health from Ruijie Cloud`}
+        subtitle={`${shownProjects.length} of ${projects.length} project${projects.length !== 1 ? "s" : ""} · device health refreshed every ~5 min`}
         icon={<Network size={20} />}
         actions={
           isAdmin && (
@@ -389,6 +389,14 @@ function AddProjectModal({ onClose, onSaved }) {
 /* ========================================================================== */
 /*  Project detail — topology + stats                                          */
 /* ========================================================================== */
+function relTime(iso) {
+  if (!iso) return null;
+  const s = Math.max(0, (Date.now() - new Date(iso).getTime()) / 1000);
+  if (s < 90) return "just now";
+  if (s < 3600) return `${Math.round(s / 60)}m ago`;
+  return `${Math.round(s / 3600)}h ago`;
+}
+
 function ProjectDetail({ project, onBack }) {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -424,7 +432,11 @@ function ProjectDetail({ project, onBack }) {
       <PageHeader
         eyebrow={`Network · ${project.name}`}
         title={project.hostname || project.name}
-        subtitle="Access points, gateway, and internet health."
+        subtitle={
+          data?.collectedAt
+            ? `Access points, gateway, and internet health · updated ${relTime(data.collectedAt)}`
+            : "Access points, gateway, and internet health."
+        }
         icon={<Globe size={20} />}
         actions={
           <>

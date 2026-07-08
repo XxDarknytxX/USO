@@ -5,6 +5,7 @@
 
 import RuijieService from './ruijieService.js';
 import { fetchProjectHealth } from './networkHealth.js';
+import { setHealthSnapshot } from './networkHealthStore.js';
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const bool = (v) => (v == null ? null : v ? 1 : 0);
@@ -17,6 +18,10 @@ export async function collectOnce(pool, ruijie) {
   for (const project of projects) {
     try {
       const h = await fetchProjectHealth(ruijie, project);
+      // Cache the full payload (devices + topology) for the on-demand health
+      // endpoint so opening the diagram reads this instead of hitting Ruijie
+      // live. Only store good data — keep the last-known-good during an outage.
+      if (h.cloudSync) setHealthSnapshot(project.id, h);
       const s = h.summary || {};
       const gatewayOnline = s.gatewayTotal > 0 ? (s.gatewayOnline > 0 ? 1 : 0) : null;
       const internetUp = bool(h.internet?.up);
