@@ -25,5 +25,8 @@ export function makePortalConfigRouter(controller) {
   // Transaction flow (grouped timeline view)
   router.get("/transaction-flows", controller.getTransactionFlows);
 
+  // Sales revenue aggregation (total / month / today / per-village + trend)
+  router.get("/revenue", controller.getRevenue);
+
   return router;
 }

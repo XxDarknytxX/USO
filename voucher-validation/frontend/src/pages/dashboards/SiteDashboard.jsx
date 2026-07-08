@@ -9,10 +9,10 @@ import {
 } from "recharts";
 import {
   Gauge, ArrowLeft, RefreshCw, Wifi, WifiOff, Users, Radio, Activity,
-  Ticket, Server, Cpu, Router as RouterIcon,
+  Ticket, Server, Cpu, Router as RouterIcon, DollarSign, TrendingUp,
 } from "lucide-react";
 import { useSite } from "../../hooks/useSite";
-import { voucherApi, networkApi } from "../../services/api";
+import { voucherApi, networkApi, portalConfigApi } from "../../services/api";
 import {
   PageHeader, Button, StatCard, Panel, Badge, EmptyState,
   SkeletonKpis, SkeletonCard,
@@ -27,6 +27,8 @@ const fmtBytes = (b) => {
   return `${n.toFixed(n >= 10 || i === 0 ? 0 : 1)} ${u[i]}`;
 };
 const fmtNum = (n) => (n == null ? "—" : Number(n).toLocaleString());
+const fmtMoney = (n) =>
+  "$" + Number(n || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const hourLabel = (t) => {
   const m = String(t).match(/(\d{4})-(\d{2})-(\d{2})\s+(\d{2})/);
   return m ? `${m[4]}:00` : String(t).slice(5, 16);
@@ -44,17 +46,19 @@ export default function SiteDashboard({ groupId, site }) {
   const load = useCallback(
     async (isRefresh = false) => {
       if (isRefresh) setRefreshing(true);
-      const [stats, overview, trend, health] = await Promise.allSettled([
+      const [stats, overview, trend, health, revenue] = await Promise.allSettled([
         voucherApi.stats({ groupId }),
         networkApi.overview({ uptimeHours: 24 }),
         networkApi.trend({ hours: 24, groupId }),
         site?.id ? networkApi.health(site.id) : Promise.resolve(null),
+        groupId ? portalConfigApi.revenue({ groupId }) : Promise.resolve(null),
       ]);
       setData({
         stats: stats.status === "fulfilled" ? stats.value : null,
         overview: overview.status === "fulfilled" ? overview.value : null,
         trend: trend.status === "fulfilled" ? trend.value : null,
         health: health.status === "fulfilled" ? health.value : null,
+        revenue: revenue.status === "fulfilled" ? revenue.value : null,
       });
       setLoading(false);
       setRefreshing(false);
@@ -85,6 +89,14 @@ export default function SiteDashboard({ groupId, site }) {
   const uptimePct = overviewSite?.uptimePct;
   const usageBytes = health?.usageBytes ?? overviewSite?.usageBytes;
   const devices = health?.devices || [];
+
+  const revenue = data?.revenue;
+  const revTrend = (revenue?.monthly || []).map((m) => ({
+    label: m.label,
+    revenue: Number(m.revenue || 0),
+    count: Number(m.count || 0),
+  }));
+  const hasRevenue = revenue && (revenue.totalCount > 0 || revenue.total > 0);
 
   const statusData = [
     { name: "Active", value: vActive, color: CHART_COLORS.emerald },
@@ -158,6 +170,58 @@ export default function SiteDashboard({ groupId, site }) {
             <StatCard label="Live now" value={fmtNum(live)} icon={<Users size={18} />} color="amber" />
             <StatCard label="Data used" value={fmtBytes(usageBytes)} icon={<Activity size={18} />} color="cyan" />
           </div>
+
+          {/* Revenue rail */}
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+            <StatCard
+              label="Revenue (total)"
+              value={fmtMoney(revenue?.total)}
+              icon={<DollarSign size={18} />}
+              color="accent"
+              sub={`${fmtNum(revenue?.totalCount || 0)} sale${revenue?.totalCount === 1 ? "" : "s"}`}
+            />
+            <StatCard
+              label="Sold this month"
+              value={fmtMoney(revenue?.month)}
+              icon={<TrendingUp size={18} />}
+              color="emerald"
+              sub={`${fmtNum(revenue?.monthCount || 0)} this month`}
+            />
+            <StatCard
+              label="Sold today"
+              value={fmtMoney(revenue?.today)}
+              icon={<DollarSign size={18} />}
+              color="violet"
+              sub={`${fmtNum(revenue?.todayCount || 0)} today`}
+            />
+            <StatCard
+              label="Avg sale"
+              value={fmtMoney(revenue?.totalCount ? revenue.total / revenue.totalCount : 0)}
+              icon={<Activity size={18} />}
+              color="cyan"
+            />
+          </div>
+
+          {/* Revenue trend */}
+          {hasRevenue && revTrend.some((m) => m.revenue > 0) && (
+            <Panel title="Revenue — last 6 months" icon={<DollarSign size={15} />}>
+              <ResponsiveContainer width="100%" height={220}>
+                <BarChart data={revTrend} margin={{ top: 8, right: 8, left: -4, bottom: 0 }}>
+                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke={ct.grid} />
+                  <XAxis dataKey="label" tickLine={false} axisLine={false} tick={{ fill: ct.axis, fontSize: 11 }} />
+                  <YAxis
+                    tickLine={false}
+                    axisLine={false}
+                    tick={{ fill: ct.axis, fontSize: 11 }}
+                    width={52}
+                    tickFormatter={(v) => "$" + Number(v).toLocaleString(undefined, { maximumFractionDigits: 0 })}
+                  />
+                  <Tooltip content={<RevenueTooltip />} cursor={{ fill: ct.cursor }} />
+                  <Bar dataKey="revenue" name="Revenue" fill={CHART_COLORS.accent} radius={[4, 4, 0, 0]} isAnimationActive={false} maxBarSize={52} />
+                </BarChart>
+              </ResponsiveContainer>
+            </Panel>
+          )}
 
           {/* Trend */}
           <Panel title="Clients — last 24h" icon={<Activity size={15} />}>
@@ -271,4 +335,18 @@ export default function SiteDashboard({ groupId, site }) {
 
 function Th({ children }) {
   return <th className="px-4 py-2.5 text-label font-medium">{children}</th>;
+}
+
+function RevenueTooltip({ active, payload, label }) {
+  if (!active || !payload?.length) return null;
+  const d = payload[0].payload || {};
+  return (
+    <div className="rounded-lg px-3 py-2 text-sm bg-[var(--bg-elevated)] border border-[var(--border-default)] shadow-[var(--shadow-card)]">
+      <p className="text-xs font-medium text-[var(--fg-muted)] mb-1">{label}</p>
+      <p className="font-semibold text-[var(--fg-primary)] tabular-nums">{fmtMoney(d.revenue)}</p>
+      <p className="mt-0.5 text-xs text-[var(--fg-muted)]">
+        {Number(d.count || 0).toLocaleString()} sale{Number(d.count) === 1 ? "" : "s"}
+      </p>
+    </div>
+  );
 }

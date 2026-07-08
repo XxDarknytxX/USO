@@ -94,6 +94,10 @@ export const portalConfigApi = {
   create: (body) => api("/portal-config/plans", { method: "POST", body }),
   update: (id, body) => api(`/portal-config/plans/${id}`, { method: "PUT", body }),
   remove: (id) => api(`/portal-config/plans/${id}`, { method: "DELETE" }),
+  revenue: (params = {}) => {
+    const qs = new URLSearchParams(params).toString();
+    return api(`/portal-config/revenue${qs ? `?${qs}` : ""}`);
+  },
 };
 
 // Network monitoring API helpers

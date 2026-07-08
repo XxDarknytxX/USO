@@ -22,6 +22,7 @@ import {
 } from "recharts";
 import {
   Users,
+  DollarSign,
   Activity,
   TrendingUp,
   Database,
@@ -76,6 +77,7 @@ export default function Dashboard() {
   const [syncing, setSyncing] = useState(false);
   const [voucherStats, setVoucherStats] = useState(null);
   const [syncLogs, setSyncLogs] = useState([]);
+  const [revenue, setRevenue] = useState(null);
   const [activeView, setActiveView] = useState("overview");
   const [selectedPackage, setSelectedPackage] = useState(null);
   const [drillDownData, setDrillDownData] = useState(null);
@@ -98,12 +100,14 @@ export default function Dashboard() {
 
   async function loadDashboardData() {
     try {
-      const [statsData, logsData] = await Promise.all([
+      const [statsData, logsData, revenueData] = await Promise.all([
         api("/vouchers/stats", { auth: true }),
         api("/vouchers/sync-logs", { auth: true }),
+        api("/portal-config/revenue", { auth: true }).catch(() => null),
       ]);
       setVoucherStats(statsData);
       setSyncLogs(logsData.logs || []);
+      setRevenue(revenueData);
     } catch (error) {
       console.error("Failed to load dashboard data:", error);
       if (
@@ -167,6 +171,67 @@ export default function Dashboard() {
       inactive: f.reduce((s, p) => s + Number(p.inactive || 0), 0),
     };
   }, [filteredPackageStats]);
+
+  // ---- Scope-aware headline numbers (from per-site totals) ----
+  const scopedPerSite = useMemo(() => {
+    const ps = Array.isArray(voucherStats?.perSite) ? voucherStats.perSite : [];
+    return ps.filter((s) => {
+      const site = sites.find((x) => String(x.ruijieGroupId) === String(s.group_id));
+      return site ? isSiteVisible(site.id) : allVisible;
+    });
+  }, [voucherStats, sites, isSiteVisible, allVisible]);
+
+  const scopedMetrics = useMemo(() => {
+    const f = scopedPerSite;
+    const total = f.reduce((s, p) => s + Number(p.total || 0), 0);
+    const active = f.reduce((s, p) => s + Number(p.active || 0), 0);
+    return {
+      totalVouchers: total,
+      activeVouchers: active,
+      liveUsers: f.reduce((s, p) => s + Number(p.currently_in_use || 0), 0),
+      totalDataUsage: f.reduce((s, p) => s + Number(p.total_used_quota_mb || 0), 0),
+      totalQuota: f.reduce((s, p) => s + Number(p.total_quota_mb || 0), 0),
+      activeRate: total > 0 ? Math.round((active / total) * 100) : 0,
+    };
+  }, [scopedPerSite]);
+
+  // ---- Revenue (scoped to the in-scope villages) ----
+  const revByGroup = useMemo(() => {
+    const map = {};
+    for (const r of revenue?.perSite || []) map[String(r.groupId)] = r;
+    return map;
+  }, [revenue]);
+
+  const scopedRevenue = useMemo(() => {
+    if (!revenue) return { total: 0, month: 0, count: 0, monthCount: 0 };
+    if (allVisible)
+      return {
+        total: revenue.total || 0,
+        month: revenue.month || 0,
+        count: revenue.totalCount || 0,
+        monthCount: revenue.monthCount || 0,
+      };
+    let total = 0, month = 0, count = 0, monthCount = 0;
+    for (const site of sites) {
+      if (!isSiteVisible(site.id)) continue;
+      const r = revByGroup[String(site.ruijieGroupId)];
+      if (r) { total += r.revenue; month += r.month; count += r.count; monthCount += r.monthCount; }
+    }
+    return { total, month, count, monthCount };
+  }, [revenue, allVisible, sites, isSiteVisible, revByGroup]);
+
+  const fmtMoney = (n) =>
+    "$" + Number(n || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+  const revenueTrend = useMemo(
+    () =>
+      (revenue?.monthly || []).map((m) => ({
+        label: m.label,
+        revenue: Number(m.revenue || 0),
+        count: Number(m.count || 0),
+      })),
+    [revenue]
+  );
 
   const pieData = filteredPackageStats
     .filter((p) => Number(p.total || 0) > 0)
@@ -312,35 +377,53 @@ export default function Dashboard() {
           })}
         </div>
 
-        {/* ----- Metric tiles ----- */}
+        {/* ----- Revenue + headline (scope-aware) ----- */}
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
           <MetricCard
-            label="Total vouchers"
-            value={metrics.totalVouchers.toLocaleString()}
-            icon={<Database size={14} />}
-            sub={`${metrics.activeVouchers.toLocaleString()} active`}
+            label="Revenue (total)"
+            value={fmtMoney(scopedRevenue.total)}
+            icon={<DollarSign size={14} />}
+            sub={`${scopedRevenue.count.toLocaleString()} sale${scopedRevenue.count === 1 ? "" : "s"}`}
+          />
+          <MetricCard
+            label="Sold this month"
+            value={fmtMoney(scopedRevenue.month)}
+            icon={<TrendingUp size={14} />}
+            sub={`${scopedRevenue.monthCount.toLocaleString()} this month`}
           />
           <MetricCard
             label="Live users"
-            value={metrics.liveUsers.toLocaleString()}
+            value={scopedMetrics.liveUsers.toLocaleString()}
             icon={<Users size={14} />}
             sub="Currently connected"
           />
           <MetricCard
-            label="Data consumed"
-            value={formatQuota(metrics.totalDataUsage)}
-            icon={<HardDrive size={14} />}
-            sub={`of ${formatQuota(metrics.totalQuota)}`}
+            label="Active rate"
+            value={`${scopedMetrics.activeRate}%`}
+            icon={<Zap size={14} />}
+            sub={`${scopedMetrics.activeVouchers.toLocaleString()} active`}
+          />
+        </div>
+
+        {/* ----- Voucher inventory (in-scope villages) ----- */}
+        <div className="grid grid-cols-2 lg:grid-cols-3 gap-3">
+          <MetricCard
+            label="Total vouchers"
+            value={scopedMetrics.totalVouchers.toLocaleString()}
+            icon={<Database size={14} />}
+            sub={`${scopedMetrics.activeVouchers.toLocaleString()} active`}
           />
           <MetricCard
-            label="Active rate"
-            value={
-              metrics.totalVouchers
-                ? `${Math.round((metrics.activeVouchers / metrics.totalVouchers) * 100)}%`
-                : "0%"
-            }
-            icon={<Zap size={14} />}
-            sub={`${metrics.expired.toLocaleString()} expired`}
+            label="Data consumed"
+            value={formatQuota(scopedMetrics.totalDataUsage)}
+            icon={<HardDrive size={14} />}
+            sub={`of ${formatQuota(scopedMetrics.totalQuota)}`}
+          />
+          <MetricCard
+            label="Villages in scope"
+            value={`${scopedPerSite.length}`}
+            icon={<Users size={14} />}
+            sub={allVisible ? "all villages" : `of ${sites.length}`}
           />
         </div>
 
@@ -366,6 +449,8 @@ export default function Dashboard() {
                       name={site?.name || (s.group_id ? `Group ${s.group_id}` : "Unassigned")}
                       hostname={site?.hostname}
                       stats={s}
+                      revenue={revByGroup[String(s.group_id)]}
+                      fmtMoney={fmtMoney}
                       onOpen={
                         site
                           ? () => {
@@ -381,6 +466,53 @@ export default function Dashboard() {
             </div>
           );
         })()}
+
+        {/* ----- Revenue trend ----- */}
+        {revenueTrend.some((m) => m.revenue > 0) && (
+          <ChartCard
+            title="Revenue trend"
+            subtitle="Last 6 months · all villages"
+            icon={<DollarSign size={14} />}
+          >
+            <div className="h-[240px]">
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart
+                  data={revenueTrend}
+                  margin={{ top: 5, right: 5, bottom: 5, left: -4 }}
+                >
+                  <CartesianGrid
+                    strokeDasharray="3 3"
+                    stroke="var(--border-subtle)"
+                    vertical={false}
+                  />
+                  <XAxis
+                    dataKey="label"
+                    tick={{ fontSize: 11, fill: "var(--text-quaternary)" }}
+                    tickLine={false}
+                    axisLine={false}
+                  />
+                  <YAxis
+                    tick={{ fontSize: 10, fill: "var(--text-quaternary)" }}
+                    tickLine={false}
+                    axisLine={false}
+                    width={52}
+                    tickFormatter={(v) =>
+                      "$" + Number(v).toLocaleString(undefined, { maximumFractionDigits: 0 })
+                    }
+                  />
+                  <Tooltip content={<RevenueTooltip />} cursor={{ fill: "var(--surface-hover)" }} />
+                  <Bar
+                    dataKey="revenue"
+                    name="Revenue"
+                    fill={getVar("--brand", "#e60000")}
+                    radius={[4, 4, 0, 0]}
+                    maxBarSize={52}
+                  />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+          </ChartCard>
+        )}
 
         {/* ----- Charts Row 1 ----- */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
@@ -886,13 +1018,17 @@ export default function Dashboard() {
 
 /* ------------ Sub-components --------------------------------------------- */
 
-function SiteCard({ name, hostname, stats, onOpen }) {
+function SiteCard({ name, hostname, stats, revenue, fmtMoney, onOpen }) {
   const total = Number(stats.total || 0);
   const active = Number(stats.active || 0);
   const live = Number(stats.currently_in_use || 0);
   const usedQ = Number(stats.total_used_quota_mb || 0);
   const totalQ = Number(stats.total_quota_mb || 0);
   const dataPct = totalQ ? Math.round((usedQ / totalQ) * 100) : 0;
+  const money = fmtMoney || ((n) => "$" + Number(n || 0).toFixed(2));
+  const rev = Number(revenue?.revenue || 0);
+  const revMonth = Number(revenue?.month || 0);
+  const revCount = Number(revenue?.count || 0);
   return (
     <button
       onClick={onOpen || undefined}
@@ -922,6 +1058,24 @@ function SiteCard({ name, hostname, stats, onOpen }) {
         <MiniStat label="Vouchers" value={total} />
         <MiniStat label="Active" value={active} />
         <MiniStat label="Live" value={live} accent />
+      </div>
+      <div className="flex items-center justify-between mb-3 px-2.5 py-2 rounded-md bg-[var(--brand-soft)]">
+        <div className="flex flex-col">
+          <span className="text-[10px] font-medium uppercase tracking-wide text-[var(--brand-fg-on-soft)] opacity-80">
+            Revenue
+          </span>
+          <span className="text-[15px] font-semibold text-[var(--brand-fg-on-soft)] tracking-tight">
+            {money(rev)}
+          </span>
+        </div>
+        <div className="text-right">
+          <span className="block text-[10px] text-[var(--brand-fg-on-soft)] opacity-80">
+            {money(revMonth)} this month
+          </span>
+          <span className="block text-[10px] text-[var(--brand-fg-on-soft)] opacity-70">
+            {revCount.toLocaleString()} sale{revCount === 1 ? "" : "s"}
+          </span>
+        </div>
       </div>
       <div>
         <div className="flex items-center justify-between text-[10.5px] mb-1.5 font-mono">
@@ -1065,6 +1219,32 @@ function ChartTooltip({ active, payload, label }) {
           </span>
         </div>
       ))}
+    </div>
+  );
+}
+
+function RevenueTooltip({ active, payload, label }) {
+  if (!active || !payload?.length) return null;
+  const d = payload[0].payload || {};
+  const money =
+    "$" +
+    Number(d.revenue || 0).toLocaleString(undefined, {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    });
+  return (
+    <div
+      className={
+        "rounded-md px-3 py-2 text-[11.5px] " +
+        "bg-[var(--surface-raised)] border border-[var(--border-default)] " +
+        "shadow-[var(--elev-2)]"
+      }
+    >
+      <p className="text-[11.5px] font-medium text-[var(--text-tertiary)] mb-1">{label}</p>
+      <p className="font-mono font-semibold text-[var(--text-primary)]">{money}</p>
+      <p className="mt-0.5 text-[var(--text-tertiary)]">
+        {Number(d.count || 0).toLocaleString()} sale{Number(d.count) === 1 ? "" : "s"}
+      </p>
     </div>
   );
 }

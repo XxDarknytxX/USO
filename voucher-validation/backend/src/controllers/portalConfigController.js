@@ -408,5 +408,83 @@ export function makePortalConfigController(pool) {
         });
       } catch (e) { console.error(e); return send.serverErr(res); }
     },
+
+    // GET /api/portal-config/revenue?groupId=XXXX
+    // Sales revenue aggregated from SUCCESSFUL (auth_success) transactions in
+    // portal_audit_logs, mapped to a village via plan_key -> plan.group_id.
+    // Returns total / this-month / today + per-village + a 6-month trend.
+    getRevenue: async (req, res) => {
+      try {
+        const groupId = req.query.groupId ? String(req.query.groupId) : null;
+
+        // One row per successful transaction: amount, when, which plan.
+        const [txns] = await pool.query(
+          `SELECT tx.amount, tx.ts, tx.plan_key, tx.user_group_id
+             FROM (
+               SELECT transaction_id,
+                      MAX(amount)          AS amount,
+                      MAX(event_timestamp) AS ts,
+                      MAX(plan_key)        AS plan_key,
+                      MAX(user_group_id)   AS user_group_id,
+                      SUM(CASE WHEN event_type = 'auth_success' THEN 1 ELSE 0 END) AS ok
+                 FROM portal_audit_logs
+                WHERE transaction_id IS NOT NULL
+                GROUP BY transaction_id
+             ) tx
+            WHERE tx.ok > 0 AND tx.amount IS NOT NULL AND tx.amount > 0`
+        );
+
+        // plan_key / user_group_id -> village ruijie group_id
+        const [plans] = await pool.query(
+          `SELECT plan_key, group_id, user_group_id FROM portal_plan_configs`
+        );
+        const byPlan = {}, byUserGroup = {};
+        for (const p of plans) {
+          if (p.plan_key) byPlan[p.plan_key] = p.group_id || null;
+          if (p.user_group_id) byUserGroup[String(p.user_group_id)] = p.group_id || null;
+        }
+        const resolveGroup = (t) =>
+          byPlan[t.plan_key] ?? byUserGroup[String(t.user_group_id)] ?? null;
+
+        const now = new Date();
+        const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+        const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+        const mKey = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+        const months = [];
+        for (let i = 5; i >= 0; i--) {
+          const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+          months.push({ key: mKey(d), label: d.toLocaleString("en", { month: "short" }), revenue: 0, count: 0 });
+        }
+        const mIdx = Object.fromEntries(months.map((m, i) => [m.key, i]));
+
+        let total = 0, totalCount = 0, month = 0, monthCount = 0, today = 0, todayCount = 0;
+        const perSite = {};
+
+        for (const t of txns) {
+          const grp = resolveGroup(t);
+          if (groupId && String(grp) !== String(groupId)) continue;
+          const amt = Number(t.amount) || 0;
+          const ts = t.ts ? new Date(t.ts) : null;
+          total += amt; totalCount++;
+          if (ts && ts >= startOfMonth) { month += amt; monthCount++; }
+          if (ts && ts >= startOfDay) { today += amt; todayCount++; }
+          const key = grp == null ? "unassigned" : String(grp);
+          if (!perSite[key]) perSite[key] = { groupId: grp, revenue: 0, count: 0, month: 0, monthCount: 0 };
+          perSite[key].revenue += amt; perSite[key].count++;
+          if (ts && ts >= startOfMonth) { perSite[key].month += amt; perSite[key].monthCount++; }
+          if (ts) {
+            const mk = mKey(new Date(ts.getFullYear(), ts.getMonth(), 1));
+            if (mk in mIdx) { months[mIdx[mk]].revenue += amt; months[mIdx[mk]].count++; }
+          }
+        }
+
+        return send.ok(res, {
+          total, totalCount, month, monthCount, today, todayCount,
+          perSite: Object.values(perSite),
+          monthly: months,
+          groupId,
+        });
+      } catch (e) { console.error(e); return send.serverErr(res); }
+    },
   };
 }
