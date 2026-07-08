@@ -71,7 +71,7 @@ const PALETTE_VARS = [
 
 export default function Dashboard() {
   const navigate = useNavigate();
-  const { sites, setActiveSiteId } = useSite();
+  const { sites, setActiveSiteId, isSiteVisible, allVisible } = useSite();
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
   const [voucherStats, setVoucherStats] = useState(null);
@@ -344,37 +344,43 @@ export default function Dashboard() {
           />
         </div>
 
-        {/* ----- Sites overview (all villages) ----- */}
-        {Array.isArray(voucherStats?.perSite) && voucherStats.perSite.length > 0 && (
-          <div>
-            <h2 className="text-[10.5px] font-medium text-[var(--text-quaternary)] mb-3">
-              Sites · {voucherStats.perSite.length}
-            </h2>
-            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
-              {voucherStats.perSite.map((s) => {
-                const site = sites.find(
-                  (x) => String(x.ruijieGroupId) === String(s.group_id)
-                );
-                return (
-                  <SiteCard
-                    key={s.group_id || "unknown"}
-                    name={site?.name || (s.group_id ? `Group ${s.group_id}` : "Unassigned")}
-                    hostname={site?.hostname}
-                    stats={s}
-                    onOpen={
-                      site
-                        ? () => {
-                            setActiveSiteId(site.id);
-                            navigate("/vouchers");
-                          }
-                        : null
-                    }
-                  />
-                );
-              })}
+        {/* ----- Sites overview (villages in the All Villages scope) ----- */}
+        {(() => {
+          const perSite = Array.isArray(voucherStats?.perSite) ? voucherStats.perSite : [];
+          const scoped = perSite.filter((s) => {
+            const site = sites.find((x) => String(x.ruijieGroupId) === String(s.group_id));
+            return site ? isSiteVisible(site.id) : allVisible;
+          });
+          if (scoped.length === 0) return null;
+          return (
+            <div>
+              <h2 className="text-[10.5px] font-medium text-[var(--text-quaternary)] mb-3">
+                Sites · {scoped.length}
+              </h2>
+              <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
+                {scoped.map((s) => {
+                  const site = sites.find((x) => String(x.ruijieGroupId) === String(s.group_id));
+                  return (
+                    <SiteCard
+                      key={s.group_id || "unknown"}
+                      name={site?.name || (s.group_id ? `Group ${s.group_id}` : "Unassigned")}
+                      hostname={site?.hostname}
+                      stats={s}
+                      onOpen={
+                        site
+                          ? () => {
+                              setActiveSiteId(site.id);
+                              navigate("/vouchers");
+                            }
+                          : null
+                      }
+                    />
+                  );
+                })}
+              </div>
             </div>
-          </div>
-        )}
+          );
+        })()}
 
         {/* ----- Charts Row 1 ----- */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">

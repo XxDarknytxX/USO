@@ -42,7 +42,7 @@ import {
 
 export default function NetworkPage() {
   const { isAdmin } = useAuth();
-  const { isInScope } = useSite();
+  const { isInScope, activeSiteId } = useSite();
   const [projects, setProjects] = useState([]);
   const [loading, setLoading] = useState(true);
   const [selected, setSelected] = useState(null); // project object
@@ -64,6 +64,15 @@ export default function NetworkPage() {
   useEffect(() => {
     loadProjects();
   }, [loadProjects]);
+
+  // With a single village selected in the scope switcher, land straight on its
+  // full diagram (topology) instead of the grid.
+  useEffect(() => {
+    if (activeSiteId != null && projects.length) {
+      const p = projects.find((x) => x.id === activeSiteId);
+      if (p) setSelected(p);
+    }
+  }, [activeSiteId, projects]);
 
   async function handleDelete() {
     if (!confirmDelete) return;
