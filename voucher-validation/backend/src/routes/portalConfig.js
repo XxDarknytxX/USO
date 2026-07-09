@@ -28,5 +28,9 @@ export function makePortalConfigRouter(controller) {
   // Sales revenue aggregation (total / month / today / per-village + trend)
   router.get("/revenue", controller.getRevenue);
 
+  // Manual assistance cases (paid but auth failed) — list + mark sorted
+  router.get("/manual-assistance", controller.getManualAssistance);
+  router.post("/manual-assistance/:transactionId/resolve", controller.resolveManualAssistance);
+
   return router;
 }

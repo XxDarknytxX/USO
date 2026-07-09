@@ -98,6 +98,12 @@ export const portalConfigApi = {
     const qs = new URLSearchParams(params).toString();
     return api(`/portal-config/revenue${qs ? `?${qs}` : ""}`);
   },
+  manualAssistance: (params = {}) => {
+    const qs = new URLSearchParams(params).toString();
+    return api(`/portal-config/manual-assistance${qs ? `?${qs}` : ""}`);
+  },
+  resolveManualAssistance: (transactionId) =>
+    api(`/portal-config/manual-assistance/${encodeURIComponent(transactionId)}/resolve`, { method: "POST" }),
 };
 
 // Network monitoring API helpers

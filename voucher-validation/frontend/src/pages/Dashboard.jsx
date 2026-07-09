@@ -23,6 +23,7 @@ import {
 import {
   Users,
   DollarSign,
+  LifeBuoy,
   Activity,
   TrendingUp,
   Database,
@@ -80,6 +81,7 @@ export default function Dashboard() {
   const [voucherStats, setVoucherStats] = useState(null);
   const [syncLogs, setSyncLogs] = useState([]);
   const [revenue, setRevenue] = useState(null);
+  const [manualAssist, setManualAssist] = useState(null);
   const [activeView, setActiveView] = useState("overview");
   const [selectedPackage, setSelectedPackage] = useState(null);
   const [drillDownData, setDrillDownData] = useState(null);
@@ -102,14 +104,16 @@ export default function Dashboard() {
 
   async function loadDashboardData() {
     try {
-      const [statsData, logsData, revenueData] = await Promise.all([
+      const [statsData, logsData, revenueData, maData] = await Promise.all([
         api("/vouchers/stats", { auth: true }),
         api("/vouchers/sync-logs", { auth: true }),
         api("/portal-config/revenue", { auth: true }).catch(() => null),
+        api("/portal-config/manual-assistance?status=open", { auth: true }).catch(() => null),
       ]);
       setVoucherStats(statsData);
       setSyncLogs(logsData.logs || []);
       setRevenue(revenueData);
+      setManualAssist(maData);
     } catch (error) {
       console.error("Failed to load dashboard data:", error);
       if (
@@ -374,6 +378,25 @@ export default function Dashboard() {
       </div>
 
       <div className="px-8 py-6 space-y-6">
+        {/* ----- Manual assistance flag ----- */}
+        {manualAssist?.unresolvedCount > 0 && (
+          <button
+            onClick={() => navigate("/manual-assistance")}
+            className="w-full flex items-center gap-3 px-4 py-3 rounded-lg bg-[var(--warning-soft)] border border-[var(--warning-fg)]/30 hover:border-[var(--warning-fg)]/60 transition-colors text-left"
+          >
+            <LifeBuoy size={18} className="text-[var(--warning-fg)] shrink-0" />
+            <div className="flex-1 min-w-0">
+              <p className="text-[13px] font-semibold text-[var(--warning-fg)]">
+                {manualAssist.unresolvedCount} manual assistance case{manualAssist.unresolvedCount === 1 ? " needs" : "s need"} attention
+              </p>
+              <p className="text-[12px] text-[var(--warning-fg)] opacity-80">
+                Customers who paid but weren't auto-connected — assign their reserved voucher.
+              </p>
+            </div>
+            <ArrowUpRight size={15} className="text-[var(--warning-fg)] shrink-0" />
+          </button>
+        )}
+
         {/* ----- View tabs ----- */}
         <div
           className={

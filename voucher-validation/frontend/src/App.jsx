@@ -16,6 +16,7 @@ const UsersPage = lazy(() => import("./pages/UsersPage"));
 const PortalConfigPage = lazy(() => import("./pages/PortalConfigPage"));
 const PortalAuditLogPage = lazy(() => import("./pages/PortalAuditLogPage"));
 const TransactionFlowPage = lazy(() => import("./pages/TransactionFlowPage"));
+const ManualAssistancePage = lazy(() => import("./pages/ManualAssistancePage"));
 
 function ProtectedRoute({ children }) {
   const token = localStorage.getItem("token");
@@ -99,6 +100,14 @@ export default function App() {
               element={
                 <AdminRoute>
                   <TransactionFlowPage />
+                </AdminRoute>
+              }
+            />
+            <Route
+              path="/manual-assistance"
+              element={
+                <AdminRoute>
+                  <ManualAssistancePage />
                 </AdminRoute>
               }
             />

@@ -504,5 +504,75 @@ export function makePortalConfigController(pool) {
         });
       } catch (e) { console.error(e); return send.serverErr(res); }
     },
+
+    // GET /api/portal-config/manual-assistance?status=open|resolved|all
+    // A "manual assistance" case = a transaction that has a
+    // manual_assistance_created audit event (paid but Ruijie auth failed). It's
+    // "resolved" once a manual_assistance_resolved event exists for it. The
+    // reserved voucher (from the keep-voucher change) is the code to hand over.
+    getManualAssistance: async (req, res) => {
+      try {
+        const status = req.query.status || 'open';
+        const [rows] = await pool.query(`
+          SELECT tx.*, pc.name AS plan_name
+          FROM (
+            SELECT transaction_id,
+                   MAX(customer_phone) AS customer_phone,
+                   MAX(amount) AS amount,
+                   MAX(plan_key) AS plan_key,
+                   MAX(voucher_code) AS voucher_code,
+                   MAX(session_id) AS session_id,
+                   MIN(CASE WHEN event_type='manual_assistance_created' THEN event_timestamp END) AS created_at,
+                   MAX(CASE WHEN event_type='manual_assistance_resolved' THEN 1 ELSE 0 END) AS resolved,
+                   MAX(CASE WHEN event_type='manual_assistance_resolved' THEN event_timestamp END) AS resolved_at
+            FROM portal_audit_logs
+            WHERE transaction_id IS NOT NULL
+            GROUP BY transaction_id
+            HAVING SUM(CASE WHEN event_type='manual_assistance_created' THEN 1 ELSE 0 END) > 0
+          ) tx
+          LEFT JOIN portal_plan_configs pc
+            ON pc.plan_key COLLATE utf8mb4_unicode_ci = tx.plan_key COLLATE utf8mb4_unicode_ci
+          ORDER BY tx.resolved ASC, tx.created_at DESC
+        `);
+        const cases = rows.map((r) => ({
+          transactionId: r.transaction_id,
+          customerPhone: r.customer_phone,
+          amount: r.amount,
+          planKey: r.plan_key,
+          planName: r.plan_name || r.plan_key || null,
+          voucherCode: r.voucher_code,
+          sessionId: r.session_id,
+          createdAt: r.created_at,
+          resolved: !!r.resolved,
+          resolvedAt: r.resolved_at,
+        }));
+        const unresolvedCount = cases.filter((c) => !c.resolved).length;
+        const filtered =
+          status === 'all' ? cases
+          : status === 'resolved' ? cases.filter((c) => c.resolved)
+          : cases.filter((c) => !c.resolved);
+        return send.ok(res, { cases: filtered, unresolvedCount, total: cases.length });
+      } catch (e) { console.error(e); return send.serverErr(res); }
+    },
+
+    // POST /api/portal-config/manual-assistance/:transactionId/resolve
+    resolveManualAssistance: async (req, res) => {
+      const transactionId = req.params.transactionId;
+      if (!transactionId) return send.bad(res, 'transactionId is required');
+      try {
+        const [[dup]] = await pool.query(
+          `SELECT COUNT(*) AS n FROM portal_audit_logs WHERE transaction_id = ? AND event_type = 'manual_assistance_resolved'`,
+          [transactionId]
+        );
+        if (!dup.n) {
+          await pool.query(
+            `INSERT INTO portal_audit_logs (event_type, transaction_id, event_data, source_ip, event_timestamp)
+             VALUES ('manual_assistance_resolved', ?, ?, 'admin-ui', NOW())`,
+            [transactionId, JSON.stringify({ resolvedBy: req.user?.email || 'admin', resolvedAt: new Date().toISOString() })]
+          );
+        }
+        return send.ok(res, { success: true });
+      } catch (e) { console.error(e); return send.serverErr(res); }
+    },
   };
 }

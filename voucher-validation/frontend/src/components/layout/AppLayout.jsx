@@ -11,7 +11,7 @@ import { Toaster } from "react-hot-toast";
 import {
   LayoutDashboard, Gauge, Network, Ticket, History, RefreshCw, Globe,
   FileText, GitBranch, Users, Settings, Menu, X, ChevronLeft, ChevronRight,
-  ChevronDown, Sun, Moon, LogOut, Shield, Eye,
+  ChevronDown, Sun, Moon, LogOut, Shield, Eye, LifeBuoy,
 } from "lucide-react";
 
 import { useAuth } from "../../hooks/useAuth";
@@ -52,6 +52,7 @@ const navSections = [
       { to: "/portal-config", label: "Portal Plans", Icon: Globe },
       { to: "/portal-audit", label: "Portal Logs", Icon: FileText },
       { to: "/portal-flows", label: "Txn Flows", Icon: GitBranch },
+      { to: "/manual-assistance", label: "Manual Assistance", Icon: LifeBuoy },
     ],
   },
   {
