@@ -84,7 +84,7 @@ export async function getPool() {
       transaction_id VARCHAR(255) NOT NULL UNIQUE,
       session_id VARCHAR(255) NULL,
       client_mac VARCHAR(17) NULL,
-      status ENUM('claimed','used','released','expired') NOT NULL DEFAULT 'claimed',
+      status ENUM('claimed','used','released','expired','manually_assigned') NOT NULL DEFAULT 'claimed',
       claimed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
       used_at TIMESTAMP NULL,
       released_at TIMESTAMP NULL,
@@ -198,6 +198,17 @@ export async function getPool() {
   for (const sql of auditIndexMigrations) {
     try { await pool.query(sql); console.log(`Migration OK: ${sql.slice(0, 60)}...`); }
     catch (e) { if (e.code !== 'ER_DUP_KEYNAME') { /* ignore */ } }
+  }
+
+  // 'manually_assigned' claim status — a paid-but-auth-failed voucher stays
+  // reserved for that customer (recovered via manual voucher-login) instead of
+  // being released to the pool.
+  const claimStatusMigrations = [
+    `ALTER TABLE voucher_claims MODIFY COLUMN status ENUM('claimed','used','released','expired','manually_assigned') NOT NULL DEFAULT 'claimed'`,
+  ];
+  for (const sql of claimStatusMigrations) {
+    try { await pool.query(sql); console.log(`Migration OK: ${sql.slice(0, 60)}...`); }
+    catch (e) { /* idempotent — already applied */ }
   }
 
   // Multi-site: tag each voucher with its Ruijie network group (the "site").

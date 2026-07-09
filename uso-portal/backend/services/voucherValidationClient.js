@@ -133,6 +133,23 @@ async function releaseVoucher(transactionId, claimId) {
 }
 
 /**
+ * Reserve a claimed voucher for a manual-assistance customer (paid but auth
+ * failed) — keeps it out of the pool so they can redeem this exact code.
+ */
+async function reserveVoucherForManual(transactionId, claimId) {
+  try {
+    const { data } = await getClient().post('/api/portal/reserve-voucher', {
+      transactionId, claimId,
+    });
+    log(`Voucher reserved (manually_assigned) for transaction ${transactionId}`);
+    return data;
+  } catch (err) {
+    log('Voucher reserve failed (non-fatal):', err.message);
+    return { success: false, error: err.message };
+  }
+}
+
+/**
  * Mark a claimed voucher as used (after successful authentication).
  */
 async function markVoucherUsed(transactionId) {
@@ -242,6 +259,7 @@ module.exports = {
   fetchCategories,
   claimVoucher,
   releaseVoucher,
+  reserveVoucherForManual,
   markVoucherUsed,
   sendAuditLog,
   invalidateCache,

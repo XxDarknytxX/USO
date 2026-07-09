@@ -30,7 +30,7 @@ export function makePortalConfigController(pool) {
              WHERE v.user_group_id COLLATE utf8mb4_0900_ai_ci = p.user_group_id COLLATE utf8mb4_0900_ai_ci
                AND v.status = '1'
                AND v.disable_status = 0
-               AND v.id NOT IN (SELECT vc.voucher_id FROM voucher_claims vc WHERE vc.status IN ('claimed','used'))
+               AND v.id NOT IN (SELECT vc.voucher_id FROM voucher_claims vc WHERE vc.status IN ('claimed','used','manually_assigned'))
             ) AS available_vouchers
            FROM portal_plan_configs p
            ${whereClause}
@@ -66,7 +66,7 @@ export function makePortalConfigController(pool) {
              WHERE v.user_group_id COLLATE utf8mb4_0900_ai_ci = p.user_group_id COLLATE utf8mb4_0900_ai_ci
                AND v.status = '1'
                AND v.disable_status = 0
-               AND v.id NOT IN (SELECT vc.voucher_id FROM voucher_claims vc WHERE vc.status IN ('claimed','used'))
+               AND v.id NOT IN (SELECT vc.voucher_id FROM voucher_claims vc WHERE vc.status IN ('claimed','used','manually_assigned'))
             ) AS available_vouchers
            FROM portal_plan_configs p WHERE p.id = ?`,
           [req.params.id]

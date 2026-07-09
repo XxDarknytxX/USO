@@ -16,6 +16,7 @@ export function makePortalRouter(controller) {
   // Voucher claim/release lifecycle
   router.post("/claim-voucher", controller.claimVoucher);
   router.post("/release-voucher", controller.releaseVoucher);
+  router.post("/reserve-voucher", controller.reserveVoucherForManual);
   router.post("/mark-used", controller.markVoucherUsed);
 
   // Voucher usage status (for user-facing status page)

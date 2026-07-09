@@ -961,11 +961,13 @@ const paymentCallback = async (req, res) => {
           },
         });
 
-        // Release the voucher claim since auth failed
-        vvClient.releaseVoucher(tID, claimId).then(result => {
-          // Audit: voucher released back to pool
+        // KEEP the voucher reserved for THIS customer (paid but Ruijie auth
+        // failed) instead of releasing it to the pool — they redeem this exact
+        // code via the manual voucher-login. The pool-pick excludes
+        // 'manually_assigned', so it is never re-sold.
+        vvClient.reserveVoucherForManual(tID, claimId).then(result => {
           vvClient.sendAuditLog({
-            eventType: 'voucher_released',
+            eventType: 'voucher_reserved_manual',
             transactionId: tID,
             sessionId,
             planKey: planId,
@@ -974,13 +976,13 @@ const paymentCallback = async (req, res) => {
             amount: parseFloat(transaction.amount),
             eventData: {
               claimId,
-              releaseSuccess: result?.success || false,
+              reserveSuccess: result?.success || false,
               reason: 'auth_failed',
-              message: `Voucher ${voucherCode} released back to pool — Ruijie auth failed`,
+              message: `Voucher ${voucherCode} reserved for the customer (manually assigned) — Ruijie auth failed`,
             },
           });
         }).catch(err => {
-          log('XXXX Failed to release voucher after auth failure:', err.message);
+          log('XXXX Failed to reserve voucher after auth failure:', err.message);
         });
 
         // Extract error details from Ruijie response

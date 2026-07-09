@@ -66,6 +66,7 @@ const STEP_TONE = {
   voucher_claimed: "brand",
   voucher_claim_failed: "warning",
   voucher_released: "info",
+  voucher_reserved_manual: "warning",
   voucher_service_error: "danger",
   auth_attempted: "info",
   auth_success: "success",

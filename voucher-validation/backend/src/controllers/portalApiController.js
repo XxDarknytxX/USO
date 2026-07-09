@@ -176,7 +176,7 @@ export function makePortalApiController(pool) {
              AND v.disable_status = 0
              AND v.id NOT IN (
                SELECT vc.voucher_id FROM voucher_claims vc
-               WHERE vc.status IN ('claimed', 'used')
+               WHERE vc.status IN ('claimed', 'used', 'manually_assigned')
              )
            ORDER BY v.create_time ASC
            LIMIT 1
@@ -265,6 +265,31 @@ export function makePortalApiController(pool) {
         }
 
         log(`Voucher released for transaction ${transactionId}`);
+        return send.ok(res, { success: true });
+      } catch (e) { console.error(e); return send.serverErr(res); }
+    },
+
+    // POST /api/portal/reserve-voucher — for a "paid but auth failed" manual
+    // assistance case, KEEP the claimed voucher reserved for that customer
+    // (status 'manually_assigned') instead of releasing it to the pool. The
+    // Ruijie voucher is still unused, so the customer can redeem this exact code
+    // via the manual voucher-login. The pool-pick excludes 'manually_assigned'
+    // so it is never re-sold.
+    reserveVoucherForManual: async (req, res) => {
+      const { transactionId, claimId } = req.body;
+      if (!transactionId) return send.bad(res, 'transactionId is required');
+      try {
+        const where = claimId ? 'id = ? AND transaction_id = ?' : 'transaction_id = ?';
+        const params = claimId ? [claimId, transactionId] : [transactionId];
+        const [result] = await pool.query(
+          `UPDATE voucher_claims SET status = 'manually_assigned', released_at = NULL
+           WHERE ${where} AND status = 'claimed'`,
+          params
+        );
+        if (result.affectedRows === 0) {
+          return send.ok(res, { success: false, message: 'No claimable voucher found for this transaction' });
+        }
+        log(`Voucher reserved (manually_assigned) for transaction ${transactionId}`);
         return send.ok(res, { success: true });
       } catch (e) { console.error(e); return send.serverErr(res); }
     },

@@ -152,7 +152,7 @@ async function getVoucherList(pool, { page = 1, limit = 10, status, packageName,
   const [rows] = await pool.query(
     `SELECT v.*, vc.client_mac AS claimed_mac, ph.payer_phone
      FROM ${tableName} v
-     LEFT JOIN voucher_claims vc ON vc.voucher_code = v.voucher_code AND vc.status IN ('claimed', 'used')
+     LEFT JOIN voucher_claims vc ON vc.voucher_code = v.voucher_code AND vc.status IN ('claimed', 'used', 'manually_assigned')
      ${phoneJoin}
      ${whereClause}
      ORDER BY v.created_at DESC LIMIT ? OFFSET ?`,
