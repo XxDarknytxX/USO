@@ -72,6 +72,30 @@ async function getStatsPerSite(pool) {
   return rows;
 }
 
+// Per-(site, package) rollup so the global dashboard can scope the package-level
+// charts/tables to just the villages enabled in the "All Villages" scope
+// (Settings). Small result set: sites × plans. Same status/quota columns as the
+// per-package rollup, plus group_id so the frontend can sum in-scope villages.
+async function getStatsPerSitePackage(pool) {
+  const [rows] = await pool.query(`
+    SELECT
+      group_id,
+      package_name,
+      COUNT(*) AS total,
+      SUM(CASE WHEN status = '1' THEN 1 ELSE 0 END) AS unused,
+      SUM(CASE WHEN status = '2' THEN 1 ELSE 0 END) AS active,
+      SUM(CASE WHEN status = '0' THEN 1 ELSE 0 END) AS inactive,
+      SUM(CASE WHEN status = '3' THEN 1 ELSE 0 END) AS expired,
+      AVG(time_period) AS avg_duration_minutes,
+      SUM(quota) AS total_quota_mb,
+      SUM(used_quota) AS total_used_quota_mb,
+      SUM(current_clients) AS currently_in_use
+    FROM vouchers
+    GROUP BY group_id, package_name
+  `);
+  return rows;
+}
+
 async function getHistoricalStats(pool) {
   const [rows] = await pool.query(`
     SELECT
@@ -86,12 +110,18 @@ async function getHistoricalStats(pool) {
   return rows;
 }
 
-async function getVoucherList(pool, { page = 1, limit = 10, status, packageName, userGroupId, groupId, includeHistorical = false }) {
+async function getVoucherList(pool, { page = 1, limit = 10, status, packageName, userGroupId, groupId, groupIds, includeHistorical = false }) {
   const offset = (page - 1) * limit;
   const params = [];
   const where = [];
 
   if (groupId) { where.push('v.group_id = ?'); params.push(groupId); }
+  // groupIds = comma-separated list (dashboard drill-down scoped to the villages
+  // in the "All Villages" scope). Ignored if a single groupId is already set.
+  else if (groupIds) {
+    const ids = String(groupIds).split(',').map((s) => s.trim()).filter(Boolean);
+    if (ids.length) { where.push(`v.group_id IN (${ids.map(() => '?').join(',')})`); params.push(...ids); }
+  }
   if (status) { where.push('v.status = ?'); params.push(status); }
   if (packageName) { where.push('v.package_name = ?'); params.push(packageName); }
   if (userGroupId) { where.push('v.user_group_id = ?'); params.push(userGroupId); }
@@ -283,18 +313,21 @@ export function makeVoucherController(pool) {
         const [stats, historicalStats] = await Promise.all([getVoucherStats(pool, groupId), getHistoricalStats(pool)]);
         const totalVouchers = stats.reduce((sum, item) => sum + Number(item.total || 0), 0);
         const totalHistorical = historicalStats.reduce((sum, item) => sum + Number(item.total_historical || 0), 0);
-        // When no site is selected, include a per-site rollup for the all-sites dashboard.
+        // When no site is selected, include per-site + per-(site,package) rollups
+        // so the all-villages dashboard can scope its charts/tables to the
+        // villages enabled in the "All Villages" scope.
         const perSite = groupId ? undefined : await getStatsPerSite(pool);
-        return send.ok(res, { packageStats: stats, historicalStats, perSite, totalVouchers, totalHistorical, lastSync: await getLastSyncTime(pool) });
+        const packageSiteStats = groupId ? undefined : await getStatsPerSitePackage(pool);
+        return send.ok(res, { packageStats: stats, packageSiteStats, historicalStats, perSite, totalVouchers, totalHistorical, lastSync: await getLastSyncTime(pool) });
       } catch (e) { console.error(e); return send.serverErr(res); }
     },
 
     getVouchers: async (req, res) => {
       try {
-        const { page, limit, status, packageName, userGroupId, includeHistorical, groupId } = req.query;
+        const { page, limit, status, packageName, userGroupId, includeHistorical, groupId, groupIds } = req.query;
         const result = await getVoucherList(pool, {
           page: parseInt(page) || 1, limit: parseInt(limit) || 10,
-          status, packageName, userGroupId, groupId, includeHistorical: includeHistorical === 'true'
+          status, packageName, userGroupId, groupId, groupIds, includeHistorical: includeHistorical === 'true'
         });
         return send.ok(res, result);
       } catch (e) { console.error(e); return send.serverErr(res); }

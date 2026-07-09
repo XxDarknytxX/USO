@@ -40,6 +40,7 @@ import {
 
 import { useNavigate } from "react-router-dom";
 import PlanBreakdown from "../components/PlanBreakdown";
+import { scopePackages } from "../utils/scopePackages";
 import { api, voucherApi } from "../services/api";
 import { useSite } from "../hooks/useSite";
 import { Modal, Badge, EmptyState } from "../components/ui";
@@ -124,8 +125,10 @@ export default function Dashboard() {
 
   async function handlePackageDrillDown(packageName) {
     try {
+      // Scope the drill-down list to the same in-scope villages as the charts.
+      const scopeQs = allVisible ? "" : `&groupIds=${inScopeGroupIds.join(",")}`;
       const data = await api(
-        `/vouchers?packageName=${encodeURIComponent(packageName)}&limit=100`,
+        `/vouchers?packageName=${encodeURIComponent(packageName)}&limit=100${scopeQs}`,
         { auth: true }
       );
       setDrillDownData(data);
@@ -148,13 +151,34 @@ export default function Dashboard() {
     return `${(val / 1024).toFixed(1)} GB`;
   }
 
+  // Ruijie groupIds of the villages currently in the "All Villages" scope.
+  const inScopeGroupIds = useMemo(
+    () =>
+      sites
+        .filter((s) => (allVisible ? true : isSiteVisible(s.id)))
+        .map((s) => s.ruijieGroupId)
+        .filter(Boolean),
+    [sites, allVisible, isSiteVisible]
+  );
+
+  // Per-plan stats collapsed to only the in-scope villages (falls back to the
+  // server's all-villages packageStats if the per-site rollup isn't present).
+  const scopedPackageStats = useMemo(
+    () =>
+      scopePackages(voucherStats?.packageSiteStats, inScopeGroupIds, allVisible) ??
+      voucherStats?.packageStats ??
+      [],
+    [voucherStats, inScopeGroupIds, allVisible]
+  );
+
   const filteredPackageStats = useMemo(() => {
-    if (!voucherStats?.packageStats) return [];
-    if (activeView === "overview") return voucherStats.packageStats;
-    return voucherStats.packageStats.filter(
+    const base = scopedPackageStats;
+    if (!base.length) return [];
+    if (activeView === "overview") return base;
+    return base.filter(
       (pkg) => classifyPackage(Number(pkg.avg_duration_minutes || 0)) === activeView
     );
-  }, [voucherStats, activeView]);
+  }, [scopedPackageStats, activeView]);
 
   const metrics = useMemo(() => {
     const f = filteredPackageStats;
@@ -186,9 +210,12 @@ export default function Dashboard() {
     const f = scopedPerSite;
     const total = f.reduce((s, p) => s + Number(p.total || 0), 0);
     const active = f.reduce((s, p) => s + Number(p.active || 0), 0);
+    const unused = f.reduce((s, p) => s + Number(p.unused || 0), 0);
     return {
       totalVouchers: total,
       activeVouchers: active,
+      unused,
+      sold: Math.max(0, total - unused),
       liveUsers: f.reduce((s, p) => s + Number(p.currently_in_use || 0), 0),
       totalDataUsage: f.reduce((s, p) => s + Number(p.total_used_quota_mb || 0), 0),
       totalQuota: f.reduce((s, p) => s + Number(p.total_quota_mb || 0), 0),
@@ -407,24 +434,34 @@ export default function Dashboard() {
         </div>
 
         {/* ----- Voucher inventory (in-scope villages) ----- */}
-        <div className="grid grid-cols-2 lg:grid-cols-3 gap-3">
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
           <MetricCard
             label="Total vouchers"
             value={scopedMetrics.totalVouchers.toLocaleString()}
             icon={<Database size={14} />}
-            sub={`${scopedMetrics.activeVouchers.toLocaleString()} active`}
+            sub={`${scopedMetrics.unused.toLocaleString()} left · ${allVisible ? "all villages" : `${scopedPerSite.length} of ${sites.length}`}`}
+          />
+          <MetricCard
+            label="Vouchers sold"
+            value={scopedMetrics.sold.toLocaleString()}
+            icon={<Ticket size={14} />}
+            sub={
+              scopedMetrics.totalVouchers
+                ? `${Math.round((scopedMetrics.sold / scopedMetrics.totalVouchers) * 100)}% of pool`
+                : "—"
+            }
           />
           <MetricCard
             label="Data consumed"
             value={formatQuota(scopedMetrics.totalDataUsage)}
             icon={<HardDrive size={14} />}
-            sub={`of ${formatQuota(scopedMetrics.totalQuota)}`}
+            sub={`of ${formatQuota(scopedMetrics.totalQuota)} allocated`}
           />
           <MetricCard
-            label="Villages in scope"
-            value={`${scopedPerSite.length}`}
-            icon={<Users size={14} />}
-            sub={allVisible ? "all villages" : `of ${sites.length}`}
+            label="Active vouchers"
+            value={scopedMetrics.activeVouchers.toLocaleString()}
+            icon={<Zap size={14} />}
+            sub={`${scopedMetrics.activeRate}% active rate`}
           />
         </div>
 

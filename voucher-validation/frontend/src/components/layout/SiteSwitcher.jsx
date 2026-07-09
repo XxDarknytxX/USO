@@ -12,7 +12,7 @@ function cn(...p) {
 }
 
 export default function SiteSwitcher({ collapsed }) {
-  const { sites, activeSite, isGlobal, setActiveSiteId, loading } = useSite();
+  const { sites, activeSite, isGlobal, setActiveSiteId, loading, isSiteVisible, activeSiteId } = useSite();
   const [open, setOpen] = useState(false);
   const ref = useRef(null);
   const navigate = useNavigate();
@@ -26,6 +26,11 @@ export default function SiteSwitcher({ collapsed }) {
   }, [open]);
 
   const label = loading ? "Loading…" : isGlobal ? "All Villages" : activeSite?.name || "Select village";
+
+  // Only show villages that are in the "All Villages" scope (Settings). The
+  // currently-selected village always stays visible so you can never get stuck.
+  const shownSites = sites.filter((s) => isSiteVisible(s.id) || s.id === activeSiteId);
+  const hiddenCount = sites.length - shownSites.length;
 
   const menu = (
     <div
@@ -50,7 +55,7 @@ export default function SiteSwitcher({ collapsed }) {
       {sites.length === 0 && (
         <div className="px-3 py-2 text-[12px] text-[var(--fg-muted)]">No villages yet</div>
       )}
-      {sites.map((s) => (
+      {shownSites.map((s) => (
         <MenuItem
           key={s.id}
           icon={<MapPin size={15} />}
@@ -64,6 +69,17 @@ export default function SiteSwitcher({ collapsed }) {
           }}
         />
       ))}
+      {hiddenCount > 0 && (
+        <button
+          onClick={() => {
+            setOpen(false);
+            navigate("/settings");
+          }}
+          className="w-full text-left px-3 py-2 text-[11.5px] text-[var(--fg-muted)] hover:bg-[var(--bg-surface)] hover:text-[var(--fg-secondary)] transition-colors"
+        >
+          {hiddenCount} village{hiddenCount === 1 ? "" : "s"} hidden — enable in Settings
+        </button>
+      )}
       <div className="my-1 h-px bg-[var(--border-default)]" />
       <button
         onClick={() => {

@@ -82,6 +82,8 @@ export default function SiteDashboard({ groupId, site }) {
   const vExpired = sum((p) => p.expired);
   const vInactive = sum((p) => p.inactive);
   const live = sum((p) => p.currently_in_use);
+  const vSold = Math.max(0, vTotal - vUnused);            // claimed (active+expired+inactive)
+  const vDataUsedMb = sum((p) => p.total_used_quota_mb);  // voucher data consumed (DB, reliable)
   const health = data?.health;
   const internetUp = health?.internet?.up ?? overviewSite?.internetUp ?? null;
   const clients = health?.summary?.clients ?? overviewSite?.clients ?? 0;
@@ -105,8 +107,14 @@ export default function SiteDashboard({ groupId, site }) {
     { name: "Expired", value: vExpired, color: CHART_COLORS.amber },
     { name: "Inactive", value: vInactive, color: CHART_COLORS.slate },
   ].filter((d) => d.value > 0);
+  // Stacked composition per plan — bar height = total; segments show the split.
   const pkgBar = pkg
-    .map((p) => ({ name: p.package_name, Vouchers: Number(p.total), Active: Number(p.active) }))
+    .map((p) => ({
+      name: p.package_name,
+      Active: Number(p.active || 0),
+      Expired: Number(p.expired || 0),
+      Left: Number(p.unused || 0),
+    }))
     .slice(0, 8);
   const trendPts = (data?.trend?.points || []).map((p) => ({
     t: hourLabel(p.t),
@@ -166,10 +174,10 @@ export default function SiteDashboard({ groupId, site }) {
 
           {/* Voucher rail */}
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-            <StatCard label="Vouchers" value={fmtNum(vTotal)} icon={<Ticket size={18} />} color="accent" />
-            <StatCard label="Active" value={fmtNum(vActive)} icon={<Ticket size={18} />} color="emerald" />
+            <StatCard label="Vouchers" value={fmtNum(vTotal)} icon={<Ticket size={18} />} color="accent" sub={`${fmtNum(vUnused)} left to sell`} />
+            <StatCard label="Sold" value={fmtNum(vSold)} icon={<Ticket size={18} />} color="violet" sub={vTotal ? `${Math.round((vSold / vTotal) * 100)}% of pool · ${fmtNum(vActive)} active` : "—"} />
             <StatCard label="Live now" value={fmtNum(live)} icon={<Users size={18} />} color="amber" />
-            <StatCard label="Data used" value={fmtBytes(usageBytes)} icon={<Activity size={18} />} color="cyan" />
+            <StatCard label="Data used" value={fmtBytes(vDataUsedMb * 1024 * 1024)} icon={<Activity size={18} />} color="cyan" sub="voucher data consumed" />
           </div>
 
           {/* Revenue rail */}
@@ -280,8 +288,9 @@ export default function SiteDashboard({ groupId, site }) {
                     <XAxis dataKey="name" tickLine={false} axisLine={false} tick={{ fill: ct.axis, fontSize: 10 }} interval={0} angle={-12} textAnchor="end" height={40} />
                     <YAxis tickLine={false} axisLine={false} tick={{ fill: ct.axis, fontSize: 11 }} width={32} allowDecimals={false} />
                     <Tooltip content={<ChartTooltip />} cursor={{ fill: ct.cursor }} />
-                    <Bar dataKey="Vouchers" fill={CHART_COLORS.accent} radius={[4, 4, 0, 0]} isAnimationActive={false} />
-                    <Bar dataKey="Active" fill={CHART_COLORS.emerald} radius={[4, 4, 0, 0]} isAnimationActive={false} />
+                    <Bar dataKey="Active" stackId="a" fill={CHART_COLORS.emerald} isAnimationActive={false} />
+                    <Bar dataKey="Expired" stackId="a" fill={CHART_COLORS.amber} isAnimationActive={false} />
+                    <Bar dataKey="Left" stackId="a" fill={CHART_COLORS.accent} radius={[4, 4, 0, 0]} isAnimationActive={false} />
                   </BarChart>
                 </ResponsiveContainer>
               )}
