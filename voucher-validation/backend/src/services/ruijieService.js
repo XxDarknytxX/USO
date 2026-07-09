@@ -1,64 +1,84 @@
 // src/services/ruijieService.js
 import fetch from 'node-fetch';
 
-// ── Process-wide Ruijie Cloud request limiter ────────────────────────────
-// Ruijie Cloud rate-limits aggressively — a burst of calls returns
-// { msg: "Too many requests" } (or HTTP 429). EVERY RuijieService instance
-// (network controller, background collector, voucher + portal controllers)
-// routes its calls through this ONE shared gate, so requests are serialized,
-// spaced ≥ MIN_GAP apart, and a rate-limit reply backs off + retries instead
-// of surfacing "Too many requests" to the UI.
-const RUIJIE_MIN_GAP_MS = 220;   // min spacing between successive calls
-const RUIJIE_MAX_RETRIES = 3;    // extra attempts on a rate-limit reply
+// ── Process-wide Ruijie Cloud request limiter + circuit breaker ───────────
+// Ruijie Cloud enforces an account-level quota; over-calling returns
+// { code: 44, msg: "Too many requests." } (HTTP 200) or HTTP 429, and stays
+// throttled until the quota recovers. RETRYING makes it worse (each retry
+// burns more of an exhausted quota), so we DON'T retry. Instead:
+//   • all calls are serialized + spaced ≥ MIN_GAP through one shared gate;
+//   • when Ruijie throttles, we OPEN a circuit and SKIP the non-critical
+//     network-monitoring calls for a cooldown so the quota can recover — while
+//     the customer-critical voucher/auth calls still go through.
+const RUIJIE_MIN_GAP_MS = 220;                       // min spacing between calls
+const RUIJIE_CIRCUIT_COOLDOWN_MS = 10 * 60 * 1000;   // pause monitoring on throttle
 const _limiter = { chain: Promise.resolve(), lastAt: 0 };
+const _circuit = { openUntil: 0 };
+
+// Non-critical, high-volume monitoring endpoints (device list, live clients,
+// gateway port info, gateway usage). These are the ones we skip while throttled.
+const _MONITORING_RE = /\/maint\/devices|\/current-user|\/gateway\/intf\/info|\/appflow\//;
 
 function _rateLimited(status, body) {
   if (status === 429) return true;
+  if (body?.code === 44) return true; // Ruijie "Too many requests."
   const msg = (body?.msg ?? body?.message ?? '').toString().toLowerCase();
   return /too many|request limited|too frequent|rate.?limit|限流|频繁/.test(msg);
 }
 
-// Drop-in replacement for fetch(): one call at a time, spaced, and
-// rate-limit-aware. Reads the body once (no clone/tee) and returns a
-// Response-like object ({ ok, status, statusText, headers, json(), text() })
-// so callers keep using response.ok / await response.json() unchanged.
+// Synthetic reply returned (instantly, no network) while the circuit is open.
+function _throttledResponse() {
+  const body = { code: 44, msg: 'Too many requests. (Ruijie cooldown active — call skipped)' };
+  const text = JSON.stringify(body);
+  return {
+    ok: false, status: 429, statusText: 'Too Many Requests',
+    headers: { get: () => null },
+    json: async () => body,
+    text: async () => text,
+  };
+}
+
+// Drop-in replacement for fetch(): serialized, spaced, circuit-breaking, and
+// NON-retrying. Reads the body once (no clone/tee) and returns a Response-like
+// object ({ ok, status, statusText, headers, json(), text() }) so callers keep
+// using response.ok / await response.json() unchanged.
 // NOTE: this MUST call the real node-fetch `fetch` internally, never itself.
 function ruijieFetch(url, options) {
   const run = _limiter.chain.then(async () => {
-    let attempt = 0;
-    for (;;) {
-      const wait = Math.max(0, _limiter.lastAt + RUIJIE_MIN_GAP_MS - Date.now());
-      if (wait) await new Promise((r) => setTimeout(r, wait));
-
-      let status, statusText, ok, headers, text = '';
-      try {
-        const res = await fetch(url, options);
-        ({ status, statusText, ok, headers } = res);
-        text = await res.text();
-      } finally {
-        _limiter.lastAt = Date.now();
-      }
-
-      let body = null;
-      try { body = text ? JSON.parse(text) : null; } catch { /* non-JSON body */ }
-
-      // Ruijie signals rate-limiting via HTTP 429 or a 200 body whose msg says
-      // "Too many requests" — back off + retry instead of surfacing it.
-      const limited = status === 429 || _rateLimited(status, body);
-      if (!limited || attempt >= RUIJIE_MAX_RETRIES) {
-        return {
-          ok, status, statusText, headers,
-          json: async () => JSON.parse(text),   // throws on non-JSON, like Response.json()
-          text: async () => text,
-        };
-      }
-
-      const ra = Number(headers?.get?.('retry-after'));
-      const backoff = Number.isFinite(ra) && ra > 0 ? ra * 1000 : 800 * 2 ** attempt;
-      console.warn(`[ruijie] rate-limited (attempt ${attempt + 1}/${RUIJIE_MAX_RETRIES}) — waiting ${backoff}ms`);
-      await new Promise((r) => setTimeout(r, backoff));
-      attempt++;
+    // While Ruijie is throttling, skip the non-critical monitoring calls
+    // entirely so the quota recovers and nothing stalls the shared gate.
+    if (_MONITORING_RE.test(String(url)) && Date.now() < _circuit.openUntil) {
+      return _throttledResponse();
     }
+
+    const wait = Math.max(0, _limiter.lastAt + RUIJIE_MIN_GAP_MS - Date.now());
+    if (wait) await new Promise((r) => setTimeout(r, wait));
+
+    let status, statusText, ok, headers, text = '';
+    try {
+      const res = await fetch(url, options);
+      ({ status, statusText, ok, headers } = res);
+      text = await res.text();
+    } finally {
+      _limiter.lastAt = Date.now();
+    }
+
+    let body = null;
+    try { body = text ? JSON.parse(text) : null; } catch { /* non-JSON body */ }
+
+    if (_rateLimited(status, body)) {
+      // Any throttle signal (from any call) pauses monitoring — no retry.
+      if (Date.now() >= _circuit.openUntil) {
+        console.warn(`[ruijie] rate-limited (code=${body?.code ?? status}) — pausing monitoring calls for ${Math.round(RUIJIE_CIRCUIT_COOLDOWN_MS / 60000)} min`);
+      }
+      _circuit.openUntil = Date.now() + RUIJIE_CIRCUIT_COOLDOWN_MS;
+    }
+
+    return {
+      ok, status, statusText, headers,
+      json: async () => JSON.parse(text),   // throws on non-JSON, like Response.json()
+      text: async () => text,
+    };
   });
   // Keep the shared chain alive even if this call rejects.
   _limiter.chain = run.then(() => {}, () => {});
