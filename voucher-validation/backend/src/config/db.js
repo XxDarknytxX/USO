@@ -190,6 +190,16 @@ export async function getPool() {
     catch (e) { if (e.code !== 'ER_DUP_FIELDNAME' && e.code !== 'ER_DUP_KEYNAME') { /* ignore */ } }
   }
 
+  // Index voucher_code on the audit log — the voucher list joins it by
+  // voucher_code to bind the M-PAiSA payer phone for search/display.
+  const auditIndexMigrations = [
+    `ALTER TABLE portal_audit_logs ADD INDEX idx_voucher_code (voucher_code)`,
+  ];
+  for (const sql of auditIndexMigrations) {
+    try { await pool.query(sql); console.log(`Migration OK: ${sql.slice(0, 60)}...`); }
+    catch (e) { if (e.code !== 'ER_DUP_KEYNAME') { /* ignore */ } }
+  }
+
   // Multi-site: tag each voucher with its Ruijie network group (the "site").
   // Vouchers existed before this column, so add it + backfill to the env group.
   const siteColumnMigrations = [

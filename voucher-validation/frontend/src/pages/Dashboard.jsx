@@ -553,7 +553,7 @@ export default function Dashboard() {
         )}
 
         {/* ----- Charts Row 1 ----- */}
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
           <ChartCard title="Package distribution" icon={<Activity size={14} />}>
             {pieData.length === 0 ? (
               <EmptyChart />
@@ -649,79 +649,79 @@ export default function Dashboard() {
             )}
           </ChartCard>
 
-          <ChartCard
-            title="Quota by package"
-            subtitle="Allocated · Consumed (GB)"
-            icon={<TrendingUp size={14} />}
-          >
-            {quotaBarData.length === 0 ? (
-              <EmptyChart />
-            ) : (
-              <div className="h-[260px]">
-                <ResponsiveContainer width="100%" height="100%">
-                  <BarChart
-                    data={quotaBarData}
-                    barGap={2}
-                    barCategoryGap="25%"
-                    margin={{ top: 5, right: 5, bottom: 5, left: -10 }}
-                  >
-                    <CartesianGrid
-                      strokeDasharray="3 3"
-                      stroke="var(--border-subtle)"
-                      vertical={false}
-                    />
-                    <XAxis
-                      dataKey="shortName"
-                      tick={{ fontSize: 10, fill: "var(--text-quaternary)" }}
-                      tickLine={false}
-                      axisLine={false}
-                      interval={0}
-                      angle={-20}
-                      textAnchor="end"
-                      height={40}
-                    />
-                    <YAxis
-                      tick={{ fontSize: 10, fill: "var(--text-quaternary)" }}
-                      tickLine={false}
-                      axisLine={false}
-                      width={32}
-                    />
-                    <Tooltip content={<ChartTooltip />} />
-                    <Legend
-                      verticalAlign="top"
-                      align="right"
-                      iconType="circle"
-                      iconSize={7}
-                      wrapperStyle={{ fontSize: 10, paddingBottom: 4 }}
-                      formatter={(val) => (
-                        <span
-                          className="ml-1"
-                          style={{ color: "var(--text-tertiary)" }}
-                        >
-                          {val}
-                        </span>
-                      )}
-                    />
-                    <Bar
-                      dataKey="allocated"
-                      name="Allocated"
-                      fill={getVar("--color-ink-400", "#9aa1ab")}
-                      radius={[3, 3, 0, 0]}
-                      maxBarSize={26}
-                    />
-                    <Bar
-                      dataKey="consumed"
-                      name="Consumed"
-                      fill={getVar("--brand", "#e60000")}
-                      radius={[3, 3, 0, 0]}
-                      maxBarSize={26}
-                    />
-                  </BarChart>
-                </ResponsiveContainer>
-              </div>
-            )}
-          </ChartCard>
         </div>
+
+        {/* ----- Quota by package (full width, all plan labels readable) ----- */}
+        <ChartCard
+          title="Quota by package"
+          subtitle="Allocated · Consumed (GB) per plan"
+          icon={<TrendingUp size={14} />}
+        >
+          {quotaBarData.length === 0 ? (
+            <EmptyChart />
+          ) : (
+            <div className="h-[340px]">
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart
+                  data={quotaBarData}
+                  barGap={4}
+                  barCategoryGap="26%"
+                  margin={{ top: 8, right: 12, bottom: 24, left: 0 }}
+                >
+                  <CartesianGrid
+                    strokeDasharray="3 3"
+                    stroke="var(--border-subtle)"
+                    vertical={false}
+                  />
+                  <XAxis
+                    dataKey="name"
+                    tick={{ fontSize: 10.5, fill: "var(--text-quaternary)" }}
+                    tickLine={false}
+                    axisLine={false}
+                    interval={0}
+                    angle={-25}
+                    textAnchor="end"
+                    height={72}
+                  />
+                  <YAxis
+                    tick={{ fontSize: 10, fill: "var(--text-quaternary)" }}
+                    tickLine={false}
+                    axisLine={false}
+                    width={44}
+                    tickFormatter={(v) => `${v} GB`}
+                  />
+                  <Tooltip content={<ChartTooltip />} cursor={{ fill: "var(--surface-hover)" }} />
+                  <Legend
+                    verticalAlign="top"
+                    align="right"
+                    iconType="circle"
+                    iconSize={7}
+                    wrapperStyle={{ fontSize: 11, paddingBottom: 6 }}
+                    formatter={(val) => (
+                      <span className="ml-1" style={{ color: "var(--text-tertiary)" }}>
+                        {val}
+                      </span>
+                    )}
+                  />
+                  <Bar
+                    dataKey="allocated"
+                    name="Allocated"
+                    fill={getVar("--color-ink-400", "#9aa1ab")}
+                    radius={[3, 3, 0, 0]}
+                    maxBarSize={46}
+                  />
+                  <Bar
+                    dataKey="consumed"
+                    name="Consumed"
+                    fill={getVar("--brand", "#e60000")}
+                    radius={[3, 3, 0, 0]}
+                    maxBarSize={46}
+                  />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+          )}
+        </ChartCard>
 
         {/* ----- Charts Row 2 ----- */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">

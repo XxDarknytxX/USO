@@ -1,7 +1,7 @@
 // src/pages/VouchersPage.jsx
 // The main inventory page. Dense table, filter rail, bulk actions, drawer modals.
 
-import React, { useEffect, useState, useCallback } from "react";
+import React, { useEffect, useState, useCallback, useMemo } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { AnimatePresence, motion } from "framer-motion";
 import toast from "react-hot-toast";
@@ -13,6 +13,8 @@ import {
   CheckCircle,
   Ticket,
   X,
+  Phone,
+  ExternalLink,
 } from "lucide-react";
 
 import { voucherApi } from "../services/api";
@@ -39,7 +41,7 @@ export default function VouchersPage() {
   const { uuid: routeUuid } = useParams();
   const navigate = useNavigate();
   const { isAdmin } = useAuth();
-  const { activeSite, activeGroupId } = useSite();
+  const { activeSite, activeGroupId, sites } = useSite();
 
   const [vouchers, setVouchers] = useState([]);
   const [total, setTotal] = useState(0);
@@ -51,6 +53,8 @@ export default function VouchersPage() {
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
   const [packageFilter, setPackageFilter] = useState("");
+  const [phoneInput, setPhoneInput] = useState("");
+  const [phoneFilter, setPhoneFilter] = useState("");
   const [packages, setPackages] = useState([]);
   const [viewMode, setViewMode] = useState("active");
 
@@ -87,6 +91,7 @@ export default function VouchersPage() {
       } else if (viewMode === "historical") {
         data = await voucherApi.historical(params);
       } else {
+        if (phoneFilter) params.phone = phoneFilter; // active-list only
         data = await voucherApi.list(params);
       }
 
@@ -97,7 +102,7 @@ export default function VouchersPage() {
     } finally {
       setLoading(false);
     }
-  }, [page, limit, statusFilter, packageFilter, searchQuery, viewMode, activeGroupId]);
+  }, [page, limit, statusFilter, packageFilter, searchQuery, phoneFilter, viewMode, activeGroupId]);
 
   useEffect(() => {
     fetchVouchers();
@@ -116,6 +121,33 @@ export default function VouchersPage() {
     }, 400);
     return () => clearTimeout(t);
   }, [searchInput]);
+
+  // Debounced phone search — the M-PAiSA payer phone bound to the voucher.
+  // Only effective on the default active list (search/historical endpoints
+  // don't support it), so the input is disabled while those are active.
+  // (phoneInput/phoneFilter are declared with the other filters above so
+  // fetchVouchers' dep array can reference phoneFilter.)
+  const phoneDisabled = !!searchInput.trim() || viewMode === "historical";
+  useEffect(() => {
+    const t = setTimeout(() => {
+      setPhoneFilter(phoneInput.trim());
+      setPage(1);
+    }, 400);
+    return () => clearTimeout(t);
+  }, [phoneInput]);
+
+  // Map a voucher's Ruijie group_id → its site host, for the usage-page link.
+  const hostByGroup = useMemo(
+    () =>
+      Object.fromEntries(
+        (sites || []).filter((s) => s.ruijieGroupId && s.hostname).map((s) => [String(s.ruijieGroupId), s.hostname])
+      ),
+    [sites]
+  );
+  const usageUrl = (v) => {
+    const host = hostByGroup[String(v.group_id)] || window.location.host;
+    return `https://${host}/status/${v.voucher_code}`;
+  };
 
   const toggleSelect = (uuid) => {
     setSelected((prev) => {
@@ -162,7 +194,7 @@ export default function VouchersPage() {
   };
 
   const totalPages = Math.ceil(total / limit);
-  const hasFilters = statusFilter || packageFilter || searchInput;
+  const hasFilters = statusFilter || packageFilter || searchInput || phoneInput;
 
   return (
     <div className="p-4 sm:p-6 lg:p-8">
@@ -189,7 +221,7 @@ export default function VouchersPage() {
       />
 
       {/* ----- Filter bar ----- */}
-      <div className="mt-6 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-[minmax(0,1.6fr)_auto_1fr_1fr_auto] lg:items-end">
+      <div className="mt-6 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)_auto_1fr_1fr_auto] lg:items-end">
         {/* Search */}
         <Field label="Search">
           <div className="relative">
@@ -207,6 +239,34 @@ export default function VouchersPage() {
             {searchInput && (
               <button
                 onClick={() => setSearchInput("")}
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-[var(--fg-muted)] hover:text-[var(--fg-secondary)] z-10"
+              >
+                <X size={13} />
+              </button>
+            )}
+          </div>
+        </Field>
+
+        {/* Phone search — M-PAiSA payer phone bound to the voucher */}
+        <Field label="Phone">
+          <div className="relative">
+            <Phone
+              size={14}
+              className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--fg-muted)] pointer-events-none z-10"
+            />
+            <Input
+              type="tel"
+              inputMode="tel"
+              placeholder={phoneDisabled ? "Clear search to use" : "Payer phone…"}
+              value={phoneInput}
+              onChange={(e) => setPhoneInput(e.target.value)}
+              disabled={phoneDisabled}
+              title={phoneDisabled ? "Phone search works on the active list — clear the Search box / switch off Historical" : ""}
+              className="pl-9 pr-9"
+            />
+            {phoneInput && (
+              <button
+                onClick={() => setPhoneInput("")}
                 className="absolute right-3 top-1/2 -translate-y-1/2 text-[var(--fg-muted)] hover:text-[var(--fg-secondary)] z-10"
               >
                 <X size={13} />
@@ -273,6 +333,7 @@ export default function VouchersPage() {
             size="sm"
             onClick={() => {
               setSearchInput("");
+              setPhoneInput("");
               setStatusFilter("");
               setPackageFilter("");
               setPage(1);
@@ -331,7 +392,7 @@ export default function VouchersPage() {
       {/* ----- Table ----- */}
       <div className="mt-4">
         {loading ? (
-          <SkeletonTable rows={8} cols={isAdmin ? 8 : 7} />
+          <SkeletonTable rows={8} cols={isAdmin ? 10 : 9} />
         ) : vouchers.length === 0 ? (
           <Panel padding>
             <EmptyState
@@ -363,10 +424,12 @@ export default function VouchersPage() {
                     <Th>Code</Th>
                     <Th>Package</Th>
                     <Th>Status</Th>
+                    <Th>Phone</Th>
                     <Th>Clients</Th>
                     <Th>Time</Th>
                     <Th>Data</Th>
                     <Th>Created</Th>
+                    <Th>Usage</Th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-[var(--border-default)]">
@@ -415,6 +478,11 @@ export default function VouchersPage() {
                         <Td>
                           <StatusBadge status={v.status} />
                         </Td>
+                        <Td>
+                          <span className="font-mono text-[12.5px] text-[var(--fg-secondary)]">
+                            {v.payer_phone || "—"}
+                          </span>
+                        </Td>
                         <Td mono>
                           <span className="text-[var(--fg-primary)] font-medium">
                             {v.current_clients}
@@ -446,6 +514,18 @@ export default function VouchersPage() {
                               ? new Date(Number(v.create_time)).toLocaleDateString()
                               : "—"}
                           </span>
+                        </Td>
+                        <Td>
+                          <a
+                            href={usageUrl(v)}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            onClick={(e) => e.stopPropagation()}
+                            title={`Open ${v.voucher_code} usage page`}
+                            className="inline-flex items-center gap-1 text-[12px] font-medium text-[var(--accent)] hover:underline whitespace-nowrap"
+                          >
+                            <ExternalLink size={12} /> Usage
+                          </a>
                         </Td>
                       </tr>
                     );

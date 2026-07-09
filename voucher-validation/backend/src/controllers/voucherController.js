@@ -110,7 +110,7 @@ async function getHistoricalStats(pool) {
   return rows;
 }
 
-async function getVoucherList(pool, { page = 1, limit = 10, status, packageName, userGroupId, groupId, groupIds, includeHistorical = false }) {
+async function getVoucherList(pool, { page = 1, limit = 10, status, packageName, userGroupId, groupId, groupIds, phone, includeHistorical = false }) {
   const offset = (page - 1) * limit;
   const params = [];
   const where = [];
@@ -125,15 +125,35 @@ async function getVoucherList(pool, { page = 1, limit = 10, status, packageName,
   if (status) { where.push('v.status = ?'); params.push(status); }
   if (packageName) { where.push('v.package_name = ?'); params.push(packageName); }
   if (userGroupId) { where.push('v.user_group_id = ?'); params.push(userGroupId); }
+  // Search by the M-PAiSA payer phone bound from portal_audit_logs (see phoneJoin).
+  if (phone) { where.push('ph.payer_phone LIKE ?'); params.push(`%${phone}%`); }
 
   const whereClause = where.length ? `WHERE ${where.join(' AND ')}` : '';
   const tableName = includeHistorical ? 'vouchers_combined' : 'vouchers';
 
-  const [[countRow]] = await pool.query(`SELECT COUNT(*) AS total FROM ${tableName} v ${whereClause}`, params);
+  // Latest M-PAiSA payer phone per voucher_code — pre-aggregated to ONE row per
+  // voucher (no fan-out). customer_phone + voucher_code sit on the same audit
+  // rows from voucher_claimed/auth_success onward. Explicit COLLATE because
+  // portal_audit_logs is utf8mb4_unicode_ci and vouchers may differ.
+  const phoneJoin = `
+    LEFT JOIN (
+      SELECT voucher_code COLLATE utf8mb4_unicode_ci AS voucher_code,
+             SUBSTRING_INDEX(GROUP_CONCAT(customer_phone ORDER BY event_timestamp DESC SEPARATOR ','), ',', 1) AS payer_phone
+      FROM portal_audit_logs
+      WHERE voucher_code IS NOT NULL AND customer_phone IS NOT NULL
+      GROUP BY voucher_code
+    ) ph ON ph.voucher_code = v.voucher_code COLLATE utf8mb4_unicode_ci`;
+
+  // COUNT only needs the phone join when actually filtering by phone.
+  const [[countRow]] = await pool.query(
+    `SELECT COUNT(*) AS total FROM ${tableName} v ${phone ? phoneJoin : ''} ${whereClause}`,
+    params
+  );
   const [rows] = await pool.query(
-    `SELECT v.*, vc.client_mac AS claimed_mac
+    `SELECT v.*, vc.client_mac AS claimed_mac, ph.payer_phone
      FROM ${tableName} v
      LEFT JOIN voucher_claims vc ON vc.voucher_code = v.voucher_code AND vc.status IN ('claimed', 'used')
+     ${phoneJoin}
      ${whereClause}
      ORDER BY v.created_at DESC LIMIT ? OFFSET ?`,
     [...params, limit, offset]
@@ -324,10 +344,10 @@ export function makeVoucherController(pool) {
 
     getVouchers: async (req, res) => {
       try {
-        const { page, limit, status, packageName, userGroupId, includeHistorical, groupId, groupIds } = req.query;
+        const { page, limit, status, packageName, userGroupId, includeHistorical, groupId, groupIds, phone } = req.query;
         const result = await getVoucherList(pool, {
           page: parseInt(page) || 1, limit: parseInt(limit) || 10,
-          status, packageName, userGroupId, groupId, groupIds, includeHistorical: includeHistorical === 'true'
+          status, packageName, userGroupId, groupId, groupIds, phone, includeHistorical: includeHistorical === 'true'
         });
         return send.ok(res, result);
       } catch (e) { console.error(e); return send.serverErr(res); }
