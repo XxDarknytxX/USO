@@ -2,6 +2,7 @@
 const axios = require('axios');
 const { TransactionDB } = require('../config/db');
 const { ruijieAuthDeduped } = require('../services/ruijieAuth');
+const vvClient = require('../services/voucherValidationClient');
 
 const log = (...messages) => console.log(new Date().toISOString(), ...messages);
 
@@ -58,6 +59,22 @@ const authenticateVoucher = async (req, res) => {
     account: voucherCode.trim()
   };
 
+  // The manual voucher-login form sends source:'manual' so we record those
+  // attempts to the portal audit log — grouped under a synthetic "manual-<code>"
+  // transaction so support can see, in the admin, every manual login for a code
+  // and exactly why it failed. Auto-auth (PortalGate) is not logged here (noisy).
+  const isManual = req.body.source === 'manual';
+  const logManual = (eventType, eventData) => {
+    if (!isManual) return;
+    vvClient.sendAuditLog({
+      eventType,
+      transactionId: `manual-${voucherCode.trim()}`,
+      sessionId: sessionId.trim(),
+      voucherCode: voucherCode.trim(),
+      eventData: { source: 'manual', clientIp: clientInfo.clientIp, ...eventData },
+    });
+  };
+
   const authUrl = RUIJIE_AUTH_URL;
   
   log('>>>> VOUCHER AUTH POST', authUrl, payload);
@@ -89,7 +106,8 @@ const authenticateVoucher = async (req, res) => {
       
       if (isSuccess) {
         const logonUrl = data.result.logonUrl || null;
-        
+        logManual('manual_auth_success', { hasLogonUrl: !!logonUrl });
+
         // Update session with successful authentication
         await TransactionDB.updateSessionAuth(sessionId.trim(), {
           isAuthenticated: true,
@@ -123,7 +141,12 @@ const authenticateVoucher = async (req, res) => {
         voucherCode: voucherCode.trim(),
         logonUrl: null
       });
-      
+
+      logManual('manual_auth_failed', {
+        reason: data?.result?.message || data?.message || 'Authentication failed',
+        ruijieResult: data?.result || null,
+      });
+
       return res.status(401).json({
         ok: false,
         error: 'Authentication failed',
@@ -132,10 +155,11 @@ const authenticateVoucher = async (req, res) => {
         sessionId: sessionId.trim()
       });
     }
-    
-    return res.status(401).json({ 
-      ok: false, 
-      error: 'Authentication failed', 
+
+    logManual('manual_auth_failed', { reason: 'Unexpected response from Ruijie', ruijieStatus: status, details: data || null });
+    return res.status(401).json({
+      ok: false,
+      error: 'Authentication failed',
       details: data,
       voucherCode: voucherCode.trim(),
       sessionId: sessionId.trim()
@@ -155,9 +179,15 @@ const authenticateVoucher = async (req, res) => {
       log('XXXX Failed to update session after auth error', dbError.message);
     }
     
-    return res.status(502).json({ 
-      ok: false, 
-      error: 'Voucher authentication service unavailable', 
+    logManual('manual_auth_failed', {
+      kind: 'exception',
+      reason: error.code || error.message || 'Auth service error',
+      statusCode: error.response?.status || null,
+    });
+
+    return res.status(502).json({
+      ok: false,
+      error: 'Voucher authentication service unavailable',
       detail: error.message,
       statusCode: error.response?.status,
       voucherCode: voucherCode.trim(),

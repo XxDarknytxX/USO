@@ -47,7 +47,7 @@ export default function ManualVoucherLogin({ open, onClose }) {
       const r = await fetch('/api/auth/voucher', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ voucherCode, sessionId }),
+        body: JSON.stringify({ voucherCode, sessionId, source: 'manual' }),
       });
       const d = await r.json().catch(() => ({}));
 

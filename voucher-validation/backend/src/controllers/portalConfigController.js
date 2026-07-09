@@ -325,9 +325,9 @@ export function makePortalConfigController(pool) {
           const eventTypes = events.map(e => e.event_type);
 
           let overallStatus = 'in_progress';
-          if (eventTypes.includes('auth_success')) overallStatus = 'success';
+          if (eventTypes.includes('auth_success') || eventTypes.includes('manual_auth_success')) overallStatus = 'success';
           else if (eventTypes.includes('manual_assistance_created')) overallStatus = 'manual_assistance';
-          else if (eventTypes.includes('auth_failed') || eventTypes.includes('case_creation_failed')) overallStatus = 'auth_failed';
+          else if (eventTypes.includes('auth_failed') || eventTypes.includes('case_creation_failed') || eventTypes.includes('manual_auth_failed')) overallStatus = 'auth_failed';
           else if (eventTypes.includes('payment_failed')) overallStatus = 'payment_failed';
           else if (eventTypes.includes('system_error')) overallStatus = 'system_error';
           else if (eventTypes.includes('handshake_failed') || eventTypes.includes('handshake_error')) overallStatus = 'handshake_failed';

@@ -70,6 +70,8 @@ const STEP_TONE = {
   auth_attempted: "info",
   auth_success: "success",
   auth_failed: "danger",
+  manual_auth_success: "success",
+  manual_auth_failed: "danger",
   no_session_id: "warning",
   manual_assistance_created: "warning",
   case_creation_failed: "danger",
