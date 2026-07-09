@@ -280,6 +280,7 @@ export function makePortalConfigController(pool) {
                   MAX(plan_key) AS plan_key,
                   MAX(customer_phone) AS customer_phone,
                   MAX(amount) AS amount,
+                  MAX(voucher_code) AS voucher_code,
                   COUNT(*) AS event_count
            FROM portal_audit_logs ${whereClause}
            GROUP BY transaction_id
@@ -333,6 +334,16 @@ export function makePortalConfigController(pool) {
           else if (eventTypes.includes('voucher_claim_failed') || eventTypes.includes('voucher_service_error')) overallStatus = 'voucher_failed';
           else if (eventTypes.includes('no_session_id')) overallStatus = 'no_session';
 
+          // Payment ↔ voucher lifecycle: paid = money received; claimed = a
+          // voucher was assigned. paidUnclaimed = the customer PAID but no
+          // voucher was ever claimed — the case to flag (they're owed a voucher
+          // and it's the gap behind "sold count ≠ paid count").
+          const paid = eventTypes.includes('payment_success');
+          const claimed = eventTypes.includes('voucher_claimed');
+          const claimEv = events.find((e) => e.event_type === 'voucher_claimed');
+          const voucherCode = claimEv?.voucher_code || txn.voucher_code || null;
+          const paidUnclaimed = paid && !claimed;
+
           return {
             transactionId: txn.transaction_id,
             sessionId: txn.session_id,
@@ -343,14 +354,21 @@ export function makePortalConfigController(pool) {
             lastEventAt: txn.last_event_at,
             eventCount: txn.event_count,
             overallStatus,
+            paid,
+            claimed,
+            voucherCode,
+            paidUnclaimed,
             events,
           };
         });
 
-        // Optional: filter by computed status
+        // Optional: filter by computed status ("paid_unclaimed" is a virtual
+        // filter over the paid-but-no-voucher flag, not an overallStatus value).
         let filtered = transactions;
-        if (status) {
-          filtered = transactions.filter(t => t.overallStatus === status);
+        if (status === 'paid_unclaimed') {
+          filtered = transactions.filter((t) => t.paidUnclaimed);
+        } else if (status) {
+          filtered = transactions.filter((t) => t.overallStatus === status);
         }
 
         return send.ok(res, {

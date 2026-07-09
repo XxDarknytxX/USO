@@ -22,6 +22,7 @@ import {
   CreditCard,
   Tag,
   ArrowRight,
+  Ticket,
 } from "lucide-react";
 
 import { portalAuditApi } from "../services/api";
@@ -30,6 +31,7 @@ import { Badge, EmptyState, PageHeader, Panel } from "../components/ui";
 
 const STATUS_OPTIONS = [
   { value: "", label: "All statuses" },
+  { value: "paid_unclaimed", label: "⚠ Paid · no voucher" },
   { value: "success", label: "Success" },
   { value: "payment_failed", label: "Payment failed" },
   { value: "auth_failed", label: "Auth failed" },
@@ -297,7 +299,9 @@ function TransactionCard({ txn, isExpanded, onToggle }) {
     <div
       className={
         "rounded-lg overflow-hidden transition-colors " +
-        "surface-card border border-[var(--border-default)] hover:border-[var(--border-hover)]"
+        (txn.paidUnclaimed
+          ? "bg-[var(--warning-soft)] ring-2 ring-inset ring-[var(--warning-fg)]"
+          : "surface-card border border-[var(--border-default)] hover:border-[var(--border-hover)]")
       }
     >
       <button
@@ -325,6 +329,18 @@ function TransactionCard({ txn, isExpanded, onToggle }) {
               {txn.transactionId}
             </span>
             <Badge tone={cfg.tone}>{cfg.label}</Badge>
+            {/* Payment ↔ voucher binding */}
+            {txn.paidUnclaimed ? (
+              <Badge tone="warning" icon={<AlertTriangle size={11} />}>
+                Paid · no voucher
+              </Badge>
+            ) : txn.claimed && txn.voucherCode ? (
+              <Badge tone="brand" icon={<Ticket size={11} />}>
+                {txn.voucherCode}
+              </Badge>
+            ) : txn.claimed ? (
+              <Badge tone="brand" icon={<Ticket size={11} />}>Voucher claimed</Badge>
+            ) : null}
           </div>
           <div className="flex items-center gap-3 mt-1 text-[12px] text-[var(--text-tertiary)]">
             {txn.planKey && (
