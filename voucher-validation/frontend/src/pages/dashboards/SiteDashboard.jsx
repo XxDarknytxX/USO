@@ -13,6 +13,7 @@ import {
 } from "lucide-react";
 import { useSite } from "../../hooks/useSite";
 import { voucherApi, networkApi, portalConfigApi } from "../../services/api";
+import PlanBreakdown from "../../components/PlanBreakdown";
 import {
   PageHeader, Button, StatCard, Panel, Badge, EmptyState,
   SkeletonKpis, SkeletonCard,
@@ -286,6 +287,11 @@ export default function SiteDashboard({ groupId, site }) {
               )}
             </Panel>
           </div>
+
+          {/* Full plan breakdown — total / sold / active / expired / left / data used, per plan */}
+          <Panel title="Plan breakdown" subtitle="Sold · Active · Expired · Left · Data used — per voucher plan" icon={<Ticket size={15} />}>
+            <PlanBreakdown packages={pkg} formatQuota={(mb) => fmtBytes(Number(mb || 0) * 1024 * 1024)} color={CHART_COLORS.accent} />
+          </Panel>
 
           {/* Devices */}
           <Panel title="Network devices" subtitle={health ? `${devices.length} device${devices.length === 1 ? "" : "s"}` : "Live data unavailable"} icon={<Server size={15} />} padding={false}>

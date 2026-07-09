@@ -39,6 +39,7 @@ import {
 } from "lucide-react";
 
 import { useNavigate } from "react-router-dom";
+import PlanBreakdown from "../components/PlanBreakdown";
 import { api, voucherApi } from "../services/api";
 import { useSite } from "../hooks/useSite";
 import { Modal, Badge, EmptyState } from "../components/ui";
@@ -825,68 +826,21 @@ export default function Dashboard() {
           </ChartCard>
         </div>
 
-        {/* ----- Package breakdown cards ----- */}
+        {/* ----- Plan breakdown (by plan name, merged across all in-scope villages) ----- */}
         <div>
-          <h2 className="text-[12px] font-medium text-[var(--text-tertiary)] mb-3">
-            Package breakdown
-          </h2>
-          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
-            {filteredPackageStats.map((pkg, i) => {
-              const total = Number(pkg.total || 0);
-              const active = Number(pkg.active || 0);
-              const liveUsers = Number(pkg.currently_in_use || 0);
-              const usedQ = Math.round(Number(pkg.total_used_quota_mb || 0) / 1024);
-              const totalQ = Math.round(Number(pkg.total_quota_mb || 0) / 1024);
-              const dataPct = totalQ ? Math.round((usedQ / totalQ) * 100) : 0;
-              const color = getVar(PALETTE_VARS[i % PALETTE_VARS.length], "#e60000");
-
-              return (
-                <div
-                  key={i}
-                  onClick={() => handlePackageDrillDown(pkg.package_name)}
-                  className={
-                    "p-4 rounded-lg cursor-pointer transition-[border-color,background-color] " +
-                    "bg-[var(--surface-raised)] border border-[var(--border-default)] " +
-                    "hover:border-[var(--brand)] hover:bg-[var(--surface-hover)]"
-                  }
-                >
-                  <div className="flex items-center justify-between mb-4">
-                    <span className="flex items-center gap-2 text-[13px] font-semibold text-[var(--text-primary)] truncate">
-                      <span
-                        className="w-2.5 h-2.5 rounded-full shrink-0"
-                        style={{ background: color }}
-                      />
-                      {pkg.package_name || "Unknown"}
-                    </span>
-                    <ArrowUpRight size={13} className="text-[var(--text-quaternary)]" />
-                  </div>
-
-                  <div className="grid grid-cols-3 gap-2 mb-3">
-                    <MiniStat label="Total" value={total} />
-                    <MiniStat label="Active" value={active} />
-                    <MiniStat label="Live" value={liveUsers} accent />
-                  </div>
-
-                  <div>
-                    <div className="flex items-center justify-between text-[11.5px] mb-1.5 font-medium">
-                      <span className="text-[var(--text-tertiary)]">
-                        Data usage
-                      </span>
-                      <span className="text-[var(--text-tertiary)]">
-                        {usedQ} / {totalQ} GB
-                      </span>
-                    </div>
-                    <div className="h-1.5 bg-[var(--surface-sunken)] rounded-full overflow-hidden">
-                      <div
-                        className="h-full bg-[var(--brand)] rounded-full transition-[width] duration-500"
-                        style={{ width: `${Math.min(dataPct, 100)}%` }}
-                      />
-                    </div>
-                  </div>
-                </div>
-              );
-            })}
+          <div className="flex items-baseline justify-between mb-3">
+            <h2 className="text-[12px] font-medium text-[var(--text-tertiary)]">
+              Plan breakdown
+            </h2>
+            <span className="text-[11px] text-[var(--text-quaternary)]">
+              Sold · Active · Expired · Left · Data used — grouped by plan across all villages
+            </span>
           </div>
+          <PlanBreakdown
+            packages={filteredPackageStats}
+            formatQuota={formatQuota}
+            onSelect={handlePackageDrillDown}
+          />
         </div>
       </div>
 
