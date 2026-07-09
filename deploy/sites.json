@@ -3,6 +3,7 @@
   "uso": [
     { "name": "site1", "host": "site1.vodafonefiji.cloud", "port": 5001, "groupId": null },
     { "name": "site2", "host": "site2.vodafonefiji.cloud", "port": 5002, "groupId": "7847952" },
-    { "name": "jioma", "host": "jioma.vodafonefiji.cloud", "port": 5003, "groupId": "7853437" }
+    { "name": "jioma", "host": "jioma.vodafonefiji.cloud", "port": 5003, "groupId": "7853437" },
+    { "name": "niudua", "host": "niudua.vodafonefiji.cloud", "port": 5004, "groupId": "7853705" }
   ]
 }
