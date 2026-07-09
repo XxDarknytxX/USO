@@ -4,8 +4,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   FaCheck, FaArrowRight, FaTimes, FaWifi, FaStar, FaLock, FaBolt,
-  FaCheckCircle, FaExclamationCircle,
+  FaCheckCircle, FaExclamationCircle, FaTicketAlt,
 } from 'react-icons/fa';
+import ManualVoucherLogin from '../components/ManualVoucherLogin';
 
 const CAT_ORDER = ['daily', 'weekly', 'monthly', 'custom'];
 const CAT_PERIOD = { daily: 'day', weekly: 'week', monthly: 'month' };
@@ -61,6 +62,7 @@ export default function MainPage() {
   const [selectedCat, setSelectedCat] = useState(null);
   const [notification, setNotification] = useState(null);
   const [sessionId, setSessionId] = useState(null);
+  const [showVoucherLogin, setShowVoucherLogin] = useState(false);
   const [handledPayment, setHandledPayment] = useState(false);
   const [redirectUrl, setRedirectUrl] = useState(null);
 
@@ -247,7 +249,20 @@ export default function MainPage() {
             </button>
           </div>
         )}
+
+        {/* Already have a voucher? (e.g. one reissued by support) */}
+        <div className="mt-[clamp(24px,5vh,48px)] text-center animate-enter">
+          <button
+            onClick={() => setShowVoucherLogin(true)}
+            className="inline-flex items-center gap-2 text-[13px] font-semibold text-ink-3 hover:text-vf transition-colors"
+          >
+            <FaTicketAlt className="text-[12px]" />
+            Already have a voucher? Log in
+          </button>
+        </div>
       </main>
+
+      <ManualVoucherLogin open={showVoucherLogin} onClose={() => setShowVoucherLogin(false)} />
 
       {/* Footer */}
       <footer className="relative w-full px-5 pb-9 pt-2">

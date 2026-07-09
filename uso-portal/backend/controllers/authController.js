@@ -13,10 +13,36 @@ const getClientInfo = (req) => ({
   userAgent: req.headers['user-agent'] || 'unknown'
 });
 
+// Lightweight in-memory brute-force guard for voucher auth. Codes are short and
+// guessable, and the manual-login form makes rapid tries easy, so cap attempts
+// per source IP. Legit auto-auth (one deduped call per page load) stays well
+// under the cap.
+const _authAttempts = new Map(); // ip -> { count, windowStart }
+const AUTH_WINDOW_MS = 60_000;
+const AUTH_MAX_PER_WINDOW = 12;
+const authRateLimited = (ip) => {
+  const now = Date.now();
+  if (_authAttempts.size > 5000) {
+    for (const [k, v] of _authAttempts) if (now - v.windowStart > AUTH_WINDOW_MS) _authAttempts.delete(k);
+  }
+  const rec = _authAttempts.get(ip);
+  if (!rec || now - rec.windowStart > AUTH_WINDOW_MS) {
+    _authAttempts.set(ip, { count: 1, windowStart: now });
+    return false;
+  }
+  rec.count += 1;
+  return rec.count > AUTH_MAX_PER_WINDOW;
+};
+
 const authenticateVoucher = async (req, res) => {
   const { voucherCode, sessionId } = req.body;
   const clientInfo = getClientInfo(req);
-  
+
+  if (authRateLimited(clientInfo.clientIp)) {
+    log('XXXX voucher auth rate-limited for', clientInfo.clientIp);
+    return res.status(429).json({ ok: false, error: 'Too many attempts. Please wait a minute and try again.' });
+  }
+
   if (!voucherCode) {
     return res.status(400).json({ ok: false, error: 'Voucher code is required' });
   }
