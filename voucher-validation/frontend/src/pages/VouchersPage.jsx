@@ -2,7 +2,7 @@
 // The main inventory page. Dense table, filter rail, bulk actions, drawer modals.
 
 import React, { useEffect, useState, useCallback, useMemo } from "react";
-import { useParams, useNavigate } from "react-router-dom";
+import { useParams, useNavigate, useSearchParams } from "react-router-dom";
 import { AnimatePresence, motion } from "framer-motion";
 import toast from "react-hot-toast";
 import {
@@ -40,6 +40,7 @@ import {
 export default function VouchersPage() {
   const { uuid: routeUuid } = useParams();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const { isAdmin } = useAuth();
   const { activeSite, activeGroupId, sites } = useSite();
 
@@ -51,7 +52,9 @@ export default function VouchersPage() {
 
   // Filters
   const [searchQuery, setSearchQuery] = useState("");
-  const [statusFilter, setStatusFilter] = useState("");
+  // Prefill the status filter from the URL so a dashboard card can drill in
+  // (e.g. "Vouchers sold" → /vouchers?status=sold).
+  const [statusFilter, setStatusFilter] = useState(() => searchParams.get("status") || "");
   const [packageFilter, setPackageFilter] = useState("");
   const [phoneInput, setPhoneInput] = useState("");
   const [phoneFilter, setPhoneFilter] = useState("");
@@ -301,6 +304,7 @@ export default function VouchersPage() {
             }}
           >
             <option value="">All status</option>
+            <option value="sold">Sold (not unused)</option>
             <option value="1">Unused</option>
             <option value="2">Active</option>
             <option value="3">Expired</option>

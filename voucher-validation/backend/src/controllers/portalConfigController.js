@@ -291,7 +291,7 @@ export function makePortalConfigController(pool) {
     // Returns recent transactions with all their events grouped as a timeline
     getTransactionFlows: async (req, res) => {
       try {
-        const { page, limit, transactionId, sessionId, status, voucherCode, startDate, endDate } = req.query;
+        const { page, limit, transactionId, sessionId, status, voucherCode, phone, startDate, endDate } = req.query;
         const pg = parseInt(page) || 1;
         const lim = Math.min(parseInt(limit) || 30, 100);
         const offset = (pg - 1) * lim;
@@ -308,6 +308,11 @@ export function makePortalConfigController(pool) {
         if (voucherCode) {
           where.push('transaction_id IN (SELECT transaction_id FROM portal_audit_logs WHERE voucher_code LIKE ? AND transaction_id IS NOT NULL)');
           params.push(`%${voucherCode}%`);
+        }
+        // Search by M-PAiSA payer phone — a txn matches if ANY event carries it.
+        if (phone) {
+          where.push('transaction_id IN (SELECT transaction_id FROM portal_audit_logs WHERE customer_phone LIKE ? AND transaction_id IS NOT NULL)');
+          params.push(`%${phone}%`);
         }
         // Status filter applied in SQL (not post-pagination) so it spans ALL
         // transactions and the count/pages are correct — this is what makes the
@@ -486,21 +491,26 @@ export function makePortalConfigController(pool) {
       try {
         const groupId = req.query.groupId ? String(req.query.groupId) : null;
 
-        // One row per successful transaction: amount, when, which plan.
+        // One row per PAID transaction: amount, when, which plan. Revenue is
+        // money RECEIVED (payment_success / M-PAiSA callback), NOT internet
+        // access (auth_success). Keying on auth_success silently dropped every
+        // "paid but auth failed" case — real money that never reconciled and
+        // made revenue look frozen while those cases piled up. We also stamp the
+        // revenue timestamp from the payment event so date buckets are accurate.
         const [txns] = await pool.query(
           `SELECT tx.amount, tx.ts, tx.plan_key, tx.user_group_id
              FROM (
                SELECT transaction_id,
                       MAX(amount)          AS amount,
-                      MAX(event_timestamp) AS ts,
+                      MAX(CASE WHEN event_type = 'payment_success' THEN event_timestamp END) AS ts,
                       MAX(plan_key)        AS plan_key,
                       MAX(user_group_id)   AS user_group_id,
-                      SUM(CASE WHEN event_type = 'auth_success' THEN 1 ELSE 0 END) AS ok
+                      SUM(CASE WHEN event_type = 'payment_success' THEN 1 ELSE 0 END) AS paid
                  FROM portal_audit_logs
                 WHERE transaction_id IS NOT NULL
                 GROUP BY transaction_id
              ) tx
-            WHERE tx.ok > 0 AND tx.amount IS NOT NULL AND tx.amount > 0`
+            WHERE tx.paid > 0 AND tx.amount IS NOT NULL AND tx.amount > 0`
         );
 
         // plan_key / user_group_id -> village ruijie group_id

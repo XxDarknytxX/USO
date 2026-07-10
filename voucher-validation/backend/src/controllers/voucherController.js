@@ -122,7 +122,10 @@ async function getVoucherList(pool, { page = 1, limit = 10, status, packageName,
     const ids = String(groupIds).split(',').map((s) => s.trim()).filter(Boolean);
     if (ids.length) { where.push(`v.group_id IN (${ids.map(() => '?').join(',')})`); params.push(...ids); }
   }
-  if (status) { where.push('v.status = ?'); params.push(status); }
+  // 'sold' is a virtual filter = anything not still unused (matches the
+  // dashboard "Vouchers sold" = total − unused), so that card can drill in.
+  if (status === 'sold') { where.push("v.status <> '1'"); }
+  else if (status) { where.push('v.status = ?'); params.push(status); }
   if (packageName) { where.push('v.package_name = ?'); params.push(packageName); }
   if (userGroupId) { where.push('v.user_group_id = ?'); params.push(userGroupId); }
   // Search by the M-PAiSA payer phone bound from portal_audit_logs (see phoneJoin).

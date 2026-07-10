@@ -2,6 +2,7 @@
 // Per-transaction event timeline view.
 
 import { useEffect, useState, useCallback } from "react";
+import { useSearchParams } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import { format } from "date-fns";
 import toast from "react-hot-toast";
@@ -110,12 +111,16 @@ export default function TransactionFlowPage() {
   const [loading, setLoading] = useState(true);
   const [expandedTxn, setExpandedTxn] = useState(null);
 
-  const [transactionId, setTransactionId] = useState("");
-  const [sessionId, setSessionId] = useState("");
-  const [voucherCode, setVoucherCode] = useState("");
-  const [status, setStatus] = useState("");
-  const [startDate, setStartDate] = useState("");
-  const [endDate, setEndDate] = useState("");
+  // Filters prefill from the URL so a dashboard card can drill straight in
+  // (e.g. "Sold this month" → /portal-flows?startDate=YYYY-MM-01).
+  const [searchParams] = useSearchParams();
+  const [transactionId, setTransactionId] = useState(() => searchParams.get("transactionId") || "");
+  const [sessionId, setSessionId] = useState(() => searchParams.get("sessionId") || "");
+  const [voucherCode, setVoucherCode] = useState(() => searchParams.get("voucherCode") || "");
+  const [phone, setPhone] = useState(() => searchParams.get("phone") || "");
+  const [status, setStatus] = useState(() => searchParams.get("status") || "");
+  const [startDate, setStartDate] = useState(() => searchParams.get("startDate") || "");
+  const [endDate, setEndDate] = useState(() => searchParams.get("endDate") || "");
 
   const fetchFlows = useCallback(async () => {
     setLoading(true);
@@ -124,6 +129,7 @@ export default function TransactionFlowPage() {
       if (transactionId.trim()) params.transactionId = transactionId.trim();
       if (sessionId.trim()) params.sessionId = sessionId.trim();
       if (voucherCode.trim()) params.voucherCode = voucherCode.trim();
+      if (phone.trim()) params.phone = phone.trim();
       if (status) params.status = status;
       if (startDate) params.startDate = startDate;
       if (endDate) params.endDate = endDate;
@@ -135,7 +141,7 @@ export default function TransactionFlowPage() {
     } finally {
       setLoading(false);
     }
-  }, [page, limit, transactionId, sessionId, voucherCode, status, startDate, endDate]);
+  }, [page, limit, transactionId, sessionId, voucherCode, phone, status, startDate, endDate]);
 
   useEffect(() => {
     fetchFlows();
@@ -143,12 +149,13 @@ export default function TransactionFlowPage() {
 
   const totalPages = Math.ceil(total / limit);
   const hasFilters =
-    transactionId.trim() || sessionId.trim() || voucherCode.trim() || status || startDate || endDate;
+    transactionId.trim() || sessionId.trim() || voucherCode.trim() || phone.trim() || status || startDate || endDate;
 
   const clearFilters = () => {
     setTransactionId("");
     setSessionId("");
     setVoucherCode("");
+    setPhone("");
     setStatus("");
     setStartDate("");
     setEndDate("");
@@ -205,6 +212,15 @@ export default function TransactionFlowPage() {
               value={voucherCode}
               onChange={(v) => {
                 setVoucherCode(v);
+                setPage(1);
+              }}
+            />
+            <FilterSearch
+              label="Phone number"
+              placeholder="Search number…"
+              value={phone}
+              onChange={(v) => {
+                setPhone(v);
                 setPage(1);
               }}
             />

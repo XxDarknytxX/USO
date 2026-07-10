@@ -435,12 +435,17 @@ export default function Dashboard() {
             value={fmtMoney(scopedRevenue.total)}
             icon={<DollarSign size={14} />}
             sub={`${scopedRevenue.count.toLocaleString()} sale${scopedRevenue.count === 1 ? "" : "s"}`}
+            onClick={() => navigate("/portal-flows")}
           />
           <MetricCard
             label="Sold this month"
             value={fmtMoney(scopedRevenue.month)}
             icon={<TrendingUp size={14} />}
             sub={`${scopedRevenue.monthCount.toLocaleString()} this month`}
+            onClick={() => {
+              const d = new Date();
+              navigate(`/portal-flows?startDate=${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-01`);
+            }}
           />
           <MetricCard
             label="Live users"
@@ -463,6 +468,7 @@ export default function Dashboard() {
             value={scopedMetrics.totalVouchers.toLocaleString()}
             icon={<Database size={14} />}
             sub={`${scopedMetrics.unused.toLocaleString()} left · ${allVisible ? "all villages" : `${scopedPerSite.length} of ${sites.length}`}`}
+            onClick={() => navigate("/vouchers")}
           />
           <MetricCard
             label="Vouchers sold"
@@ -473,18 +479,21 @@ export default function Dashboard() {
                 ? `${Math.round((scopedMetrics.sold / scopedMetrics.totalVouchers) * 100)}% of pool`
                 : "—"
             }
+            onClick={() => navigate("/vouchers?status=sold")}
           />
           <MetricCard
             label="Data consumed"
             value={formatQuota(scopedMetrics.totalDataUsage)}
             icon={<HardDrive size={14} />}
             sub={`of ${formatQuota(scopedMetrics.totalQuota)} allocated`}
+            onClick={() => navigate("/vouchers?status=sold")}
           />
           <MetricCard
             label="Active vouchers"
             value={scopedMetrics.activeVouchers.toLocaleString()}
             icon={<Zap size={14} />}
             sub={`${scopedMetrics.activeRate}% active rate`}
+            onClick={() => navigate("/vouchers?status=2")}
           />
         </div>
 
@@ -1109,13 +1118,20 @@ function SiteCard({ name, hostname, stats, revenue, fmtMoney, onOpen }) {
   );
 }
 
-function MetricCard({ label, value, icon, sub }) {
+function MetricCard({ label, value, icon, sub, onClick }) {
+  const clickable = typeof onClick === "function";
+  const Tag = clickable ? "button" : "div";
   return (
-    <div
+    <Tag
+      onClick={onClick}
+      title={clickable ? "View the individual records" : undefined}
       className={
-        "rounded-lg p-4 " +
+        "rounded-lg p-4 text-left w-full block " +
         "bg-[var(--surface-raised)] border border-[var(--border-default)] " +
-        "shadow-[var(--elev-1)]"
+        "shadow-[var(--elev-1)] " +
+        (clickable
+          ? "cursor-pointer hover:border-[var(--border-hover)] hover:bg-[var(--surface-hover)] transition-colors"
+          : "")
       }
     >
       <div className="flex items-center gap-2 mb-2">
@@ -1127,9 +1143,12 @@ function MetricCard({ label, value, icon, sub }) {
         >
           {icon}
         </span>
-        <span className="text-[12px] font-medium text-[var(--text-tertiary)]">
+        <span className="text-[12px] font-medium text-[var(--text-tertiary)] flex-1">
           {label}
         </span>
+        {clickable && (
+          <ArrowUpRight size={13} className="text-[var(--text-quaternary)]" />
+        )}
       </div>
       <p className="text-[22px] font-semibold text-[var(--text-primary)] tracking-tight">
         {value}
@@ -1137,7 +1156,7 @@ function MetricCard({ label, value, icon, sub }) {
       {sub && (
         <p className="text-[12px] text-[var(--text-tertiary)] mt-1">{sub}</p>
       )}
-    </div>
+    </Tag>
   );
 }
 
