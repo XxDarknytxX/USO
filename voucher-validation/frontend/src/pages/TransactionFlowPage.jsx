@@ -112,6 +112,7 @@ export default function TransactionFlowPage() {
 
   const [transactionId, setTransactionId] = useState("");
   const [sessionId, setSessionId] = useState("");
+  const [voucherCode, setVoucherCode] = useState("");
   const [status, setStatus] = useState("");
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
@@ -122,6 +123,7 @@ export default function TransactionFlowPage() {
       const params = { page: String(page), limit: String(limit) };
       if (transactionId.trim()) params.transactionId = transactionId.trim();
       if (sessionId.trim()) params.sessionId = sessionId.trim();
+      if (voucherCode.trim()) params.voucherCode = voucherCode.trim();
       if (status) params.status = status;
       if (startDate) params.startDate = startDate;
       if (endDate) params.endDate = endDate;
@@ -133,7 +135,7 @@ export default function TransactionFlowPage() {
     } finally {
       setLoading(false);
     }
-  }, [page, limit, transactionId, sessionId, status, startDate, endDate]);
+  }, [page, limit, transactionId, sessionId, voucherCode, status, startDate, endDate]);
 
   useEffect(() => {
     fetchFlows();
@@ -141,11 +143,12 @@ export default function TransactionFlowPage() {
 
   const totalPages = Math.ceil(total / limit);
   const hasFilters =
-    transactionId.trim() || sessionId.trim() || status || startDate || endDate;
+    transactionId.trim() || sessionId.trim() || voucherCode.trim() || status || startDate || endDate;
 
   const clearFilters = () => {
     setTransactionId("");
     setSessionId("");
+    setVoucherCode("");
     setStatus("");
     setStartDate("");
     setEndDate("");
@@ -193,6 +196,15 @@ export default function TransactionFlowPage() {
               value={sessionId}
               onChange={(v) => {
                 setSessionId(v);
+                setPage(1);
+              }}
+            />
+            <FilterSearch
+              label="Voucher ID"
+              placeholder="Search voucher…"
+              value={voucherCode}
+              onChange={(v) => {
+                setVoucherCode(v);
                 setPage(1);
               }}
             />

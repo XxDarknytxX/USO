@@ -9,6 +9,47 @@ const send = {
   serverErr: (res, msg = "Internal server error") => res.status(500).json({ error: msg }),
 };
 
+// Ordered exactly like the overallStatus cascade in getTransactionFlows, so an
+// SQL pre-filter can pick the SAME transactions whose *computed* status matches
+// — a transaction has status X iff it has an event in X's set AND none from a
+// higher-priority set. This is what makes the Status filter (and "manual
+// assistance") work across ALL transactions instead of just the current page.
+const TXN_STATUS_EVENT_SETS = [
+  ['success', ['auth_success', 'manual_auth_success']],
+  ['manual_assistance', ['manual_assistance_created']],
+  ['auth_failed', ['auth_failed', 'case_creation_failed', 'manual_auth_failed']],
+  ['payment_failed', ['payment_failed']],
+  ['system_error', ['system_error']],
+  ['handshake_failed', ['handshake_failed', 'handshake_error']],
+  ['voucher_failed', ['voucher_claim_failed', 'voucher_service_error']],
+  ['no_session', ['no_session_id']],
+];
+
+const _inSub = (types) =>
+  `transaction_id IN (SELECT transaction_id FROM portal_audit_logs WHERE event_type IN (${types.map(() => '?').join(',')}))`;
+const _notInSub = (types) =>
+  `transaction_id NOT IN (SELECT transaction_id FROM portal_audit_logs WHERE event_type IN (${types.map(() => '?').join(',')}))`;
+
+// Returns { sql, params } for a status value, or null when the status needs no
+// SQL constraint. Kept in lock-step with the JS overallStatus cascade below.
+function txnStatusFilterSql(status) {
+  if (!status) return null;
+  if (status === 'paid_unclaimed') {
+    return { sql: `${_inSub(['payment_success'])} AND ${_notInSub(['voucher_claimed'])}`, params: ['payment_success', 'voucher_claimed'] };
+  }
+  if (status === 'in_progress') {
+    const all = TXN_STATUS_EVENT_SETS.flatMap(([, t]) => t);
+    return { sql: _notInSub(all), params: all };
+  }
+  const idx = TXN_STATUS_EVENT_SETS.findIndex(([k]) => k === status);
+  if (idx === -1) return null;
+  const own = TXN_STATUS_EVENT_SETS[idx][1];
+  const higher = TXN_STATUS_EVENT_SETS.slice(0, idx).flatMap(([, t]) => t);
+  return higher.length
+    ? { sql: `${_inSub(own)} AND ${_notInSub(higher)}`, params: [...own, ...higher] }
+    : { sql: _inSub(own), params: own };
+}
+
 export function makePortalConfigController(pool) {
   return {
     // GET /api/portal-config/plans
@@ -250,7 +291,7 @@ export function makePortalConfigController(pool) {
     // Returns recent transactions with all their events grouped as a timeline
     getTransactionFlows: async (req, res) => {
       try {
-        const { page, limit, transactionId, sessionId, status, startDate, endDate } = req.query;
+        const { page, limit, transactionId, sessionId, status, voucherCode, startDate, endDate } = req.query;
         const pg = parseInt(page) || 1;
         const lim = Math.min(parseInt(limit) || 30, 100);
         const offset = (pg - 1) * lim;
@@ -263,6 +304,16 @@ export function makePortalConfigController(pool) {
         if (sessionId) { where.push('session_id = ?'); params.push(sessionId); }
         if (startDate) { where.push('event_timestamp >= ?'); params.push(startDate); }
         if (endDate) { where.push('event_timestamp <= ?'); params.push(endDate); }
+        // Search by voucher code — a txn matches if ANY of its events carries it.
+        if (voucherCode) {
+          where.push('transaction_id IN (SELECT transaction_id FROM portal_audit_logs WHERE voucher_code LIKE ? AND transaction_id IS NOT NULL)');
+          params.push(`%${voucherCode}%`);
+        }
+        // Status filter applied in SQL (not post-pagination) so it spans ALL
+        // transactions and the count/pages are correct — this is what makes the
+        // "manual assistance" (and every other status) filter actually work.
+        const sf = txnStatusFilterSql(status);
+        if (sf) { where.push(`(${sf.sql})`); params.push(...sf.params); }
 
         const whereClause = `WHERE ${where.join(' AND ')}`;
 
