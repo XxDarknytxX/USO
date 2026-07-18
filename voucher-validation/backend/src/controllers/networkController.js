@@ -4,7 +4,7 @@
 
 import RuijieService from "../services/ruijieService.js";
 import { fetchProjectHealth } from "../services/networkHealth.js";
-import { getHealthSnapshot } from "../services/networkHealthStore.js";
+import { getHealthSnapshot, setHealthSnapshot } from "../services/networkHealthStore.js";
 
 const send = {
   ok: (res, data = {}) => res.json(data),
@@ -25,15 +25,11 @@ const mapProject = (r) => ({
   createdAt: r.created_at,
 });
 
-// Live health is expensive (~6–7 Ruijie Cloud calls per project). Opening the
-// Network diagram / a site dashboard used to hit Ruijie live every time,
-// bursting past its rate limit. Cache the assembled result per project and
-// collapse concurrent requests into one in-flight fetch. Good data is cached
-// longer than a failed (rate-limited) one so we recover quickly.
-const _healthCache = new Map();     // projectId -> { ts, payload }
+// Live health is expensive (~6–7 Ruijie Cloud calls per project) and Ruijie
+// rate-limits hard. It is fetched ONLY on an explicit manual refresh
+// (GET .../health?refresh=1) — never on a plain page load. Concurrent refreshes
+// collapse into one in-flight fetch.
 const _healthInflight = new Map();  // projectId -> Promise<payload>
-const HEALTH_TTL_OK_MS = 45_000;
-const HEALTH_TTL_FAIL_MS = 15_000;
 
 export function makeNetworkController(pool) {
   const ruijie = new RuijieService();
@@ -137,11 +133,13 @@ export function makeNetworkController(pool) {
       }
     },
 
-    // GET /api/network/projects/:id/health
-    // Served from the background collector's snapshot (refreshed every ~5 min)
-    // so opening the diagram never hits Ruijie Cloud live — Ruijie rate-limits
-    // hard. Only when no snapshot exists yet (cold start, before the first
-    // collector cycle) do we do ONE gated live fetch, cached + deduped.
+    // GET /api/network/projects/:id/health           → cached snapshot only
+    // GET /api/network/projects/:id/health?refresh=1  → ONE live Ruijie fetch
+    //
+    // A plain page load NEVER calls Ruijie Cloud: it returns the last snapshot
+    // (from the collector if enabled, or from the last manual refresh) or an
+    // empty "no data yet" payload. Ruijie is hit only when the user explicitly
+    // clicks Refresh (?refresh=1) — this keeps us off the `code: 44` throttle.
     getProjectHealth: async (req, res) => {
       try {
         const [rows] = await pool.query("SELECT * FROM network_projects WHERE id = ?", [req.params.id]);
@@ -159,30 +157,43 @@ export function makeNetworkController(pool) {
           devices: h.devices,
         });
 
-        // Preferred path: the collector snapshot. Zero live Ruijie calls.
-        const snap = getHealthSnapshot(project.id);
-        if (snap) {
+        const wantRefresh = String(req.query.refresh || "") === "1";
+
+        // Plain page load: serve the cached snapshot, zero Ruijie calls.
+        if (!wantRefresh) {
+          const snap = getHealthSnapshot(project.id);
+          if (snap) {
+            return send.ok(res, {
+              ...buildPayload(snap.health),
+              source: "snapshot",
+              collectedAt: new Date(snap.ts).toISOString(),
+            });
+          }
+          // No snapshot yet and no explicit refresh → do NOT touch Ruijie.
+          // Return an empty payload so the page renders a "click Refresh" state.
           return send.ok(res, {
-            ...buildPayload(snap.health),
-            source: "collector",
-            collectedAt: new Date(snap.ts).toISOString(),
+            project: mapProject(project),
+            cloudSync: false,
+            notice: "No cached data yet — click Refresh to fetch live from Ruijie Cloud.",
+            summary: null,
+            internet: null,
+            usageBytes: null,
+            topology: null,
+            devices: [],
+            source: "none",
+            collectedAt: null,
           });
         }
 
-        // Cold-start fallback: one gated live fetch, cached + in-flight-deduped.
+        // Manual refresh only: ONE live fetch, concurrent clicks deduped. The
+        // fresh result becomes the new snapshot so later page loads serve it.
         const key = String(project.id);
-        const cached = _healthCache.get(key);
-        if (cached) {
-          const ttl = cached.payload.cloudSync ? HEALTH_TTL_OK_MS : HEALTH_TTL_FAIL_MS;
-          if (Date.now() - cached.ts < ttl) return send.ok(res, cached.payload);
-        }
         let inflight = _healthInflight.get(key);
         if (!inflight) {
           inflight = fetchProjectHealth(ruijie, project)
             .then((h) => {
-              const payload = { ...buildPayload(h), source: "live", collectedAt: new Date().toISOString() };
-              _healthCache.set(key, { ts: Date.now(), payload });
-              return payload;
+              if (h.cloudSync) setHealthSnapshot(project.id, h);
+              return { ...buildPayload(h), source: "live", collectedAt: new Date().toISOString() };
             })
             .finally(() => _healthInflight.delete(key));
           _healthInflight.set(key, inflight);

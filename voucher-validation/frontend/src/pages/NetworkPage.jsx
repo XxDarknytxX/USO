@@ -270,18 +270,20 @@ function AddProjectModal({ onClose, onSaved }) {
   });
   const [saving, setSaving] = useState(false);
   const [discovered, setDiscovered] = useState([]);
-  const [discovering, setDiscovering] = useState(true);
+  const [discovering, setDiscovering] = useState(false);
   const set = (k, v) => setForm((p) => ({ ...p, [k]: v }));
 
-  // Pull the list of Ruijie network groups so the admin can pick a village
-  // instead of typing the group ID. Manual entry still works (fallback).
-  useEffect(() => {
+  // Fetch Ruijie network groups ON DEMAND only. This is a live Ruijie Cloud
+  // call, so it must NOT fire on form open — the admin clicks "Load from Ruijie"
+  // when they want the picker. Manual group-ID entry works without any call.
+  function runDiscover() {
+    setDiscovering(true);
     networkApi
       .discoverGroups()
       .then((d) => setDiscovered(d.groups || []))
       .catch(() => setDiscovered([]))
       .finally(() => setDiscovering(false));
-  }, []);
+  }
 
   function pickDiscovered(groupId) {
     const g = discovered.find((x) => String(x.groupId) === String(groupId));
@@ -325,22 +327,40 @@ function AddProjectModal({ onClose, onSaved }) {
           <div className="flex flex-col gap-4">
             <Field
               label="Discover from Ruijie"
-              hint={discovering ? "Loading sites from Ruijie…" : "Pick a village, or enter the group ID manually below."}
+              hint={
+                discovering
+                  ? "Loading villages from Ruijie…"
+                  : discovered.length
+                  ? "Pick a village, or enter the group ID manually below."
+                  : "Click Load to fetch villages from Ruijie, or enter the group ID manually below."
+              }
             >
-              <Select
-                value={form.ruijieGroupId}
-                onChange={(e) => pickDiscovered(e.target.value)}
-                disabled={discovering || discovered.length === 0}
-              >
-                <option value="">
-                  {discovering ? "Loading…" : discovered.length ? "Select a Ruijie network…" : "None found — enter manually"}
-                </option>
-                {discovered.map((g) => (
-                  <option key={g.groupId} value={g.groupId}>
-                    {(g.name || `Group ${g.groupId}`) + ` (${g.groupId})` + (g.type ? ` · ${g.type}` : "")}
+              <div className="flex flex-col gap-2">
+                <Button
+                  type="button"
+                  variant="secondary"
+                  size="sm"
+                  onClick={runDiscover}
+                  loading={discovering}
+                  className="self-start"
+                >
+                  {discovered.length ? "Reload from Ruijie" : "Load villages from Ruijie"}
+                </Button>
+                <Select
+                  value={form.ruijieGroupId}
+                  onChange={(e) => pickDiscovered(e.target.value)}
+                  disabled={discovering || discovered.length === 0}
+                >
+                  <option value="">
+                    {discovering ? "Loading…" : discovered.length ? "Select a Ruijie network…" : "Not loaded — click Load or enter manually"}
                   </option>
-                ))}
-              </Select>
+                  {discovered.map((g) => (
+                    <option key={g.groupId} value={g.groupId}>
+                      {(g.name || `Group ${g.groupId}`) + ` (${g.groupId})` + (g.type ? ` · ${g.type}` : "")}
+                    </option>
+                  ))}
+                </Select>
+              </div>
             </Field>
             <Field label="Site name" required hint="The village name shown in the switcher, e.g. “Nadi Village”.">
               <Input value={form.name} onChange={(e) => set("name", e.target.value)} placeholder="Nadi Village" />
@@ -407,7 +427,10 @@ function ProjectDetail({ project, onBack }) {
       if (isRefresh) setRefreshing(true);
       else setLoading(true);
       try {
-        const res = await networkApi.health(project.id);
+        // Page load (isRefresh=false) reads the cached snapshot — no Ruijie
+        // call. The Refresh button (isRefresh=true) is the only path that hits
+        // Ruijie Cloud live.
+        const res = await networkApi.health(project.id, { refresh: isRefresh });
         setData(res);
       } catch (err) {
         toast.error("Failed to load health: " + err.message);

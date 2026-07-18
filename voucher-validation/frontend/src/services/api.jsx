@@ -121,7 +121,9 @@ export const networkApi = {
   createProject: (body) => api("/network/projects", { method: "POST", body }),
   updateProject: (id, body) => api(`/network/projects/${id}`, { method: "PUT", body }),
   removeProject: (id) => api(`/network/projects/${id}`, { method: "DELETE" }),
-  health: (id) => api(`/network/projects/${id}/health`),
+  // Plain call = cached snapshot (no Ruijie). { refresh: true } = live fetch,
+  // only ever triggered by an explicit Refresh click.
+  health: (id, { refresh } = {}) => api(`/network/projects/${id}/health${refresh ? "?refresh=1" : ""}`),
 };
 
 // User management API helpers
