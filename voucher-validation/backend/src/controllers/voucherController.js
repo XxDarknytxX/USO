@@ -391,15 +391,42 @@ async function runExcelSync(pool, ruijieService, syncId) {
   const siteResults = [];
   let throttled = false;
 
+  // Build a (village group_id → (user_group_name → Ruijie user_group_id)) map from
+  // the local plan configs. The Excel export carries the group NAME but no id, so
+  // this backfills user_group_id on each voucher (needed by the id-keyed available
+  // count, purchase→claim, and voucher-filter). portal_plan_configs already stores
+  // that mapping (cached when each plan was created), so this is a single LOCAL
+  // query — ZERO Ruijie calls (replaces the old per-village usergroup/list call).
+  // A group with no configured plan stays unmapped; its vouchers keep an empty
+  // user_group_id, which the name-based query fallbacks still cover.
+  const ugIdByGroup = new Map(); // groupId(str) → Map(nameLower → user_group_id)
+  try {
+    const [planGroups] = await pool.query(
+      `SELECT group_id, user_group_name, user_group_id
+       FROM portal_plan_configs
+       WHERE user_group_id IS NOT NULL AND user_group_id <> '' AND user_group_name IS NOT NULL`
+    );
+    for (const r of planGroups) {
+      const g = String(r.group_id);
+      const nm = String(r.user_group_name).trim().toLowerCase();
+      if (!nm) continue;
+      if (!ugIdByGroup.has(g)) ugIdByGroup.set(g, new Map());
+      const m = ugIdByGroup.get(g);
+      if (!m.has(nm)) m.set(nm, String(r.user_group_id));
+    }
+  } catch (e) {
+    console.warn(`Excel sync: plan-config user-group map failed: ${e.message} — user_group_id left blank (name match still covers it).`);
+  }
+
   for (let i = 0; i < sites.length; i++) {
     const site = sites[i];
     const gid = site.group_id;
     if (!gid) continue;
 
     // If Ruijie is already throttling (circuit open — e.g. tripped by a prior
-    // village's export/download OR its user-group lookup), stop now: firing more
-    // export calls into an exhausted quota only prolongs the throttle. Mark this
-    // site and the rest skipped.
+    // village's export/download), stop now: firing more export calls into an
+    // exhausted quota only prolongs the throttle. Mark this site and the rest
+    // skipped.
     if (typeof ruijieService.isThrottled === 'function' && ruijieService.isThrottled()) {
       console.warn('Excel sync: Ruijie circuit open — aborting remaining sites this run.');
       for (const s of sites.slice(i)) {
@@ -457,23 +484,9 @@ async function runExcelSync(pool, ruijieService, syncId) {
         if (!codeToUuid.has(k)) codeToUuid.set(k, r.uuid); // non-null group rows first
       }
 
-      // Resolve user_group_name → Ruijie user_group_id for this village. The Excel
-      // export has NO user_group_id (only the group name), so anything keyed on it
-      // — the plan "available" count, the purchase→claim, filtering vouchers by
-      // user group — would otherwise break. One usergroup/list call per village
-      // backfills it. Best-effort: on failure we leave it blank and the name-based
-      // fallbacks in those queries still cover it.
-      const nameToUgId = new Map();
-      try {
-        const groups = await ruijieService.getUserGroups({ groupId: gid });
-        for (const g of (groups?.data || [])) {
-          const nm = String(g?.name ?? g?.groupName ?? g?.userGroupName ?? '').trim().toLowerCase();
-          const ugid = String(g?.id ?? g?.userGroupId ?? '').trim();
-          if (nm && ugid && !nameToUgId.has(nm)) nameToUgId.set(nm, ugid);
-        }
-      } catch (e) {
-        console.warn(`Excel sync: user-group lookup failed for site "${site.name}" (${gid}): ${e.message} — user_group_id left blank (name match still covers it).`);
-      }
+      // Name→id map for this village, from the local plan-config map built above
+      // (no Ruijie call). Empty Map when the site has no configured plans.
+      const nameToUgId = ugIdByGroup.get(String(gid)) || new Map();
 
       const usedUuid = new Set();
       const resolved = [];
