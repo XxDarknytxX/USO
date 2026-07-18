@@ -109,6 +109,7 @@ export default function VoucherStatus() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [lastUpdated, setLastUpdated] = useState(null);
+  const [now, setNow] = useState(() => Date.now());
 
   // Use a ref for "has data" check to avoid dependency cycle
   const dataRef = useRef(data);
@@ -152,6 +153,13 @@ export default function VoucherStatus() {
       clearInterval(interval);
     };
   }, [fetchStatus]);
+
+  // Tick every second so the time-remaining countdown updates live (it's derived
+  // from the server-provided expiresAt, not from the 30s poll).
+  useEffect(() => {
+    const t = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(t);
+  }, []);
 
   // Backstop: if the voucher isn't usable (expired / deactivated / out of data),
   // send the customer to the purchase portal instead of leaving them on the
@@ -201,7 +209,19 @@ export default function VoucherStatus() {
 
   /* ── Calculations ── */
   const dataPercent = data.quota > 0 ? ((data.usedQuota || 0) / data.quota) * 100 : 0;
-  const timePercent = data.timePeriod > 0 ? ((data.usedTime || 0) / data.timePeriod) * 100 : 0;
+
+  // Time remaining counts down live from the server-computed expiry (activation +
+  // plan period), so it's correct without waiting for a voucher sync. Falls back
+  // to the synced remaining/used minutes when there's no expiry (e.g. an
+  // unlimited-time plan, or a voucher not yet activated).
+  const hasLiveExpiry = data.expiresAt && data.timePeriod > 0;
+  const remainingMin = hasLiveExpiry
+    ? Math.max(0, (data.expiresAt - now) / 60000)
+    : (data.remainingTime || 0);
+  const usedMin = hasLiveExpiry
+    ? Math.min(data.timePeriod, Math.max(0, data.timePeriod - remainingMin))
+    : (data.usedTime || 0);
+  const timePercent = data.timePeriod > 0 ? (usedMin / data.timePeriod) * 100 : 0;
   const dataColor = dataPercent > 85 ? '#ef4444' : dataPercent > 60 ? '#f59e0b' : '#10b981';
   const timeColor = timePercent > 85 ? '#ef4444' : timePercent > 60 ? '#f59e0b' : '#3b82f6';
   const isActive = data.isActive;
@@ -312,7 +332,7 @@ export default function VoucherStatus() {
                        style={{ background: `${timeColor}15` }}>
                     <FaClock className="text-xs" style={{ color: timeColor }} />
                   </div>
-                  <span className="text-xl font-bold text-ink leading-tight">{formatTime(data.remainingTime)}</span>
+                  <span className="text-xl font-bold text-ink leading-tight">{formatTime(remainingMin)}</span>
                   <span className="text-[10px] text-ink-4 mt-0.5">remaining</span>
                 </ProgressRing>
 
@@ -322,15 +342,15 @@ export default function VoucherStatus() {
                 </div>
 
                 <div className="w-full space-y-2.5">
-                  <UsageBar percent={timePercent} color={timeColor} label="Time Usage" used={formatTime(data.usedTime)} total={formatTime(data.timePeriod)} />
+                  <UsageBar percent={timePercent} color={timeColor} label="Time Usage" used={formatTime(usedMin)} total={formatTime(data.timePeriod)} />
                   <div className="grid grid-cols-3 gap-2">
                     <div className="bg-white/[0.03] border border-edge rounded-lg py-1.5 px-1 text-center">
                       <div className="text-[9px] text-ink-5 uppercase tracking-wider">Used</div>
-                      <div className="text-[11px] font-bold text-ink mt-0.5">{formatTime(data.usedTime)}</div>
+                      <div className="text-[11px] font-bold text-ink mt-0.5">{formatTime(usedMin)}</div>
                     </div>
                     <div className="bg-white/[0.03] border border-edge rounded-lg py-1.5 px-1 text-center">
                       <div className="text-[9px] text-ink-5 uppercase tracking-wider">Left</div>
-                      <div className="text-[11px] font-bold text-ink mt-0.5">{formatTime(data.remainingTime)}</div>
+                      <div className="text-[11px] font-bold text-ink mt-0.5">{formatTime(remainingMin)}</div>
                     </div>
                     <div className="bg-white/[0.03] border border-edge rounded-lg py-1.5 px-1 text-center">
                       <div className="text-[9px] text-ink-5 uppercase tracking-wider">Total</div>

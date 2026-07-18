@@ -10,9 +10,53 @@ const getVoucherStatus = async (req, res) => {
     return res.status(400).json({ ok: false, error: 'Voucher code is required' });
   }
 
+  const code = voucherCode.trim();
+
   try {
-    const data = await vvClient.fetchVoucherStatus(voucherCode.trim());
-    return res.json({ ok: true, ...data });
+    const data = await vvClient.fetchVoucherStatus(code);
+
+    // Live expiry, computed locally so "time remaining" counts down in real time
+    // and does NOT depend on a voucher sync. Ruijie time passes are wall-clock from
+    // first login, so: expiry = (first time we authenticated this voucher) + the
+    // plan's time period. We record that activation as transactions.auth_completed_at
+    // when the customer connects. Falls back to Ruijie's synced login/expiry when we
+    // have no local auth record (e.g. an admin-issued voucher), and stays null for
+    // unlimited-time plans (timePeriod = 0).
+    let activatedAt = null;
+    let expiresAt = null;
+    try {
+      const { pool } = require('../config/db');
+      // UNIX_TIMESTAMP on the TIMESTAMP column returns the true UTC epoch (seconds)
+      // regardless of the DB/connection timezone — avoids the mysql2 Date-parsing
+      // timezone ambiguity (the pool is configured '+00:00').
+      const [rows] = await pool.execute(
+        `SELECT UNIX_TIMESTAMP(MIN(auth_completed_at)) AS activated_s
+         FROM transactions
+         WHERE voucher_code = ? AND auth_success = 1 AND auth_completed_at IS NOT NULL`,
+        [code]
+      );
+      const s = rows[0] && rows[0].activated_s;
+      if (s) activatedAt = Number(s) * 1000;
+    } catch (e) {
+      log('Activation lookup failed:', e.message);
+    }
+
+    // Fallback to Ruijie's synced first-login (ms) if we have no local auth record.
+    if (!activatedAt && data.loginTime) {
+      const lt = Number(data.loginTime);
+      if (lt > 0) activatedAt = lt < 1e12 ? lt * 1000 : lt;
+    }
+
+    const periodMin = Number(data.timePeriod) || 0;
+    if (activatedAt && periodMin > 0) {
+      expiresAt = activatedAt + periodMin * 60 * 1000;
+    } else if (data.expiryTime) {
+      // No activation/period to compute from → use Ruijie's synced expiry if present.
+      const et = Number(data.expiryTime);
+      if (et > 0) expiresAt = et < 1e12 ? et * 1000 : et;
+    }
+
+    return res.json({ ok: true, ...data, activatedAt, expiresAt });
   } catch (err) {
     log('Failed to fetch voucher status:', err.message);
 
