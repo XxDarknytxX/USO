@@ -43,11 +43,16 @@ export function SiteProvider({ children }) {
       const data = await networkApi.projects();
       const list = data.projects || [];
       setSites(list);
-      setActiveSiteIdState((cur) => (cur && list.some((s) => s.id === cur) ? cur : null));
+      // Keep the persisted scope if that village still exists. Compare as strings
+      // so a stored id can never be dropped over a number-vs-string mismatch
+      // (which would silently reset the scope to "All Villages" on reload).
+      setActiveSiteIdState((cur) =>
+        cur != null && list.some((s) => String(s.id) === String(cur)) ? cur : null
+      );
       // Prune the visible set to sites that still exist; empty → treat as all.
       setVisibleState((cur) => {
         if (cur == null) return null;
-        const kept = cur.filter((id) => list.some((s) => s.id === id));
+        const kept = cur.filter((id) => list.some((s) => String(s.id) === String(id)));
         return kept.length && kept.length < list.length ? kept : null;
       });
     } catch {

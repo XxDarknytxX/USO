@@ -16,7 +16,7 @@ import {
 
 import { useAuth } from "../../hooks/useAuth";
 import { useTheme } from "../../hooks/useTheme";
-import { SiteProvider } from "../../hooks/useSite";
+import { SiteProvider, useSite } from "../../hooks/useSite";
 import VodafoneLogo from "../ui/VodafoneLogo";
 import FloatingBlobs from "../ui/FloatingBlobs";
 import SiteSwitcher from "./SiteSwitcher";
@@ -78,6 +78,7 @@ function Shell() {
   const location = useLocation();
   const { email, role, isAdmin, logout } = useAuth();
   const { theme, toggle } = useTheme();
+  const { loading: siteLoading } = useSite();
   const isDark = theme === "dark";
 
   const [mobileOpen, setMobileOpen] = useState(false);
@@ -347,9 +348,25 @@ function Shell() {
           </div>
         </header>
 
-        {/* Page content — pages own their padding (.page-shell / p-4…) */}
+        {/* Page content — pages own their padding (.page-shell / p-4…).
+            Hold rendering until the site scope has loaded so scope-aware pages
+            mount with the correct activeGroupId from their first fetch. Otherwise,
+            on a hard reload they fire an UNSCOPED request while `sites` is still
+            loading, and that "all villages" response can land after the scoped one
+            and clobber it — the page then shows data across every scope. This gate
+            fires only during the one-time context load after a full reload. */}
         <main className="flex-1 overflow-y-auto overflow-x-hidden">
-          <Outlet />
+          {siteLoading ? (
+            <div className="h-full flex flex-col items-center justify-center gap-3 text-[var(--fg-muted)]">
+              <div
+                className="w-9 h-9 rounded-full border-[3px] animate-spin"
+                style={{ borderColor: "var(--bg-surface)", borderTopColor: "var(--accent)" }}
+              />
+              <p className="text-[13px] font-medium">Loading villages…</p>
+            </div>
+          ) : (
+            <Outlet />
+          )}
         </main>
       </div>
 
