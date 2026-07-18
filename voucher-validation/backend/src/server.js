@@ -90,7 +90,15 @@ app.listen(port, () => {
   console.log(`Voucher Validation API listening on http://localhost:${port}`);
 });
 
-// Background: collect per-village network status for the Overview dashboard.
-// Interval via NETWORK_COLLECT_INTERVAL_MIN (default 5 min); set 0 to disable.
-const collectMin = Number(process.env.NETWORK_COLLECT_INTERVAL_MIN ?? 5);
+// Background network-health/usage collector — DISABLED by default to conserve
+// the Ruijie Cloud API quota. It polled every active village every few minutes
+// (getDevices + getClients + getGatewayInterfaces + getGatewayUsage ≈ 4 calls ×
+// villages × 12/hr × 24h ≈ the whole 5,000/day quota) — the dominant driver of
+// the `code: 44` throttle. Device health + usage now refresh ON DEMAND: opening
+// a village's Network diagram does one gated, cached live fetch (see
+// networkController.getProjectHealth's cold-start fallback). Trade-off: the
+// Overview dashboard's per-village status table (network_status) shows the last
+// collected values until this is re-enabled.
+// To re-enable later: set NETWORK_COLLECT_INTERVAL_MIN to a positive number.
+const collectMin = Number(process.env.NETWORK_COLLECT_INTERVAL_MIN ?? 0);
 if (collectMin > 0) startCollector(pool, { intervalMs: collectMin * 60 * 1000 });

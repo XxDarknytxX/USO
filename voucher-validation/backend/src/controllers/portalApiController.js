@@ -1,7 +1,9 @@
 // src/controllers/portalApiController.js
 // Public API endpoints called by USO Portal (shared-secret auth)
-
-import RuijieService from '../services/ruijieService.js';
+//
+// NOTE: this controller no longer talks to Ruijie Cloud. Voucher status/usage is
+// served from the local mirror (refreshed by the manual POST /api/vouchers/sync);
+// the per-request live lookups were removed to stop the `code: 44` API throttle.
 
 const send = {
   ok: (res, data = {}) => res.json(data),
@@ -10,9 +12,6 @@ const send = {
 };
 
 const log = (...m) => console.log(new Date().toISOString(), '[PortalAPI]', ...m);
-
-// Shared Ruijie service instance for live voucher lookups
-const ruijie = new RuijieService();
 
 // Resolve which site (Ruijie network group) a public request is for.
 // USO Portal passes ?hostname=<the site domain the customer is on>; admin/debug
@@ -380,78 +379,18 @@ export function makePortalApiController(pool) {
       };
 
       try {
-        // 1. Check in-memory live cache first
+        // 1. In-memory cache — cheap short-circuit for the status page's polling.
         const cached = liveVoucherCache.get(code);
         if (cached && Date.now() - cached.timestamp < LIVE_CACHE_TTL) {
           return send.ok(res, cached.data);
         }
 
-        // Look up the voucher's site (Ruijie group) + admin disable flag once.
-        // Multi-site: a voucher lives in ONE Ruijie project, so we must query
-        // THAT project's live list — the default (env) group won't contain
-        // another site's voucher, which left its status/stats stale before this.
-        let voucherGroupId = null;
-        let localDisable = 0;
-        try {
-          const [dr] = await pool.query('SELECT group_id, disable_status FROM vouchers WHERE voucher_code = ? LIMIT 1', [code]);
-          if (dr[0]) {
-            voucherGroupId = dr[0].group_id || null;
-            localDisable = Number(dr[0].disable_status) || 0;
-          }
-        } catch { /* ignore */ }
-
-        // 2. Try live fetch from Ruijie Cloud API (scoped to the voucher's project)
-        let liveVoucher = null;
-        try {
-          log(`Fetching live voucher data from Ruijie Cloud for: ${code} (group=${voucherGroupId || 'default'})`);
-          const allVouchers = await ruijie.getAllVouchers(voucherGroupId ? { groupId: voucherGroupId } : {});
-          const match = allVouchers.find(
-            v => (v.voucherCode || v.codeNo || '').toLowerCase() === code.toLowerCase()
-          );
-          if (match) {
-            liveVoucher = {
-              voucher_code: match.voucherCode ?? match.codeNo,
-              status: String(match.status ?? '1'),
-              quota: Number(match.quota ?? 0),
-              used_quota: Number(match.usedQuota ?? 0),
-              time_period: Number(match.timePeriod ?? 0),
-              used_time: Number(match.usedTime ?? 0),
-              expiry_time: match.expiryTime ? Number(match.expiryTime) : null,
-              login_time: match.loginTime ? Number(match.loginTime) : null,
-              create_time: match.createTime ? Number(match.createTime) : null,
-              current_clients: Number(match.currentClients ?? 0),
-              max_clients: Number(match.maxClients ?? 1),
-              download_rate_limit: Number(match.downloadRateLimit ?? 0),
-              upload_rate_limit: Number(match.uploadRateLimit ?? 0),
-              package_name: match.packageName ?? match.userGroupName ?? '',
-              user_group_name: match.userGroupName ?? null,
-            };
-
-            // Update local DB in the background (fire-and-forget)
-            pool.query(
-              `UPDATE vouchers SET used_quota = ?, used_time = ?, status = ?,
-                      current_clients = ?, login_time = ?, last_synced = CURRENT_TIMESTAMP
-               WHERE voucher_code = ?`,
-              [liveVoucher.used_quota, liveVoucher.used_time, liveVoucher.status,
-               liveVoucher.current_clients, liveVoucher.login_time, code]
-            ).catch(e => log('Background DB update failed:', e.message));
-
-            log(`Live data fetched for ${code}: used_quota=${liveVoucher.used_quota}, used_time=${liveVoucher.used_time}`);
-          }
-        } catch (cloudErr) {
-          log(`Ruijie Cloud fetch failed, falling back to local DB: ${cloudErr.message}`);
-        }
-
-        // 3. Use live data if available, otherwise fall back to local DB.
-        //    Ruijie's list doesn't carry the admin "disabled" flag, so merge
-        //    it from the local DB before deciding usability.
-        if (liveVoucher) {
-          const responseData = buildResponse(liveVoucher, localDisable);
-          liveVoucherCache.set(code, { data: responseData, timestamp: Date.now() });
-          return send.ok(res, responseData);
-        }
-
-        // 4. Fallback: local database
+        // 2. LOCAL MIRROR ONLY. We deliberately do NOT live-query Ruijie Cloud
+        //    per status check anymore — that (plus the network collector) was the
+        //    driver of the `code: 44` throttle, and Ruijie's list API returns 0
+        //    for used data anyway. Status/usage here is as fresh as the last
+        //    MANUAL voucher sync (POST /api/vouchers/sync). buildResponse reads
+        //    the admin `disable_status` straight off the same row.
         const [rows] = await pool.query(
           `SELECT voucher_code, status, quota, used_quota, time_period, used_time,
                   expiry_time, login_time, current_clients, max_clients,
