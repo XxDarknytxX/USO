@@ -165,6 +165,13 @@ class RuijieService {
     return `${base}${p}`;
   }
 
+  // True while the shared circuit breaker is open (Ruijie recently returned a
+  // throttle). Lets callers proactively skip work rather than fire calls that are
+  // guaranteed to fail into an already-exhausted quota.
+  isThrottled() {
+    return Date.now() < _circuit.openUntil;
+  }
+
   async getAccessToken() {
     if (this.accessToken && this.tokenExpiry && Date.now() < this.tokenExpiry) {
       return this.accessToken;

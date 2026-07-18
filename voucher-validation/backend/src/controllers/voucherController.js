@@ -395,6 +395,19 @@ async function runExcelSync(pool, ruijieService, syncId) {
     const site = sites[i];
     const gid = site.group_id;
     if (!gid) continue;
+
+    // If Ruijie is already throttling (circuit open — e.g. tripped by a prior
+    // village's export/download OR its user-group lookup), stop now: firing more
+    // export calls into an exhausted quota only prolongs the throttle. Mark this
+    // site and the rest skipped.
+    if (typeof ruijieService.isThrottled === 'function' && ruijieService.isThrottled()) {
+      console.warn('Excel sync: Ruijie circuit open — aborting remaining sites this run.');
+      for (const s of sites.slice(i)) {
+        if (s.group_id) siteResults.push({ site: s.name, groupId: s.group_id, error: 'skipped — Ruijie throttled' });
+      }
+      break;
+    }
+
     try {
       // 1. ONE export (pageSize=0 = every voucher) + one file download.
       const { buffer } = await ruijieService.exportAndDownloadVoucherExcel({ groupId: gid });
@@ -444,6 +457,24 @@ async function runExcelSync(pool, ruijieService, syncId) {
         if (!codeToUuid.has(k)) codeToUuid.set(k, r.uuid); // non-null group rows first
       }
 
+      // Resolve user_group_name → Ruijie user_group_id for this village. The Excel
+      // export has NO user_group_id (only the group name), so anything keyed on it
+      // — the plan "available" count, the purchase→claim, filtering vouchers by
+      // user group — would otherwise break. One usergroup/list call per village
+      // backfills it. Best-effort: on failure we leave it blank and the name-based
+      // fallbacks in those queries still cover it.
+      const nameToUgId = new Map();
+      try {
+        const groups = await ruijieService.getUserGroups({ groupId: gid });
+        for (const g of (groups?.data || [])) {
+          const nm = String(g?.name ?? g?.groupName ?? g?.userGroupName ?? '').trim().toLowerCase();
+          const ugid = String(g?.id ?? g?.userGroupId ?? '').trim();
+          if (nm && ugid && !nameToUgId.has(nm)) nameToUgId.set(nm, ugid);
+        }
+      } catch (e) {
+        console.warn(`Excel sync: user-group lookup failed for site "${site.name}" (${gid}): ${e.message} — user_group_id left blank (name match still covers it).`);
+      }
+
       const usedUuid = new Set();
       const resolved = [];
       let uuidCollisions = 0;
@@ -452,7 +483,12 @@ async function runExcelSync(pool, ruijieService, syncId) {
         const uuid = (ev.uuid && String(ev.uuid).trim()) || codeToUuid.get(code) || `xls-${gid}-${code}`;
         if (usedUuid.has(uuid)) { uuidCollisions++; continue; } // never overwrite a sibling
         usedUuid.add(uuid);
-        resolved.push({ ...ev, uuid });
+        // Backfill user_group_id from the village's name→id map when the export
+        // didn't carry one (it never does), so downstream id-keyed queries work.
+        const userGroupId = (ev.userGroupId && String(ev.userGroupId).trim())
+          || nameToUgId.get(String(ev.userGroupName ?? '').trim().toLowerCase())
+          || '';
+        resolved.push({ ...ev, uuid, userGroupId });
       }
 
       // 7. Archive rows that dropped out of the export — ONLY when EVERY row had a
