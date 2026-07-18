@@ -48,10 +48,18 @@ export default function SyncPage() {
   async function handleSync() {
     setSyncing(true);
     try {
-      const result = await voucherApi.sync();
-      toast.success(
-        `Sync complete · ${result.totalProcessed} processed (${result.newVouchers} new, ${result.updatedVouchers} updated, ${result.archivedVouchers || 0} archived)`
-      );
+      const { syncId } = await voucherApi.sync();
+      loadLogs(); // show the running row immediately
+      const log = await voucherApi.waitForSync(syncId);
+      if (!log) {
+        toast("Sync is still running — see the log below.", { icon: "⏳" });
+      } else if (log.status === "failed") {
+        toast.error("Sync failed: " + (log.error_message || "unknown error"));
+      } else {
+        toast.success(
+          `Sync complete · ${log.total_processed} processed (${log.total_new} new, ${log.total_updated} updated, ${log.total_archived || 0} archived)`
+        );
+      }
       loadLogs();
     } catch (err) {
       toast.error("Sync failed: " + err.message);

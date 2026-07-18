@@ -97,8 +97,17 @@ export default function Dashboard() {
   async function syncNow() {
     setSyncing(true);
     try {
-      await voucherApi.sync();
-      toast.success("Sync complete");
+      const { syncId } = await voucherApi.sync();
+      const log = await voucherApi.waitForSync(syncId);
+      if (!log) {
+        toast("Sync still running — data will update shortly.", { icon: "⏳" });
+      } else if (log.status === "failed") {
+        toast.error("Sync failed: " + (log.error_message || "unknown error"));
+      } else {
+        toast.success(
+          `Sync complete · ${log.total_processed} processed (${log.total_new} new, ${log.total_updated} updated, ${log.total_archived || 0} archived)`
+        );
+      }
     } catch (err) {
       toast.error("Sync failed: " + (err?.message || "unknown error"));
     } finally {

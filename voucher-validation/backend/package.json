@@ -9,7 +9,13 @@
     "seed": "node seed.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
-  "keywords": ["voucher", "management", "ruijie", "api", "express"],
+  "keywords": [
+    "voucher",
+    "management",
+    "ruijie",
+    "api",
+    "express"
+  ],
   "author": "",
   "license": "ISC",
   "description": "Voucher management system with Ruijie Networks API integration",
@@ -17,6 +23,7 @@
     "bcryptjs": "^3.0.2",
     "cors": "^2.8.5",
     "dotenv": "^17.2.1",
+    "exceljs": "^4.4.0",
     "express": "^5.1.0",
     "express-validator": "^7.2.1",
     "jsonwebtoken": "^9.0.2",

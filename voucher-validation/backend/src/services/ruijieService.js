@@ -85,6 +85,70 @@ function ruijieFetch(url, options) {
   return run;
 }
 
+const _sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+// True when a download response body is an actual Excel file (vs. a JSON
+// "not ready"/error body the report endpoint returns before the file exists).
+function _isExcelContentType(contentType) {
+  const v = String(contentType || '').toLowerCase();
+  return (
+    v.startsWith('application/vnd.ms-excel') ||
+    v.startsWith('application/vnd.openxmlformats-officedocument.spreadsheetml.sheet') ||
+    v.startsWith('application/octet-stream') ||
+    v.includes('spreadsheetml')
+  );
+}
+
+// .xlsx is a ZIP container, so real bytes start with the ZIP magic "PK" (50 4B).
+// Sniffing this lets us accept a valid file even when the server sends a blank/
+// missing content-type (the vendor reference explicitly treats blank as valid).
+function _looksLikeXlsx(buffer) {
+  return Buffer.isBuffer(buffer) && buffer.length > 3 && buffer[0] === 0x50 && buffer[1] === 0x4b;
+}
+
+// Binary-aware sibling of ruijieFetch, for the xlsx report download. Shares the
+// same serialized + spaced gate and circuit breaker, but reads the body as raw
+// BYTES (ruijieFetch reads text(), which corrupts binary). Returns the Buffer
+// plus contentType, and — when the body is JSON (error / not-ready / throttle) —
+// the parsed body so the caller can branch and so a throttle still trips the
+// circuit. Non-retrying at this layer; the caller decides whether to poll.
+function ruijieFetchBinary(url, options) {
+  const run = _limiter.chain.then(async () => {
+    const wait = Math.max(0, _limiter.lastAt + RUIJIE_MIN_GAP_MS - Date.now());
+    if (wait) await new Promise((r) => setTimeout(r, wait));
+
+    let status, statusText, ok, headers, buffer = Buffer.alloc(0);
+    try {
+      const res = await fetch(url, options);
+      ({ status, statusText, ok, headers } = res);
+      buffer = Buffer.from(await res.arrayBuffer());
+    } finally {
+      _limiter.lastAt = Date.now();
+    }
+
+    const contentType = (headers?.get?.('content-type') || '').toLowerCase();
+
+    // Only try to JSON-parse when it clearly isn't an xlsx (by content-type AND
+    // by magic bytes) — stringifying/parsing megabytes of binary just to throw
+    // would waste time, and a valid file can arrive with a blank content-type.
+    let body = null;
+    if (!_isExcelContentType(contentType) && !_looksLikeXlsx(buffer)) {
+      try { body = JSON.parse(buffer.toString('utf8')); } catch { /* non-JSON body */ }
+    }
+
+    if (_rateLimited(status, body)) {
+      if (Date.now() >= _circuit.openUntil) {
+        console.warn(`[ruijie] rate-limited (code=${body?.code ?? status}) on download — pausing monitoring calls for ${Math.round(RUIJIE_CIRCUIT_COOLDOWN_MS / 60000)} min`);
+      }
+      _circuit.openUntil = Date.now() + RUIJIE_CIRCUIT_COOLDOWN_MS;
+    }
+
+    return { ok, status, statusText, contentType, body, buffer };
+  });
+  _limiter.chain = run.then(() => {}, () => {});
+  return run;
+}
+
 class RuijieService {
   constructor() {
     this.baseUrl = process.env.RUIJIE_API_BASE_URL;
@@ -211,6 +275,97 @@ class RuijieService {
       if (hasMore) await new Promise(r => setTimeout(r, 100));
     }
     return allVouchers;
+  }
+
+  // ── Excel export flow (voucher usage sync — ONE API call for ALL vouchers) ──
+  // Replaces the paginated getAllVouchers() polling for the sync job. Ruijie
+  // generates an .xlsx server-side; we fetch the whole voucher list in a single
+  // export call (pageSize=0) instead of N paged getList calls, which is the
+  // capacity fix for the account-wide code:44 throttle.
+
+  /**
+   * Request a full voucher export for a site and return the generated fileName.
+   * GET /intlSamVoucher/export/{groupId}?pageSize=0  → { code:0, fileName }.
+   * pageSize=0 = ALL vouchers in one call. JSON response (via ruijieFetch).
+   */
+  async exportVouchersExcel(opts = {}, _retried = false) {
+    const accessToken = await this.getAccessToken();
+    const gid = opts.groupId || this.groupId;
+    if (!gid) throw new Error('exportVouchersExcel: missing groupId');
+
+    const url = new URL(this.buildUrl(`/intlSamVoucher/export/${gid}`));
+    url.searchParams.set('access_token', accessToken);
+    url.searchParams.set('ishttps', 'false');
+    url.searchParams.set('start', '0');
+    url.searchParams.set('pageSize', '0');          // 0 = export every voucher
+    url.searchParams.set('lang', 'en');
+    url.searchParams.set('createBegin', opts.createBegin || '');
+    url.searchParams.set('createEnd', opts.createEnd || '');
+    url.searchParams.set('name', opts.name || '');
+    url.searchParams.set('status', opts.status || '');
+    url.searchParams.set('userMac', opts.userMac || '');
+
+    const response = await ruijieFetch(url.toString(), {
+      method: 'GET',
+      headers: { Accept: 'application/json, text/plain, */*' },
+    });
+    if (!response.ok) throw new Error(`Voucher export HTTP ${response.status} ${response.statusText}`);
+
+    const data = await response.json();
+    if (data?.code !== 0) {
+      // code 3/4 = token expired → refresh once, mirroring getVouchers().
+      if (this.isTokenExpired(data) && !_retried) {
+        console.log('Ruijie token expired in exportVouchersExcel, refreshing...');
+        this.invalidateToken();
+        return this.exportVouchersExcel(opts, true);
+      }
+      throw new Error(`Voucher export failed: code=${data?.code} ${data?.msg || ''}`);
+    }
+    if (!data?.fileName) throw new Error('Voucher export returned no fileName');
+    return data.fileName;
+  }
+
+  /**
+   * Download a previously-exported voucher .xlsx as a Buffer. The report is
+   * generated asynchronously, so we poll until the bytes are ready. A JSON body
+   * means "not ready"/error; a throttle (code 44 / HTTP 429) aborts immediately —
+   * retrying would burn more quota. The poll window (default 10 × 12s = 120s)
+   * matches the vendor's expectation that large-site reports can take a while.
+   * GET /report?path={fileName}.
+   */
+  async downloadVoucherExcel(fileName, { attempts = 10, intervalMs = 12000 } = {}) {
+    const accessToken = await this.getAccessToken();
+    const url = new URL(this.buildUrl('/report'));
+    url.searchParams.set('access_token', accessToken);
+    url.searchParams.set('ishttps', 'false');
+    url.searchParams.set('path', fileName);
+
+    let lastErr;
+    for (let attempt = 1; attempt <= attempts; attempt++) {
+      const r = await ruijieFetchBinary(url.toString(), { method: 'GET', headers: { Accept: '*/*' } });
+
+      // Accept when the bytes are Excel by content-type OR by the .xlsx/ZIP magic
+      // "PK" — the report can arrive with a blank content-type (which the vendor
+      // reference treats as valid), so don't reject on content-type alone.
+      if (r.ok && r.buffer.length > 0 && (_isExcelContentType(r.contentType) || _looksLikeXlsx(r.buffer))) {
+        return r.buffer;
+      }
+      if (_rateLimited(r.status, r.body)) {
+        throw new Error(`Voucher report download throttled (code=${r.body?.code ?? r.status}) — aborting to protect quota`);
+      }
+      lastErr = new Error(
+        `Voucher report not ready (attempt ${attempt}/${attempts}, status=${r.status}, contentType=${r.contentType || 'none'}, code=${r.body?.code ?? ''})`
+      );
+      if (attempt < attempts) await _sleep(intervalMs);
+    }
+    throw lastErr;
+  }
+
+  /** Convenience: export a site's vouchers and download the file. */
+  async exportAndDownloadVoucherExcel(opts = {}) {
+    const fileName = await this.exportVouchersExcel(opts);
+    const buffer = await this.downloadVoucherExcel(fileName, opts.download);
+    return { fileName, buffer };
   }
 
   /**

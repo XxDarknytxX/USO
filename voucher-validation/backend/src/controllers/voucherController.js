@@ -2,6 +2,7 @@
 import { validationResult } from "express-validator";
 import crypto from "crypto";
 import RuijieService from "../services/ruijieService.js";
+import { parseVoucherExcelBuffer } from "../services/excelVoucherParser.js";
 
 const send = {
   ok: (res, data = {}) => res.json(data),
@@ -185,26 +186,40 @@ async function archiveVouchersNotInCloud(pool, cloudVoucherUuids, syncId, groupI
   const siteFilter = groupId ? 'group_id = ?' : '1=1';
   const siteParam = groupId ? [groupId] : [];
 
+  // Build the "rows to archive" predicate once so the copy and the delete target
+  // exactly the same rows.
+  let where, whereParams;
   if (cloudVoucherUuids.length === 0) {
-    const [result] = await pool.query(
-      `INSERT INTO vouchers_historical (${insertCols}) SELECT ${selectCols} FROM vouchers WHERE ${siteFilter}`,
-      [syncId, ...siteParam]
-    );
-    const archivedCount = result.affectedRows;
-    if (archivedCount > 0) await pool.query(`DELETE FROM vouchers WHERE ${siteFilter}`, siteParam);
-    return archivedCount;
+    where = siteFilter;
+    whereParams = [...siteParam];
+  } else {
+    const placeholders = cloudVoucherUuids.map(() => '?').join(',');
+    where = `${siteFilter} AND uuid NOT IN (${placeholders})`;
+    whereParams = [...siteParam, ...cloudVoucherUuids];
   }
 
-  const placeholders = cloudVoucherUuids.map(() => '?').join(',');
-  const [result] = await pool.query(
-    `INSERT INTO vouchers_historical (${insertCols}) SELECT ${selectCols} FROM vouchers WHERE ${siteFilter} AND uuid NOT IN (${placeholders})`,
-    [syncId, ...siteParam, ...cloudVoucherUuids]
-  );
-  const archivedCount = result.affectedRows;
-  if (archivedCount > 0) {
-    await pool.query(`DELETE FROM vouchers WHERE ${siteFilter} AND uuid NOT IN (${placeholders})`, [...siteParam, ...cloudVoucherUuids]);
+  // Archive = copy → delete. Run both in one transaction so a crash between them
+  // can't leave a voucher in BOTH tables (which would double-count it in
+  // vouchers_historical when the next sync re-archives it).
+  const conn = await pool.getConnection();
+  try {
+    await conn.beginTransaction();
+    const [result] = await conn.query(
+      `INSERT INTO vouchers_historical (${insertCols}) SELECT ${selectCols} FROM vouchers WHERE ${where}`,
+      [syncId, ...whereParams]
+    );
+    const archivedCount = result.affectedRows;
+    if (archivedCount > 0) {
+      await conn.query(`DELETE FROM vouchers WHERE ${where}`, whereParams);
+    }
+    await conn.commit();
+    return archivedCount;
+  } catch (e) {
+    try { await conn.rollback(); } catch { /* rollback best-effort */ }
+    throw e;
+  } finally {
+    conn.release();
   }
-  return archivedCount;
 }
 
 async function upsertVoucher(pool, voucherData) {
@@ -322,6 +337,193 @@ async function getLastSyncTime(pool) {
     `SELECT sync_completed_at FROM voucher_sync_log WHERE status = 'completed' ORDER BY sync_completed_at DESC LIMIT 1`
   );
   return rows[0]?.sync_completed_at || null;
+}
+
+// Timezone of the Ruijie export's display timestamps (Fiji UTC+12 by default).
+// Used to convert the .xlsx date strings to absolute epoch ms deterministically.
+const EXPORT_TZ_OFFSET_MIN = Number(process.env.RUIJIE_EXPORT_TZ_OFFSET_MIN ?? 720);
+
+// Did this error come from a Ruijie throttle? If so we stop syncing the rest of
+// the sites — retrying/continuing just burns more of an already-exhausted quota.
+function _isThrottleError(err) {
+  const m = String(err?.message || '').toLowerCase();
+  return m.includes('throttl') || m.includes('code=44') || m.includes('code:44') || m.includes('too many');
+}
+
+/**
+ * Excel-based voucher sync — the replacement for the paginated voucher/getList
+ * polling. For each active site it makes ONE export call (all vouchers) + one
+ * file download, parses the .xlsx, mirrors the rows into the local DB, and
+ * archives any voucher that dropped out of the export. Runs in the BACKGROUND
+ * (after the HTTP response is sent) so a slow report generation or many villages
+ * can't time the request out; progress + final status land in voucher_sync_log
+ * (id = syncId), which the UI polls.
+ *
+ * The Excel export has NO uuid, so each voucher is resolved to a STABLE uuid:
+ * reuse the existing DB row's uuid (matched by voucher_code within the site OR
+ * among legacy NULL-group rows, which are then adopted into the site), else
+ * synthesize a deterministic `xls-<groupId>-<voucherCode>`. That lets the proven
+ * uuid-keyed upsert + archive logic run unchanged.
+ *
+ * SAFETY: archiving is the destructive step (moves rows to historical + DELETE),
+ * so it is heavily guarded. A voucher with no code, an export where <90% of rows
+ * carry a code, or two rows resolving to the same uuid are treated as suspicious
+ * and never allowed to drive an archive — the failure mode we refuse to allow is
+ * a malformed/locale-shifted export wiping a whole site.
+ */
+async function runExcelSync(pool, ruijieService, syncId) {
+  let sites = [];
+  try {
+    const [rows] = await pool.query(
+      `SELECT name, ruijie_group_id AS group_id, ruijie_tenant_id AS tenant_id
+       FROM network_projects
+       WHERE is_active = 1 AND ruijie_group_id IS NOT NULL AND ruijie_group_id != ''
+       ORDER BY sort_order, name`
+    );
+    sites = rows;
+  } catch { /* table may not exist yet */ }
+  if (sites.length === 0) {
+    sites = [{ name: 'Default', group_id: process.env.RUIJIE_GROUP_ID, tenant_id: process.env.RUIJIE_TENANT_ID }];
+  }
+
+  let totalFetched = 0, processedCount = 0, newCount = 0, updatedCount = 0, archivedCount = 0;
+  let succeededSites = 0;
+  const siteResults = [];
+  let throttled = false;
+
+  for (let i = 0; i < sites.length; i++) {
+    const site = sites[i];
+    const gid = site.group_id;
+    if (!gid) continue;
+    try {
+      // 1. ONE export (pageSize=0 = every voucher) + one file download.
+      const { buffer } = await ruijieService.exportAndDownloadVoucherExcel({ groupId: gid });
+      // 2. Parse the .xlsx. Throws if the voucher-code column is missing (header
+      //    rename / locale shift) — caught below, so the site is skipped, NOT wiped.
+      const parsed = await parseVoucherExcelBuffer(buffer, {
+        tenantId: site.tenant_id,
+        tzOffsetMinutes: EXPORT_TZ_OFFSET_MIN,
+      });
+
+      // 3. Split rows by whether they carry a usable voucher_code. A blank code
+      //    can't be matched to a DB row (all blanks would collapse onto one uuid).
+      const total = parsed.length;
+      const withCode = parsed.filter((ev) => String(ev.voucherCode ?? '').trim() !== '');
+      const blankCodes = total - withCode.length;
+
+      // 4. A genuinely empty export → nothing to upsert, and archiving against an
+      //    empty set would wipe the site, so skip entirely (counts as success).
+      if (total === 0) {
+        siteResults.push({ site: site.name, groupId: gid, fetched: 0, processed: 0, new: 0, updated: 0, archived: 0 });
+        succeededSites++;
+        continue;
+      }
+
+      // 5. SUSPICIOUS-EXPORT GUARD. If >10% of rows lack a code, the export is
+      //    malformed (format/locale/sheet problem) — skip the whole site rather
+      //    than act on garbage. (A total header mismatch already threw in the
+      //    parser; this catches data-cell-level corruption.)
+      if (withCode.length === 0 || blankCodes > total * 0.10) {
+        const msg = `suspicious export: only ${withCode.length}/${total} rows had a voucher code (${blankCodes} blank) — site skipped`;
+        console.warn(`Excel sync: site "${site.name}" (${gid}) ${msg}`);
+        siteResults.push({ site: site.name, groupId: gid, fetched: total, error: msg });
+        continue;
+      }
+
+      // 6. Resolve a stable uuid per voucher. Reuse an existing DB row's uuid —
+      //    matched by voucher_code within this site OR among legacy NULL-group
+      //    rows (non-null group preferred) — else synthesize one. De-dupe by uuid
+      //    so two rows sharing a code can never silently overwrite each other.
+      const [existing] = await pool.query(
+        'SELECT voucher_code, uuid FROM vouchers WHERE (group_id <=> ?) OR group_id IS NULL ORDER BY (group_id IS NULL)',
+        [gid]
+      );
+      const codeToUuid = new Map();
+      for (const r of existing) {
+        const k = String(r.voucher_code).trim(); // trim to match the lookup key below
+        if (!codeToUuid.has(k)) codeToUuid.set(k, r.uuid); // non-null group rows first
+      }
+
+      const usedUuid = new Set();
+      const resolved = [];
+      let uuidCollisions = 0;
+      for (const ev of withCode) {
+        const code = String(ev.voucherCode).trim();
+        const uuid = (ev.uuid && String(ev.uuid).trim()) || codeToUuid.get(code) || `xls-${gid}-${code}`;
+        if (usedUuid.has(uuid)) { uuidCollisions++; continue; } // never overwrite a sibling
+        usedUuid.add(uuid);
+        resolved.push({ ...ev, uuid });
+      }
+
+      // 7. Archive rows that dropped out of the export — ONLY when EVERY row had a
+      //    code. A blank-code row is a still-present voucher we can't match to its
+      //    DB row, so if any exist we can't compute a safe "kept" set — skip the
+      //    archive this run (upserts below still apply) rather than risk deleting a
+      //    live voucher. When we do archive, cloudUuids is non-empty (guarded by
+      //    steps 4-5), so it can never hit the wipe-all branch.
+      let arch = 0;
+      if (blankCodes === 0) {
+        const cloudUuids = resolved.map((v) => v.uuid);
+        arch = await archiveVouchersNotInCloud(pool, cloudUuids, syncId, gid);
+      } else {
+        console.warn(`Excel sync: site "${site.name}" (${gid}) has ${blankCodes}/${total} blank-code rows — skipping archive this run (upserts still applied).`);
+      }
+
+      // 8. Upsert each voucher with its resolved uuid.
+      let proc = 0, nw = 0, upd = 0;
+      for (const ev of resolved) {
+        try {
+          const result = await upsertVoucher(pool, transformVoucherData(ev, gid));
+          proc++;
+          if (result.affectedRows === 1) nw++;
+          else if (result.affectedRows === 2) upd++;
+        } catch (error) { console.error('Error processing voucher:', error); }
+      }
+
+      totalFetched += total;
+      processedCount += proc; newCount += nw; updatedCount += upd; archivedCount += arch;
+      succeededSites++;
+      const r = { site: site.name, groupId: gid, fetched: total, processed: proc, new: nw, updated: upd, archived: arch };
+      if (blankCodes || uuidCollisions) r.skipped = { blankCodes, uuidCollisions, archiveSkipped: blankCodes > 0 };
+      siteResults.push(r);
+    } catch (e) {
+      console.error(`Excel sync failed for site "${site.name}" (${gid}):`, e.message);
+      siteResults.push({ site: site.name, groupId: gid, error: e.message });
+      if (_isThrottleError(e)) throttled = true; // stop hammering an exhausted quota
+    }
+
+    // Progress: update running counters after each site so a mid-sync poll moves.
+    try {
+      await updateSyncLog(pool, syncId, {
+        total_fetched: totalFetched, total_processed: processedCount,
+        total_new: newCount, total_updated: updatedCount, total_archived: archivedCount,
+      });
+    } catch { /* non-fatal progress update */ }
+
+    if (throttled) {
+      console.warn('Excel sync: Ruijie throttle detected — aborting remaining sites this run.');
+      for (const s of sites.slice(i + 1)) {
+        if (s.group_id) siteResults.push({ site: s.name, groupId: s.group_id, error: 'skipped — Ruijie throttled' });
+      }
+      break;
+    }
+  }
+
+  // Finalize honestly: 'failed' if nothing synced and there were errors; else
+  // 'completed', but surface any per-site errors in error_message so a partial
+  // (or all-throttled) run isn't reported as a clean success.
+  const errored = siteResults.filter((s) => s.error);
+  const status = succeededSites === 0 && errored.length > 0 ? 'failed' : 'completed';
+  const error_message = errored.length
+    ? errored.map((s) => `${s.site}: ${s.error}`).join(' | ').slice(0, 1000)
+    : null;
+
+  await updateSyncLog(pool, syncId, {
+    sync_completed_at: new Date(), total_fetched: totalFetched,
+    total_processed: processedCount, total_new: newCount, total_updated: updatedCount,
+    total_archived: archivedCount, status, error_message,
+  });
+  return { siteResults, totalFetched, processedCount, newCount, updatedCount, archivedCount, status };
 }
 
 // ── Factory ─────────────────────────────────────────────────────
@@ -782,68 +984,71 @@ export function makeVoucherController(pool) {
       } catch (e) { console.error(e); return send.serverErr(res, e.message); }
     },
 
-    // Syncs EVERY active site (one Ruijie groupId per village), tagging each
-    // voucher with its site's group_id and archiving per-site. Falls back to
-    // the env group as a single implicit site when no sites are configured.
+    // Excel-based sync of EVERY active site (one Ruijie groupId per village).
+    // The export + multi-village download can take a while, so we create the
+    // sync-log row, respond IMMEDIATELY with its id, and run the work in the
+    // background (runExcelSync). The UI polls voucher_sync_log for progress and
+    // the final completed/failed status + counters.
     syncVouchers: async (req, res) => {
-      const syncId = await createSyncLog(pool, req.user.id);
+      // Overlap guard: only ONE sync may run at a time — a second concurrent run
+      // would double the Ruijie export volume this migration exists to cut. We use
+      // a MySQL advisory lock (GET_LOCK) rather than a SELECT-then-INSERT check so
+      // there is NO check-then-act race: the lock is an atomic mutex. It is held
+      // on a dedicated connection for the whole background run and released when it
+      // finishes; if the process crashes, MySQL frees it automatically on session
+      // end (no permanent deadlock).
+      let lockConn = null;
       try {
-        let sites = [];
-        try {
-          const [rows] = await pool.query(
-            `SELECT name, ruijie_group_id AS group_id, ruijie_tenant_id AS tenant_id
-             FROM network_projects
-             WHERE is_active = 1 AND ruijie_group_id IS NOT NULL AND ruijie_group_id != ''
-             ORDER BY sort_order, name`
-          );
-          sites = rows;
-        } catch { /* table may not exist yet */ }
-        if (sites.length === 0) {
-          sites = [{ name: 'Default', group_id: process.env.RUIJIE_GROUP_ID, tenant_id: process.env.RUIJIE_TENANT_ID }];
-        }
-
-        let totalFetched = 0, processedCount = 0, newCount = 0, updatedCount = 0, archivedCount = 0;
-        const siteResults = [];
-
-        for (const site of sites) {
-          const gid = site.group_id;
-          if (!gid) continue;
+        lockConn = await pool.getConnection();
+        const [rows] = await lockConn.query("SELECT GET_LOCK('uso_voucher_sync', 0) AS got");
+        if (Number(rows?.[0]?.got) !== 1) {
+          lockConn.release();
+          lockConn = null;
+          let running = [];
           try {
-            const externalVouchers = await ruijieService.getAllVouchers({ groupId: gid, tenantId: site.tenant_id });
-            const cloudUuids = externalVouchers.map(v => v.uuid);
-            const arch = await archiveVouchersNotInCloud(pool, cloudUuids, syncId, gid);
-
-            let proc = 0, nw = 0, upd = 0;
-            for (const ev of externalVouchers) {
-              try {
-                const result = await upsertVoucher(pool, transformVoucherData(ev, gid));
-                proc++;
-                if (result.affectedRows === 1) nw++;
-                else if (result.affectedRows === 2) upd++;
-              } catch (error) { console.error('Error processing voucher:', error); }
-            }
-
-            totalFetched += externalVouchers.length;
-            processedCount += proc; newCount += nw; updatedCount += upd; archivedCount += arch;
-            siteResults.push({ site: site.name, groupId: gid, fetched: externalVouchers.length, processed: proc, new: nw, updated: upd, archived: arch });
-          } catch (e) {
-            console.error(`Sync failed for site "${site.name}" (${gid}):`, e.message);
-            siteResults.push({ site: site.name, groupId: gid, error: e.message });
-          }
+            [running] = await pool.query(
+              `SELECT id FROM voucher_sync_log WHERE status = 'running' ORDER BY id DESC LIMIT 1`
+            );
+          } catch { /* best-effort */ }
+          return res.json({ success: true, syncId: running[0]?.id ?? null, status: 'running', message: 'A sync is already in progress' });
         }
-
-        await updateSyncLog(pool, syncId, {
-          sync_completed_at: new Date(), total_fetched: totalFetched,
-          total_processed: processedCount, total_new: newCount, total_updated: updatedCount,
-          total_archived: archivedCount, status: 'completed',
-        });
-
-        return send.ok(res, { success: true, sites: siteResults, totalFetched, totalProcessed: processedCount, newVouchers: newCount, updatedVouchers: updatedCount, archivedVouchers: archivedCount, syncId });
-      } catch (error) {
-        console.error('Sync failed:', error);
-        await updateSyncLog(pool, syncId, { sync_completed_at: new Date(), status: 'failed', error_message: error.message });
-        return send.serverErr(res, `Sync failed: ${error.message}`);
+      } catch (e) {
+        // Lock infra unavailable — fall through WITHOUT a lock rather than block
+        // operators (the frontend still disables its own button during a sync).
+        if (lockConn) { try { lockConn.release(); } catch { /* ignore */ } }
+        lockConn = null;
+        console.error('Sync lock acquire failed (continuing without lock):', e.message);
       }
+
+      const releaseLock = async () => {
+        if (!lockConn) return;
+        try { await lockConn.query("SELECT RELEASE_LOCK('uso_voucher_sync')"); } catch { /* ignore */ }
+        try { lockConn.release(); } catch { /* ignore */ }
+        lockConn = null;
+      };
+
+      let syncId;
+      try {
+        syncId = await createSyncLog(pool, req.user.id);
+      } catch (e) {
+        console.error('Failed to create sync log:', e);
+        await releaseLock();
+        return send.serverErr(res, 'Could not start sync');
+      }
+
+      // Kick off in the background; the row is already 'running' (schema default).
+      res.json({ success: true, syncId, status: 'running', message: 'Sync started' });
+
+      runExcelSync(pool, ruijieService, syncId)
+        .catch(async (error) => {
+          console.error('Excel sync crashed:', error);
+          try {
+            await updateSyncLog(pool, syncId, {
+              sync_completed_at: new Date(), status: 'failed', error_message: error.message,
+            });
+          } catch (e2) { console.error('Failed to mark sync failed:', e2); }
+        })
+        .finally(releaseLock);
     },
 
     restoreVoucher: async (req, res) => {

@@ -59,6 +59,23 @@ export const voucherApi = {
   sync: () => api("/vouchers/sync", { method: "POST" }),
   testConnection: () => api("/vouchers/test-connection"),
   syncLogs: () => api("/vouchers/sync-logs"),
+  // The sync now runs in the background; poll the sync log until this run's row
+  // reports a terminal status. Resolves with the completed log row, or null on
+  // timeout (the sync may still be finishing). Only hits the local sync-log
+  // endpoint — no Ruijie calls.
+  waitForSync: async (syncId, { intervalMs = 3000, timeoutMs = 420000 } = {}) => {
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      await new Promise((r) => setTimeout(r, intervalMs));
+      let logs = [];
+      try {
+        ({ logs = [] } = await api("/vouchers/sync-logs"));
+      } catch { /* transient — keep polling */ continue; }
+      const log = logs.find((l) => l.id === syncId);
+      if (log && (log.status === "completed" || log.status === "failed")) return log;
+    }
+    return null;
+  },
   activity: (params = {}) => {
     const qs = new URLSearchParams(params).toString();
     return api(`/vouchers/activity${qs ? `?${qs}` : ""}`);
