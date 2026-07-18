@@ -317,8 +317,11 @@ export function makePortalApiController(pool) {
       } catch (e) { console.error(e); return send.serverErr(res); }
     },
 
-    // GET /api/portal/voucher-status/:voucherCode - public usage data for status page
-    // Fetches LIVE data from Ruijie Cloud API, falls back to local DB if Cloud is unavailable
+    // GET /api/portal/voucher-status/:voucherCode - public usage data for status page.
+    // LOCAL MIRROR ONLY: reads the local `vouchers` table (refreshed by the manual
+    // sync). No Ruijie Cloud call — the per-request live lookup was a code:44 driver
+    // and Ruijie's list API returns 0 for used data anyway. So usage/status is as
+    // fresh as the last sync; a 20s in-memory cache sits in front of the DB read.
     getVoucherStatus: async (req, res) => {
       const { voucherCode } = req.params;
 
