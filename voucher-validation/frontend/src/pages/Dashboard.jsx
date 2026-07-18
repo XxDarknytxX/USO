@@ -44,7 +44,7 @@ import PlanBreakdown from "../components/PlanBreakdown";
 import { scopePackages } from "../utils/scopePackages";
 import { api, voucherApi } from "../services/api";
 import { useSite } from "../hooks/useSite";
-import { Modal, Badge, EmptyState } from "../components/ui";
+import { Modal, Badge, EmptyState, Button } from "../components/ui";
 
 // Categorize package by time_period (minutes)
 function classifyPackage(timePeriodMinutes) {
@@ -86,16 +86,21 @@ export default function Dashboard() {
   const [selectedPackage, setSelectedPackage] = useState(null);
   const [drillDownData, setDrillDownData] = useState(null);
 
+  // Load from our local DB mirror only — NO automatic Ruijie Cloud sync on
+  // login/mount. Opening the dashboard must never hit Ruijie (that was feeding
+  // the account-wide code:44 throttle). Fresh data is pulled only when the
+  // operator explicitly clicks "Sync now" below (or on the dedicated Sync page).
   useEffect(() => {
-    autoSyncAndLoad();
+    loadDashboardData();
   }, []);
 
-  async function autoSyncAndLoad() {
+  async function syncNow() {
     setSyncing(true);
     try {
       await voucherApi.sync();
+      toast.success("Sync complete");
     } catch (err) {
-      toast.error("Auto-sync failed — showing cached data");
+      toast.error("Sync failed: " + (err?.message || "unknown error"));
     } finally {
       setSyncing(false);
     }
@@ -336,9 +341,7 @@ export default function Dashboard() {
               borderTopColor: "var(--brand)",
             }}
           />
-          <p className="text-[13px] font-medium">
-            {syncing ? "Syncing with Ruijie Cloud…" : "Loading analytics…"}
-          </p>
+          <p className="text-[13px] font-medium">Loading analytics…</p>
         </div>
       </div>
     );
@@ -364,16 +367,21 @@ export default function Dashboard() {
         </div>
 
         <div className="flex items-center gap-3">
-          {syncing && (
-            <Badge tone="brand" icon={<RefreshCw size={11} className="animate-spin" />}>
-              Syncing
-            </Badge>
-          )}
           {lastSync && (
             <span className="text-[12px] text-[var(--text-tertiary)]">
               Last sync · {new Date(lastSync.sync_started_at).toLocaleString()}
             </span>
           )}
+          <Button
+            variant="secondary"
+            size="sm"
+            onClick={syncNow}
+            loading={syncing}
+            iconLeft={<RefreshCw size={14} />}
+            title="Pull fresh voucher data from Ruijie Cloud (the only action here that calls Ruijie)"
+          >
+            {syncing ? "Syncing…" : "Sync now"}
+          </Button>
         </div>
       </div>
 
