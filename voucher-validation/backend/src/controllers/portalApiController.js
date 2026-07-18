@@ -129,7 +129,7 @@ export function makePortalApiController(pool) {
 
         // Check plan config exists and is active
         const [configRows] = await conn.query(
-          'SELECT id, group_id FROM portal_plan_configs WHERE id = ? AND is_active = 1',
+          'SELECT id, group_id, user_group_name FROM portal_plan_configs WHERE id = ? AND is_active = 1',
           [planConfigId]
         );
         if (configRows.length === 0) {
@@ -158,29 +158,34 @@ export function makePortalApiController(pool) {
           });
         }
 
-        // Find an available voucher (FOR UPDATE to prevent races). Scope to the
-        // plan's site (group_id) too, so a site's purchase can only claim THAT
-        // site's vouchers — even if two sites happen to share a user_group_id.
-        // Ruijie keeps projects isolated (a voucher only auths a device whose
-        // session is in the same project), so a cross-site voucher wouldn't work.
+        // Find an available voucher (FOR UPDATE to prevent races). Match to the
+        // plan's user group by user_group_id when the voucher carries one (legacy
+        // API-synced), OR by (site group_id + group NAME) for Excel-synced
+        // vouchers, which have NO user_group_id (the Excel export only carries the
+        // group name). A user_group_id is itself site-unique, so the id branch is
+        // already site-scoped; the name branch is scoped by group_id. Ruijie keeps
+        // projects isolated (a voucher only auths a device whose session is in the
+        // same project), so a cross-site voucher wouldn't work anyway.
         const planGroupId = configRows[0].group_id || null;
-        const groupClause = planGroupId ? 'AND v.group_id = ? COLLATE utf8mb4_0900_ai_ci' : '';
-        const voucherParams = planGroupId ? [userGroupId, planGroupId] : [userGroupId];
+        const planUserGroupName = configRows[0].user_group_name || '';
         const [vouchers] = await conn.query(
           `SELECT v.id, v.uuid, v.voucher_code
            FROM vouchers v
-           WHERE v.user_group_id = ? COLLATE utf8mb4_0900_ai_ci
-             ${groupClause}
-             AND v.status = '1'
+           WHERE v.status = '1'
              AND v.disable_status = 0
              AND v.id NOT IN (
                SELECT vc.voucher_id FROM voucher_claims vc
-               WHERE vc.status IN ('claimed', 'used', 'manually_assigned')
+               WHERE vc.status IN ('claimed', 'used', 'manually_assigned') AND vc.voucher_id IS NOT NULL
+             )
+             AND (
+               (v.user_group_id <> '' AND v.user_group_id = ? COLLATE utf8mb4_0900_ai_ci)
+               OR (? IS NOT NULL AND v.group_id = ? COLLATE utf8mb4_0900_ai_ci
+                   AND v.user_group_name = ? COLLATE utf8mb4_0900_ai_ci)
              )
            ORDER BY v.create_time ASC
            LIMIT 1
            FOR UPDATE`,
-          voucherParams
+          [userGroupId, planGroupId, planGroupId, planUserGroupName]
         );
 
         if (vouchers.length === 0) {
