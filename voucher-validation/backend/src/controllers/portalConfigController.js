@@ -68,10 +68,24 @@ export function makePortalConfigController(pool) {
         const [plans] = await pool.query(
           `SELECT p.*,
             (SELECT COUNT(*) FROM vouchers v
-             WHERE v.user_group_id COLLATE utf8mb4_0900_ai_ci = p.user_group_id COLLATE utf8mb4_0900_ai_ci
-               AND v.status = '1'
+             WHERE v.status = '1'
                AND v.disable_status = 0
-               AND v.id NOT IN (SELECT vc.voucher_id FROM voucher_claims vc WHERE vc.status IN ('claimed','used','manually_assigned'))
+               AND v.id NOT IN (
+                 SELECT vc.voucher_id FROM voucher_claims vc
+                 WHERE vc.status IN ('claimed','used','manually_assigned') AND vc.voucher_id IS NOT NULL
+               )
+               -- Match a voucher to this plan's user group by the Ruijie
+               -- user_group_id when the voucher carries one (legacy API-synced),
+               -- OR by (village group_id + group NAME) for Excel-synced vouchers,
+               -- which have no user_group_id. The group_id keeps the count scoped
+               -- to THIS village so same-named profiles in other villages don't
+               -- inflate it.
+               AND (
+                 (v.user_group_id <> '' AND v.user_group_id COLLATE utf8mb4_0900_ai_ci = p.user_group_id COLLATE utf8mb4_0900_ai_ci)
+                 OR (p.group_id IS NOT NULL
+                     AND v.group_id COLLATE utf8mb4_0900_ai_ci = p.group_id COLLATE utf8mb4_0900_ai_ci
+                     AND v.user_group_name COLLATE utf8mb4_0900_ai_ci = p.user_group_name COLLATE utf8mb4_0900_ai_ci)
+               )
             ) AS available_vouchers
            FROM portal_plan_configs p
            ${whereClause}
@@ -104,10 +118,24 @@ export function makePortalConfigController(pool) {
         const [rows] = await pool.query(
           `SELECT p.*,
             (SELECT COUNT(*) FROM vouchers v
-             WHERE v.user_group_id COLLATE utf8mb4_0900_ai_ci = p.user_group_id COLLATE utf8mb4_0900_ai_ci
-               AND v.status = '1'
+             WHERE v.status = '1'
                AND v.disable_status = 0
-               AND v.id NOT IN (SELECT vc.voucher_id FROM voucher_claims vc WHERE vc.status IN ('claimed','used','manually_assigned'))
+               AND v.id NOT IN (
+                 SELECT vc.voucher_id FROM voucher_claims vc
+                 WHERE vc.status IN ('claimed','used','manually_assigned') AND vc.voucher_id IS NOT NULL
+               )
+               -- Match a voucher to this plan's user group by the Ruijie
+               -- user_group_id when the voucher carries one (legacy API-synced),
+               -- OR by (village group_id + group NAME) for Excel-synced vouchers,
+               -- which have no user_group_id. The group_id keeps the count scoped
+               -- to THIS village so same-named profiles in other villages don't
+               -- inflate it.
+               AND (
+                 (v.user_group_id <> '' AND v.user_group_id COLLATE utf8mb4_0900_ai_ci = p.user_group_id COLLATE utf8mb4_0900_ai_ci)
+                 OR (p.group_id IS NOT NULL
+                     AND v.group_id COLLATE utf8mb4_0900_ai_ci = p.group_id COLLATE utf8mb4_0900_ai_ci
+                     AND v.user_group_name COLLATE utf8mb4_0900_ai_ci = p.user_group_name COLLATE utf8mb4_0900_ai_ci)
+               )
             ) AS available_vouchers
            FROM portal_plan_configs p WHERE p.id = ?`,
           [req.params.id]
