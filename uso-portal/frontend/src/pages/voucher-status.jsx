@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback, useRef } from 'react';
-import { useParams, Link } from 'react-router-dom';
+import { useParams } from 'react-router-dom';
 import { QRCodeSVG } from 'qrcode.react';
 import {
   FaWifi,
@@ -161,16 +161,13 @@ export default function VoucherStatus() {
     return () => clearInterval(t);
   }, []);
 
-  // Backstop: if the voucher isn't usable (expired / deactivated / out of data),
-  // send the customer to the purchase portal instead of leaving them on the
-  // status page. Only auto-bounce when on the captive WiFi (a session exists);
-  // an off-network status check keeps the expired view + "Buy More Data" button.
-  useEffect(() => {
-    if (data && data.isActive === false && sessionStorage.getItem('wifiSessionId')) {
-      const t = setTimeout(() => { window.location.replace('/'); }, 1800);
-      return () => clearTimeout(t);
-    }
-  }, [data]);
+  // NOTE: we deliberately do NOT auto-redirect an expired device to "/". A new
+  // plan can only be purchased with a FRESH Ruijie sessionId, which is issued by
+  // the gateway's captive-portal redirect (customHtmlnew → portal?sessionId=…) —
+  // not something the portal can mint, and the previous session is dead once the
+  // plan lapses. Bouncing to "/" just lands on a portal that can't complete a
+  // purchase, so instead we keep the customer on the status page and tell them to
+  // reconnect to the Wi-Fi (which re-triggers the captive cycle).
 
   const statusUrl = `${window.location.origin}/status/${voucherCode}`;
 
@@ -224,7 +221,14 @@ export default function VoucherStatus() {
   const timePercent = data.timePeriod > 0 ? (usedMin / data.timePeriod) * 100 : 0;
   const dataColor = dataPercent > 85 ? '#ef4444' : dataPercent > 60 ? '#f59e0b' : '#10b981';
   const timeColor = timePercent > 85 ? '#ef4444' : timePercent > 60 ? '#f59e0b' : '#3b82f6';
-  const isActive = data.isActive;
+
+  // Effective state, kept consistent with the live countdown. TIME expiry comes
+  // from the activation-based timer (not the synced status/used_time, which lags
+  // and was showing "Expired" while time + data clearly remained); data-exhaustion
+  // and admin-disable still come from the mirror.
+  const dataExhausted = data.quota > 0 && ((data.remainingQuota ?? 0) <= 0);
+  const timeUp = hasLiveExpiry ? remainingMin <= 0 : !!data.isExpired;
+  const isActive = !data.disabled && !dataExhausted && !timeUp;
 
   return (
     <div className="min-h-screen min-h-[100dvh] font-sans flex flex-col">
@@ -376,25 +380,25 @@ export default function VoucherStatus() {
               <h2 className="text-lg sm:text-xl font-bold text-ink mb-2">
                 {data.disabled
                   ? 'Plan Deactivated'
-                  : data.isExpired
+                  : timeUp
                     ? 'Your Plan Has Expired'
                     : 'Plan Used Up'}
               </h2>
               <p className="text-sm text-ink-3 mb-5 max-w-md mx-auto">
                 {data.disabled
-                  ? 'This plan has been deactivated. Purchase a new plan to get back online.'
-                  : data.isExpired
-                    ? 'Your data plan has run out. Purchase a new plan to get back online.'
-                    : 'You’ve used all your data or time. Purchase a new plan to reconnect.'}
+                  ? 'This plan has been deactivated. Reconnect to the Wi-Fi to purchase a new plan.'
+                  : timeUp
+                    ? 'Your plan time has run out. Reconnect to the Wi-Fi to purchase a new plan.'
+                    : 'You’ve used all your data. Reconnect to the Wi-Fi to purchase a new plan.'}
               </p>
-              <Link
-                to="/"
-                className="inline-flex items-center gap-2 px-6 py-3 rounded-xl text-sm font-semibold
-                           bg-vf text-white hover:bg-vf/90 transition-all shadow-lg shadow-vf/20"
-              >
-                <FaWifi className="text-xs" />
-                Buy More Data
-              </Link>
+              <div className="inline-flex items-start gap-3 text-left max-w-md mx-auto px-5 py-4 rounded-xl bg-white/[0.03] border border-edge">
+                <FaWifi className="text-vf mt-1 shrink-0" />
+                <div className="text-sm text-ink-3 leading-relaxed">
+                  <span className="font-semibold text-ink">Reconnect to the Wi-Fi</span> to buy a new plan.
+                  Your device will re-open the sign-in page automatically, where you can purchase and get
+                  back online. A new plan can’t be started from this page — it needs a fresh Wi-Fi sign-in.
+                </div>
+              </div>
             </div>
           </div>
         )}
@@ -446,8 +450,8 @@ export default function VoucherStatus() {
               <div className="mt-auto">
                 <div className="text-[10px] text-ink-5 uppercase tracking-wider mb-0.5">Activated</div>
                 <div className="text-sm font-medium text-ink">
-                  {data.loginTime
-                    ? new Date(Number(data.loginTime)).toLocaleDateString(undefined, {
+                  {(data.activatedAt || data.loginTime)
+                    ? new Date(Number(data.activatedAt || data.loginTime)).toLocaleDateString(undefined, {
                         year: 'numeric', month: 'short', day: 'numeric',
                         hour: '2-digit', minute: '2-digit',
                       })
