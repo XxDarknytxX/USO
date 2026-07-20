@@ -15,45 +15,44 @@ const getVoucherStatus = async (req, res) => {
   try {
     const data = await vvClient.fetchVoucherStatus(code);
 
-    // Live expiry, computed locally so "time remaining" counts down in real time
-    // and does NOT depend on a voucher sync. Ruijie time passes are wall-clock from
-    // first login, so: expiry = (first time we authenticated this voucher) + the
-    // plan's time period. We record that activation as transactions.auth_completed_at
-    // when the customer connects. Falls back to Ruijie's synced login/expiry when we
-    // have no local auth record (e.g. an admin-issued voucher), and stays null for
-    // unlimited-time plans (timePeriod = 0).
-    let activatedAt = null;
-    let expiresAt = null;
-    try {
-      const { pool } = require('../config/db');
-      // UNIX_TIMESTAMP on the TIMESTAMP column returns the true UTC epoch (seconds)
-      // regardless of the DB/connection timezone — avoids the mysql2 Date-parsing
-      // timezone ambiguity (the pool is configured '+00:00').
-      const [rows] = await pool.execute(
-        `SELECT UNIX_TIMESTAMP(MIN(auth_completed_at)) AS activated_s
-         FROM transactions
-         WHERE voucher_code = ? AND auth_success = 1 AND auth_completed_at IS NOT NULL`,
-        [code]
-      );
-      const s = rows[0] && rows[0].activated_s;
-      if (s) activatedAt = Number(s) * 1000;
-    } catch (e) {
-      log('Activation lookup failed:', e.message);
-    }
-
-    // Fallback to Ruijie's synced first-login (ms) if we have no local auth record.
-    if (!activatedAt && data.loginTime) {
-      const lt = Number(data.loginTime);
-      if (lt > 0) activatedAt = lt < 1e12 ? lt * 1000 : lt;
-    }
-
+    // "Time remaining" countdown. Ruijie's own timer runs wall-clock from first
+    // login, and its synced expiry_time is AUTHORITATIVE (it's what the admin portal
+    // uses to expire the voucher). So we count down to that. Priority:
+    //   1. Ruijie expiry_time (authoritative — matches the main portal)
+    //   2. Ruijie first-login (login_time) + plan period
+    //   3. our own auth record (transactions.auth_completed_at) + period — ONLY when
+    //      the voucher hasn't been synced yet (no login_time/expiry_time).
+    // NOTE: auth_completed_at was previously used first, but it can differ from
+    // Ruijie's real activation (re-auths / clock differences), which made the timer
+    // read time-left on an already-expired voucher. It's now the last resort.
+    // Null for unlimited-time plans (periodMin 0) with no expiry_time.
     const periodMin = Number(data.timePeriod) || 0;
-    if (activatedAt && periodMin > 0) {
+    const toMs = (v) => { const n = Number(v); return n > 0 ? (n < 1e12 ? n * 1000 : n) : null; };
+
+    // Activation basis (also drives the "Activated" label) = Ruijie's first login.
+    let activatedAt = toMs(data.loginTime);
+    if (!activatedAt) {
+      try {
+        const { pool } = require('../config/db');
+        // UNIX_TIMESTAMP on the TIMESTAMP column returns the true UTC epoch regardless
+        // of the DB/connection timezone (pool is '+00:00').
+        const [rows] = await pool.execute(
+          `SELECT UNIX_TIMESTAMP(MIN(auth_completed_at)) AS activated_s
+           FROM transactions
+           WHERE voucher_code = ? AND auth_success = 1 AND auth_completed_at IS NOT NULL`,
+          [code]
+        );
+        const s = rows[0] && rows[0].activated_s;
+        if (s) activatedAt = Number(s) * 1000;
+      } catch (e) {
+        log('Activation lookup failed:', e.message);
+      }
+    }
+
+    // Expiry: authoritative expiry_time first, else activation + period.
+    let expiresAt = toMs(data.expiryTime);
+    if (!expiresAt && activatedAt && periodMin > 0) {
       expiresAt = activatedAt + periodMin * 60 * 1000;
-    } else if (data.expiryTime) {
-      // No activation/period to compute from → use Ruijie's synced expiry if present.
-      const et = Number(data.expiryTime);
-      if (et > 0) expiresAt = et < 1e12 ? et * 1000 : et;
     }
 
     return res.json({ ok: true, ...data, activatedAt, expiresAt });
