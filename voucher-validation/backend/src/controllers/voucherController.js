@@ -271,18 +271,32 @@ async function updateSyncLog(pool, syncId, updates) {
   await pool.query(`UPDATE voucher_sync_log SET ${fields} WHERE id = ?`, [...values, syncId]);
 }
 
-async function getRecentSyncLogs(pool, limit = 10) {
-  // LEFT JOIN (not INNER) so scheduled/automatic syncs — inserted with
-  // user_id = NULL by the background scheduler — still appear in the history.
-  // An INNER JOIN silently drops every auto-sync row (incl. failures). NULL
-  // user_email is labelled "System" so the UI shows who ran it.
+// Paginated, filterable sync history.
+//  - LEFT JOIN (not INNER) so scheduled/automatic syncs — inserted with
+//    user_id = NULL by the background scheduler — still appear (an INNER JOIN
+//    silently drops every auto-sync row, including failures).
+//  - sync_type is DERIVED from user_id (NULL = scheduler = 'auto'; a real user =
+//    'manual'), so no schema migration is needed and it classifies existing rows
+//    retroactively. The same predicate drives the type filter.
+//  - user_email is labelled "System" for automatic runs.
+async function getSyncLogsPage(pool, { limit = 20, offset = 0, type = 'all' } = {}) {
+  const where =
+    type === 'manual' ? 'WHERE vsl.user_id IS NOT NULL' :
+    type === 'auto'   ? 'WHERE vsl.user_id IS NULL' : '';
   const [rows] = await pool.query(
-    `SELECT vsl.*, COALESCE(u.email, 'System') AS user_email
+    `SELECT vsl.*,
+            COALESCE(u.email, 'System') AS user_email,
+            CASE WHEN vsl.user_id IS NULL THEN 'auto' ELSE 'manual' END AS sync_type
      FROM voucher_sync_log vsl LEFT JOIN users u ON vsl.user_id = u.id
-     ORDER BY vsl.sync_started_at DESC LIMIT ?`,
-    [limit]
+     ${where}
+     ORDER BY vsl.sync_started_at DESC
+     LIMIT ? OFFSET ?`,
+    [limit, offset]
   );
-  return rows;
+  const [countRows] = await pool.query(
+    `SELECT COUNT(*) AS total FROM voucher_sync_log vsl ${where}`
+  );
+  return { logs: rows, total: Number(countRows[0]?.total || 0) };
 }
 
 /**
@@ -1167,10 +1181,14 @@ export function makeVoucherController(pool) {
       }
     },
 
-    getSyncLogs: async (_req, res) => {
+    getSyncLogs: async (req, res) => {
       try {
-        const logs = await getRecentSyncLogs(pool, 20);
-        return send.ok(res, { logs });
+        const page = Math.max(1, parseInt(req.query.page, 10) || 1);
+        const limit = Math.min(100, Math.max(1, parseInt(req.query.limit, 10) || 20));
+        const offset = (page - 1) * limit;
+        const type = ['manual', 'auto'].includes(req.query.type) ? req.query.type : 'all';
+        const { logs, total } = await getSyncLogsPage(pool, { limit, offset, type });
+        return send.ok(res, { logs, total, page, limit });
       } catch (e) { console.error(e); return send.serverErr(res); }
     },
 

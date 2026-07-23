@@ -58,7 +58,11 @@ export const voucherApi = {
   restore: (uuid) => api(`/vouchers/restore/${uuid}`, { method: "POST" }),
   sync: () => api("/vouchers/sync", { method: "POST" }),
   testConnection: () => api("/vouchers/test-connection"),
-  syncLogs: () => api("/vouchers/sync-logs"),
+  // params: { page, limit, type: 'manual'|'auto' } — omit type for all.
+  syncLogs: (params = {}) => {
+    const qs = new URLSearchParams(params).toString();
+    return api(`/vouchers/sync-logs${qs ? `?${qs}` : ""}`);
+  },
   // The sync now runs in the background; poll the sync log until this run's row
   // reports a terminal status. Resolves with the completed log row, or null on
   // timeout (the sync may still be finishing). Only hits the local sync-log
