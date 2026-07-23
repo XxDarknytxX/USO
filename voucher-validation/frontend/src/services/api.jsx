@@ -87,6 +87,10 @@ export const settingsApi = {
   get: () => api("/settings"),
   update: (key, value, type = "string") =>
     api("/settings", { method: "PUT", body: { key, value, type } }),
+  syncStatus: () => api("/settings/sync-status"),
+  // Atomic schedule update — both keys committed together server-side, single reload.
+  updateSync: (enabled, intervalMinutes) =>
+    api("/settings/sync", { method: "PUT", body: { enabled, intervalMinutes } }),
 };
 
 // Portal Audit Log API helpers

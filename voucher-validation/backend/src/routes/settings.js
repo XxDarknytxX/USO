@@ -10,6 +10,19 @@ export function makeSettingsRouter(controller) {
   // GET /api/settings
   router.get("/", controller.getSettings);
 
+  // GET /api/settings/sync-status — automatic-sync scheduler state + last sync
+  router.get("/sync-status", controller.getSyncStatus);
+
+  // PUT /api/settings/sync — atomically set the sync schedule (enabled + interval)
+  router.put(
+    "/sync",
+    [
+      body("enabled").isBoolean().withMessage("enabled must be a boolean"),
+      body("intervalMinutes").isNumeric().withMessage("intervalMinutes must be a number"),
+    ],
+    controller.updateSyncSettings
+  );
+
   // PUT /api/settings
   router.put(
     "/",

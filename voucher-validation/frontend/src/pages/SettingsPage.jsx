@@ -2,18 +2,58 @@
 // System information + read-only app settings.
 
 import { useEffect, useState } from "react";
-import { Settings, Server, Eye, EyeOff, MapPin, Check, Globe2 } from "lucide-react";
+import { Settings, Server, Eye, EyeOff, MapPin, Check, Globe2, RefreshCw } from "lucide-react";
 import toast from "react-hot-toast";
 
 import { settingsApi } from "../services/api";
 import { useSite } from "../hooks/useSite";
-import { Button, Panel, Badge, PageHeader } from "../components/ui";
+import { Button, Panel, Badge, PageHeader, Toggle, Select, Field } from "../components/ui";
+
+// Sync-frequency presets. Floor is 5 min to protect the Ruijie account-wide rate
+// limit (the backend clamps to the same range regardless of what's sent).
+const INTERVAL_OPTIONS = [
+  { v: 5, label: "Every 5 minutes" },
+  { v: 10, label: "Every 10 minutes" },
+  { v: 15, label: "Every 15 minutes" },
+  { v: 30, label: "Every 30 minutes" },
+  { v: 60, label: "Every hour" },
+  { v: 120, label: "Every 2 hours" },
+  { v: 360, label: "Every 6 hours" },
+  { v: 720, label: "Every 12 hours" },
+  { v: 1440, label: "Once a day" },
+];
+
+function relTime(ts) {
+  if (!ts) return "—";
+  const d = new Date(ts).getTime();
+  if (!Number.isFinite(d)) return "—";
+  const s = Math.max(0, Math.floor((Date.now() - d) / 1000));
+  if (s < 60) return `${s}s ago`;
+  if (s < 3600) return `${Math.floor(s / 60)}m ago`;
+  if (s < 86400) return `${Math.floor(s / 3600)}h ago`;
+  return `${Math.floor(s / 86400)}d ago`;
+}
 
 export default function SettingsPage() {
   const [settings, setSettings] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showSecrets, setShowSecrets] = useState(false);
   const { sites, isSiteVisible, toggleVisibleSite, setVisibleSiteIds, allVisible, visibleSites } = useSite();
+
+  // Voucher-sync schedule
+  const [syncEnabled, setSyncEnabled] = useState(true);
+  const [syncInterval, setSyncInterval] = useState(10);
+  const [origSync, setOrigSync] = useState({ enabled: true, interval: 10 });
+  const [savingSync, setSavingSync] = useState(false);
+  const [syncStatus, setSyncStatus] = useState(null);
+
+  const syncDirty = syncEnabled !== origSync.enabled || syncInterval !== origSync.interval;
+
+  // If the stored interval isn't one of the presets (e.g. set directly in the DB),
+  // surface it as a selectable option so the dropdown reflects the real value.
+  const intervalChoices = INTERVAL_OPTIONS.some((o) => o.v === syncInterval)
+    ? INTERVAL_OPTIONS
+    : [{ v: syncInterval, label: `Every ${syncInterval} minutes` }, ...INTERVAL_OPTIONS];
 
   useEffect(() => {
     loadSettings();
@@ -23,11 +63,47 @@ export default function SettingsPage() {
     setLoading(true);
     try {
       const data = await settingsApi.get();
-      setSettings(data.settings || []);
+      const list = data.settings || [];
+      setSettings(list);
+      const byKey = Object.fromEntries(list.map((s) => [s.setting_key, s.setting_value]));
+      const enabled =
+        byKey.sync_enabled == null ? true : String(byKey.sync_enabled).toLowerCase() === "true";
+      const interval = Number(byKey.sync_interval_minutes) || 10;
+      setSyncEnabled(enabled);
+      setSyncInterval(interval);
+      setOrigSync({ enabled, interval });
     } catch {
       // Settings table may be empty — that's fine.
     } finally {
       setLoading(false);
+    }
+    loadSyncStatus();
+  }
+
+  async function loadSyncStatus() {
+    try {
+      setSyncStatus(await settingsApi.syncStatus());
+    } catch {
+      // non-critical
+    }
+  }
+
+  async function saveSyncSettings() {
+    setSavingSync(true);
+    try {
+      // Single atomic call — the backend commits both keys in one transaction and
+      // reloads the scheduler once, so there's no half-applied window.
+      await settingsApi.updateSync(syncEnabled, syncInterval);
+      setOrigSync({ enabled: syncEnabled, interval: syncInterval });
+      toast.success("Sync schedule updated");
+      loadSyncStatus();
+    } catch (e) {
+      toast.error(e?.message || "Failed to update sync schedule");
+      // Resync the UI baseline to whatever the server actually committed, so the
+      // form + Save button + status badge never show a stale/half-applied state.
+      loadSettings();
+    } finally {
+      setSavingSync(false);
     }
   }
 
@@ -96,6 +172,74 @@ export default function SettingsPage() {
               >
                 Operational
               </Badge>
+            </div>
+          </div>
+        </Panel>
+
+        {/* Voucher sync schedule */}
+        <Panel
+          title="Voucher sync"
+          subtitle="How often the portal pulls the latest vouchers from Ruijie (Excel export). Turn it off to pause all automatic syncing — you can still sync on demand from the Dashboard."
+          icon={<RefreshCw size={15} />}
+        >
+          <div className="space-y-5">
+            <Toggle
+              checked={syncEnabled}
+              onChange={setSyncEnabled}
+              label="Automatic sync"
+              hint={
+                syncEnabled
+                  ? "Vouchers refresh automatically on the schedule below."
+                  : "Automatic syncing is paused."
+              }
+            />
+
+            <Field
+              label="Sync frequency"
+              hint="Minimum 5 minutes to protect the Ruijie API rate limit. More villages = more calls per cycle."
+              className="max-w-xs"
+            >
+              <Select
+                value={syncInterval}
+                onChange={(e) => setSyncInterval(Number(e.target.value))}
+                disabled={!syncEnabled}
+              >
+                {intervalChoices.map((o) => (
+                  <option key={o.v} value={o.v}>
+                    {o.label}
+                  </option>
+                ))}
+              </Select>
+            </Field>
+
+            {syncStatus && (
+              <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[11.5px] text-[var(--text-tertiary)]">
+                <Badge tone={syncStatus.enabled ? "success" : "neutral"}>
+                  {syncStatus.enabled
+                    ? `Auto-sync on · every ${syncStatus.intervalMinutes} min`
+                    : "Auto-sync off"}
+                </Badge>
+                {syncStatus.lastSync && (
+                  <span>
+                    Last sync{" "}
+                    {relTime(
+                      syncStatus.lastSync.sync_completed_at || syncStatus.lastSync.sync_started_at
+                    )}{" "}
+                    · <span className="capitalize">{syncStatus.lastSync.status}</span>
+                  </span>
+                )}
+              </div>
+            )}
+
+            <div className="flex justify-end border-t border-[var(--border-default)] pt-4">
+              <Button
+                variant="primary"
+                onClick={saveSyncSettings}
+                loading={savingSync}
+                disabled={!syncDirty || savingSync}
+              >
+                Save changes
+              </Button>
             </div>
           </div>
         </Panel>

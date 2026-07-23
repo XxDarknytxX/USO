@@ -272,8 +272,14 @@ async function updateSyncLog(pool, syncId, updates) {
 }
 
 async function getRecentSyncLogs(pool, limit = 10) {
+  // LEFT JOIN (not INNER) so scheduled/automatic syncs — inserted with
+  // user_id = NULL by the background scheduler — still appear in the history.
+  // An INNER JOIN silently drops every auto-sync row (incl. failures). NULL
+  // user_email is labelled "System" so the UI shows who ran it.
   const [rows] = await pool.query(
-    `SELECT vsl.*, u.email AS user_email FROM voucher_sync_log vsl JOIN users u ON vsl.user_id = u.id ORDER BY vsl.sync_started_at DESC LIMIT ?`,
+    `SELECT vsl.*, COALESCE(u.email, 'System') AS user_email
+     FROM voucher_sync_log vsl LEFT JOIN users u ON vsl.user_id = u.id
+     ORDER BY vsl.sync_started_at DESC LIMIT ?`,
     [limit]
   );
   return rows;
@@ -579,6 +585,73 @@ async function runExcelSync(pool, ruijieService, syncId) {
 
 export function makeVoucherController(pool) {
   const ruijieService = new RuijieService();
+
+  // Scheduler ref, wired by server.js. Lets updateSetting re-arm the timer the
+  // moment a sync setting changes (no service restart needed).
+  let syncScheduler = null;
+
+  // Shared, single-flight sync starter used by BOTH the manual POST /sync and the
+  // background scheduler. Acquires the advisory lock, creates the sync-log row, and
+  // kicks runExcelSync off in the background. Returns a status object (never touches
+  // res) so either caller can adapt it. userId is null for scheduled (system) runs.
+  async function runGuardedSync(userId = null) {
+    let lockConn = null;
+    try {
+      lockConn = await pool.getConnection();
+      const [rows] = await lockConn.query("SELECT GET_LOCK('uso_voucher_sync', 0) AS got");
+      if (Number(rows?.[0]?.got) !== 1) {
+        lockConn.release();
+        lockConn = null;
+        let running = [];
+        try {
+          [running] = await pool.query(
+            `SELECT id FROM voucher_sync_log WHERE status = 'running' ORDER BY id DESC LIMIT 1`
+          );
+        } catch { /* best-effort */ }
+        return { status: 'already-running', syncId: running[0]?.id ?? null };
+      }
+    } catch (e) {
+      // Lock infra threw (conn failure / query timeout). FAIL CLOSED: skip this run
+      // rather than proceed unlocked — an unguarded run could double-fire the Ruijie
+      // Excel export against the account-wide code:44 quota (the outage this whole
+      // system exists to prevent). A skipped sync is retriable: the scheduler re-arms
+      // next interval; a manual caller sees an error and can retry.
+      if (lockConn) { try { lockConn.release(); } catch { /* ignore */ } }
+      lockConn = null;
+      console.error('Sync lock acquire failed (skipping run to protect Ruijie quota):', e.message);
+      return { status: 'error', error: `lock-unavailable: ${e.message}` };
+    }
+
+    const releaseLock = async () => {
+      if (!lockConn) return;
+      try { await lockConn.query("SELECT RELEASE_LOCK('uso_voucher_sync')"); } catch { /* ignore */ }
+      try { lockConn.release(); } catch { /* ignore */ }
+      lockConn = null;
+    };
+
+    let syncId;
+    try {
+      syncId = await createSyncLog(pool, userId);
+    } catch (e) {
+      console.error('Failed to create sync log:', e);
+      await releaseLock();
+      return { status: 'error', error: e.message };
+    }
+
+    // Kick off in the background; the row is already 'running' (schema default).
+    runExcelSync(pool, ruijieService, syncId)
+      .catch(async (error) => {
+        console.error('Excel sync crashed:', error);
+        try {
+          await updateSyncLog(pool, syncId, {
+            sync_completed_at: new Date(), status: 'failed', error_message: error.message,
+          });
+        } catch (e2) { console.error('Failed to mark sync failed:', e2); }
+      })
+      .finally(releaseLock);
+
+    return { status: 'started', syncId };
+  }
 
   return {
     getStats: async (req, res) => {
@@ -1034,70 +1107,19 @@ export function makeVoucherController(pool) {
     },
 
     // Excel-based sync of EVERY active site (one Ruijie groupId per village).
-    // The export + multi-village download can take a while, so we create the
-    // sync-log row, respond IMMEDIATELY with its id, and run the work in the
-    // background (runExcelSync). The UI polls voucher_sync_log for progress and
-    // the final completed/failed status + counters.
+    // Delegates to the shared single-flight runGuardedSync (same advisory lock the
+    // background scheduler uses, so a manual sync and a scheduled tick can never
+    // double-run), responds IMMEDIATELY with the sync-log id, and the work runs in
+    // the background. The UI polls voucher_sync_log for progress + final status.
     syncVouchers: async (req, res) => {
-      // Overlap guard: only ONE sync may run at a time — a second concurrent run
-      // would double the Ruijie export volume this migration exists to cut. We use
-      // a MySQL advisory lock (GET_LOCK) rather than a SELECT-then-INSERT check so
-      // there is NO check-then-act race: the lock is an atomic mutex. It is held
-      // on a dedicated connection for the whole background run and released when it
-      // finishes; if the process crashes, MySQL frees it automatically on session
-      // end (no permanent deadlock).
-      let lockConn = null;
-      try {
-        lockConn = await pool.getConnection();
-        const [rows] = await lockConn.query("SELECT GET_LOCK('uso_voucher_sync', 0) AS got");
-        if (Number(rows?.[0]?.got) !== 1) {
-          lockConn.release();
-          lockConn = null;
-          let running = [];
-          try {
-            [running] = await pool.query(
-              `SELECT id FROM voucher_sync_log WHERE status = 'running' ORDER BY id DESC LIMIT 1`
-            );
-          } catch { /* best-effort */ }
-          return res.json({ success: true, syncId: running[0]?.id ?? null, status: 'running', message: 'A sync is already in progress' });
-        }
-      } catch (e) {
-        // Lock infra unavailable — fall through WITHOUT a lock rather than block
-        // operators (the frontend still disables its own button during a sync).
-        if (lockConn) { try { lockConn.release(); } catch { /* ignore */ } }
-        lockConn = null;
-        console.error('Sync lock acquire failed (continuing without lock):', e.message);
+      const r = await runGuardedSync(req.user?.id ?? null);
+      if (r.status === 'already-running') {
+        return res.json({ success: true, syncId: r.syncId, status: 'running', message: 'A sync is already in progress' });
       }
-
-      const releaseLock = async () => {
-        if (!lockConn) return;
-        try { await lockConn.query("SELECT RELEASE_LOCK('uso_voucher_sync')"); } catch { /* ignore */ }
-        try { lockConn.release(); } catch { /* ignore */ }
-        lockConn = null;
-      };
-
-      let syncId;
-      try {
-        syncId = await createSyncLog(pool, req.user.id);
-      } catch (e) {
-        console.error('Failed to create sync log:', e);
-        await releaseLock();
+      if (r.status === 'error') {
         return send.serverErr(res, 'Could not start sync');
       }
-
-      // Kick off in the background; the row is already 'running' (schema default).
-      res.json({ success: true, syncId, status: 'running', message: 'Sync started' });
-
-      runExcelSync(pool, ruijieService, syncId)
-        .catch(async (error) => {
-          console.error('Excel sync crashed:', error);
-          try {
-            await updateSyncLog(pool, syncId, {
-              sync_completed_at: new Date(), status: 'failed', error_message: error.message,
-            });
-          } catch (e2) { console.error('Failed to mark sync failed:', e2); }
-        })
-        .finally(releaseLock);
+      return res.json({ success: true, syncId: r.syncId, status: 'running', message: 'Sync started' });
     },
 
     restoreVoucher: async (req, res) => {
@@ -1161,15 +1183,83 @@ export function makeVoucherController(pool) {
 
     updateSetting: async (req, res) => {
       try {
-        const { key } = req.params;
-        const { value } = req.body;
+        // key/value/type arrive in the BODY (matches the PUT /api/settings route +
+        // frontend settingsApi.update). setting_type is persisted so the value can
+        // be parsed back correctly. Values are stored as strings.
+        const { key, value, type } = req.body;
+        if (!key) return send.bad(res, 'Setting key is required');
+        const settingType = ['string', 'number', 'boolean', 'json'].includes(type) ? type : 'string';
+        const strValue = value === null || value === undefined ? null : String(value);
         await pool.query(
-          `INSERT INTO app_settings (setting_key, setting_value, updated_by) VALUES (?, ?, ?)
-           ON DUPLICATE KEY UPDATE setting_value = VALUES(setting_value), updated_by = VALUES(updated_by)`,
-          [key, value, req.user.id]
+          `INSERT INTO app_settings (setting_key, setting_value, setting_type, updated_by) VALUES (?, ?, ?, ?)
+           ON DUPLICATE KEY UPDATE setting_value = VALUES(setting_value), setting_type = VALUES(setting_type), updated_by = VALUES(updated_by)`,
+          [key, strValue, settingType, req.user?.id ?? null]
         );
+        // Apply sync-schedule changes immediately (no restart required).
+        if (key === 'sync_enabled' || key === 'sync_interval_minutes') {
+          try { await syncScheduler?.reload(); } catch (e) { console.error('Scheduler reload failed:', e.message); }
+        }
         return send.ok(res, { success: true });
       } catch (e) { console.error(e); return send.serverErr(res); }
     },
+
+    // Automatic-sync scheduler status for the Settings UI (current enabled/interval
+    // + the most recent sync-log row for a "last synced" line).
+    getSyncStatus: async (_req, res) => {
+      try {
+        const s = (typeof syncScheduler?.status === 'function') ? syncScheduler.status() : null;
+        const [rows] = await pool.query(
+          `SELECT id, status, sync_started_at, sync_completed_at, total_processed, total_archived, error_message
+           FROM voucher_sync_log ORDER BY id DESC LIMIT 1`
+        );
+        return send.ok(res, {
+          enabled: s ? s.enabled : null,
+          intervalMinutes: s ? s.intervalMinutes : null,
+          nextRunAt: s ? s.nextRunAt : null,
+          lastSync: rows[0] || null,
+        });
+      } catch (e) { console.error(e); return send.serverErr(res); }
+    },
+
+    // Atomic update of the sync schedule: BOTH keys in ONE transaction + a SINGLE
+    // scheduler reload afterward. This prevents the scheduler from ever observing a
+    // half-updated pair (e.g. enabled=true armed against the OLD, more-aggressive
+    // interval) that a two-call sequence could leave behind. Backs PUT /api/settings/sync.
+    updateSyncSettings: async (req, res) => {
+      const { enabled, intervalMinutes } = req.body || {};
+      if (typeof enabled !== 'boolean') return send.bad(res, 'enabled (boolean) is required');
+      const mins = Number(intervalMinutes);
+      if (!Number.isFinite(mins)) return send.bad(res, 'intervalMinutes (number) is required');
+      // Server-side floor/ceiling — the 5-min minimum protects the Ruijie quota
+      // regardless of what the client sends (mirrors the scheduler's own clamp).
+      const clamped = Math.min(1440, Math.max(5, Math.round(mins)));
+      const uid = req.user?.id ?? null;
+
+      const conn = await pool.getConnection();
+      try {
+        await conn.beginTransaction();
+        const upsert =
+          `INSERT INTO app_settings (setting_key, setting_value, setting_type, updated_by) VALUES (?, ?, ?, ?)
+           ON DUPLICATE KEY UPDATE setting_value = VALUES(setting_value), setting_type = VALUES(setting_type), updated_by = VALUES(updated_by)`;
+        await conn.query(upsert, ['sync_enabled', enabled ? 'true' : 'false', 'boolean', uid]);
+        await conn.query(upsert, ['sync_interval_minutes', String(clamped), 'number', uid]);
+        await conn.commit();
+      } catch (e) {
+        try { await conn.rollback(); } catch { /* ignore */ }
+        conn.release();
+        console.error('updateSyncSettings failed:', e);
+        return send.serverErr(res);
+      }
+      conn.release();
+
+      // Single reload AFTER the commit → the scheduler reads a consistent pair.
+      let status = null;
+      try { status = await syncScheduler?.reload(); } catch (e) { console.error('Scheduler reload failed:', e.message); }
+      return send.ok(res, { success: true, enabled, intervalMinutes: clamped, status });
+    },
+
+    // Wiring hook (server.js) + shared starter exposed for the scheduler.
+    setSyncScheduler: (s) => { syncScheduler = s; },
+    runGuardedSync,
   };
 }

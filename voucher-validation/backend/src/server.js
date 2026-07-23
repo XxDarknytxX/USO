@@ -16,6 +16,7 @@ import { makePortalRouter } from "./routes/portal.js";
 import { makeNetworkController } from "./controllers/networkController.js";
 import { makeNetworkRouter } from "./routes/network.js";
 import { startCollector } from "./services/networkCollector.js";
+import { makeSyncScheduler } from "./services/syncScheduler.js";
 
 const app = express();
 
@@ -71,6 +72,15 @@ const portalConfig = makePortalConfigController(pool);
 const portalApi = makePortalApiController(pool);
 const network = makeNetworkController(pool);
 
+// Automatic Excel voucher sync — interval + on/off configured from the admin
+// Settings page (app_settings: sync_enabled / sync_interval_minutes). Lives in
+// this single VV process, so exactly one scheduler runs per deployment.
+const syncScheduler = makeSyncScheduler({
+  pool,
+  runGuardedSync: (userId) => voucher.runGuardedSync(userId),
+});
+voucher.setSyncScheduler(syncScheduler);
+
 // Routes
 app.use("/api", makeAuthRouter(admin));
 app.use("/api/vouchers", makeVoucherRouter(voucher));
@@ -89,6 +99,20 @@ const port = process.env.PORT || 4001;
 app.listen(port, () => {
   console.log(`Voucher Validation API listening on http://localhost:${port}`);
 });
+
+// Start the automatic voucher-sync scheduler (first run happens one interval from
+// now, not on boot, so restarts/deploys don't each trigger a Ruijie export).
+// Only ONE process may run it — N schedulers = N× the Ruijie export volume. In PM2
+// cluster mode NODE_APP_INSTANCE is set per fork so only fork 0 arms the timer; in
+// fork mode (our deploy) it's unset/"0", so this single process runs it. This makes
+// the "one scheduler per deployment" guarantee code-enforced, not doc-only.
+const _instanceId = process.env.NODE_APP_INSTANCE;
+const _isSchedulerPrimary = _instanceId == null || String(_instanceId) === "0";
+if (_isSchedulerPrimary) {
+  syncScheduler.start().catch((e) => console.error("Sync scheduler failed to start:", e.message));
+} else {
+  console.log(`[SyncScheduler] instance ${_instanceId} is not primary — scheduler not started`);
+}
 
 // Background network-health/usage collector — DISABLED by default to conserve
 // the Ruijie Cloud API quota. It polled every active village every few minutes
