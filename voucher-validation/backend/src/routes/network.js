@@ -3,11 +3,14 @@ import { Router } from "express";
 import { body, param } from "express-validator";
 import { requireAuth, requireAdmin } from "../middleware/auth.js";
 
-export function makeNetworkRouter(controller) {
+export function makeNetworkRouter(controller, attachScope) {
   const router = Router();
 
   // All network-monitoring routes require authentication.
   router.use(requireAuth);
+  // Village scope so viewers only ever see their assigned villages' projects,
+  // overview rows, trend, and per-project health.
+  if (attachScope) router.use(attachScope);
 
   // Projects (any authenticated user can view)
   router.get("/projects", controller.listProjects);

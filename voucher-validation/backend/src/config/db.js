@@ -137,6 +137,20 @@ export async function getPool() {
       INDEX idx_sort (sort_order)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
 
+    // Which villages (network_projects) a VIEWER user is allowed to see. Admins are
+    // unrestricted and have NO rows here; a viewer with no rows sees nothing. Created
+    // AFTER network_projects so the FK target exists. ON DELETE CASCADE cleans up when
+    // a user or a project is removed. This is the server-side scope store — the SPA's
+    // client-side site filter is advisory only.
+    `CREATE TABLE IF NOT EXISTS user_villages (
+      user_id INT NOT NULL,
+      project_id INT NOT NULL,
+      PRIMARY KEY (user_id, project_id),
+      INDEX idx_uv_user (user_id),
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+      FOREIGN KEY (project_id) REFERENCES network_projects(id) ON DELETE CASCADE
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
+
     // Latest network status snapshot per project (one row each) — written by the
     // background overview collector, read by GET /api/network/overview.
     `CREATE TABLE IF NOT EXISTS network_status (

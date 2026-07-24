@@ -1,13 +1,16 @@
 // src/routes/vouchers.js
 import { Router } from "express";
 import { query, param, body } from "express-validator";
-import { requireAuth, requireAdmin } from "../middleware/auth.js";
+import { requireAuth, requireAdmin, requireNotViewer } from "../middleware/auth.js";
 
-export function makeVoucherRouter(controller) {
+export function makeVoucherRouter(controller, attachScope) {
   const router = Router();
 
   // All voucher routes require authentication
   router.use(requireAuth);
+  // Attach the caller's village scope (viewer = restricted set; admin = unrestricted)
+  // so /stats and the list can clamp their results server-side.
+  if (attachScope) router.use(attachScope);
 
   // --- Static paths first (before /:uuid) ---
 
@@ -17,6 +20,7 @@ export function makeVoucherRouter(controller) {
   // GET /api/vouchers/search?q=...&page=&limit=
   router.get(
     "/search",
+    requireNotViewer,
     [
       query("q").optional().isString(),
       query("page").optional().isInt({ min: 1 }),
@@ -28,6 +32,7 @@ export function makeVoucherRouter(controller) {
   // GET /api/vouchers/activity?page=&limit=&eventType=&voucherUuid=&startDate=&endDate=
   router.get(
     "/activity",
+    requireNotViewer,
     [
       query("page").optional().isInt({ min: 1 }),
       query("limit").optional().isInt({ min: 1, max: 100 }),
@@ -40,14 +45,15 @@ export function makeVoucherRouter(controller) {
   );
 
   // GET /api/vouchers/test-connection
-  router.get("/test-connection", controller.testConnection);
+  router.get("/test-connection", requireNotViewer, controller.testConnection);
 
   // GET /api/vouchers/sync-logs
-  router.get("/sync-logs", controller.getSyncLogs);
+  router.get("/sync-logs", requireNotViewer, controller.getSyncLogs);
 
   // GET /api/vouchers/historical?page=&limit=
   router.get(
     "/historical",
+    requireNotViewer,
     [
       query("page").optional().isInt({ min: 1 }),
       query("limit").optional().isInt({ min: 1, max: 100 }),
@@ -56,7 +62,7 @@ export function makeVoucherRouter(controller) {
   );
 
   // GET /api/vouchers/user-groups - fetch profiles from Ruijie
-  router.get("/user-groups", controller.getUserGroups);
+  router.get("/user-groups", requireNotViewer, controller.getUserGroups);
 
   // GET /api/vouchers - paginated list
   router.get(
@@ -110,6 +116,7 @@ export function makeVoucherRouter(controller) {
   // GET /api/vouchers/:uuid
   router.get(
     "/:uuid",
+    requireNotViewer,
     [param("uuid").notEmpty()],
     controller.getVoucherDetail
   );

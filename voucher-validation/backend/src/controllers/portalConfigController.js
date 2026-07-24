@@ -518,6 +518,10 @@ export function makePortalConfigController(pool) {
     getRevenue: async (req, res) => {
       try {
         const groupId = req.query.groupId ? String(req.query.groupId) : null;
+        // Viewer scope: only count revenue for the viewer's assigned villages.
+        // Empty set -> nothing matches -> zeroed totals (never all villages).
+        const scope = req.scope || { isViewer: false };
+        const allowedGroups = scope.isViewer ? new Set((scope.groupIds || []).map(String)) : null;
 
         // One row per PAID transaction: amount, when, which plan. Revenue is
         // money RECEIVED (payment_success / M-PAiSA callback), NOT internet
@@ -570,6 +574,7 @@ export function makePortalConfigController(pool) {
         for (const t of txns) {
           const grp = resolveGroup(t);
           if (groupId && String(grp) !== String(groupId)) continue;
+          if (allowedGroups && !allowedGroups.has(String(grp))) continue; // viewer scope
           const amt = Number(t.amount) || 0;
           const ts = t.ts ? new Date(t.ts) : null;
           total += amt; totalCount++;

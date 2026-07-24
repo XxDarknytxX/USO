@@ -32,7 +32,8 @@ const navSections = [
   {
     title: "Monitoring",
     items: [
-      { to: "/dashboard", label: "Dashboard", Icon: LayoutDashboard, end: true },
+      // viewerOk: the read-only viewer role sees ONLY the Dashboard tab.
+      { to: "/dashboard", label: "Dashboard", Icon: LayoutDashboard, end: true, viewerOk: true },
       { to: "/overview", label: "Overview", Icon: Gauge },
       { to: "/network", label: "Network", Icon: Network },
     ],
@@ -76,7 +77,7 @@ export default function AppLayout() {
 function Shell() {
   const navigate = useNavigate();
   const location = useLocation();
-  const { email, role, isAdmin, logout } = useAuth();
+  const { email, role, isAdmin, isViewer, logout } = useAuth();
   const { theme, toggle } = useTheme();
   const { loading: siteLoading } = useSite();
   const isDark = theme === "dark";
@@ -93,7 +94,12 @@ function Shell() {
   const initial = displayName[0].toUpperCase();
   const roleLabel = role ? role.charAt(0).toUpperCase() + role.slice(1) : "User";
 
-  const sections = navSections.filter((s) => !s.adminOnly || isAdmin);
+  // Section-level admin gate, then a per-item viewer gate: a viewer keeps only
+  // items marked viewerOk (just Dashboard), and empty sections are dropped.
+  const sections = navSections
+    .filter((s) => !s.adminOnly || isAdmin)
+    .map((s) => ({ ...s, items: s.items.filter((it) => !isViewer || it.viewerOk) }))
+    .filter((s) => s.items.length > 0);
 
   function toggleCollapsed() {
     setCollapsed((prev) => {

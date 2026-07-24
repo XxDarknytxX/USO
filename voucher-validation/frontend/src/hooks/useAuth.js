@@ -24,6 +24,7 @@ export function useAuth() {
       role,
       email: payload?.email || "",
       isAdmin: role === "admin",
+      isViewer: role === "viewer",
       logout: () => {
         localStorage.removeItem("token");
         localStorage.removeItem("role");

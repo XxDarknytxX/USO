@@ -12,9 +12,11 @@ import {
   EyeOff,
   Edit3,
   RefreshCw,
+  Check,
+  MapPin,
 } from "lucide-react";
 
-import { userApi } from "../services/api";
+import { userApi, networkApi } from "../services/api";
 import { useAuth } from "../hooks/useAuth";
 import ConfirmDialog from "../components/shared/ConfirmDialog";
 import {
@@ -246,13 +248,30 @@ function UserFormModal({ mode, user, onClose, onSaved }) {
     password: "",
     name: user?.name || "",
     role: user?.role || "viewer",
+    villageIds: Array.isArray(user?.villageIds) ? user.villageIds : [],
   });
+  const [villages, setVillages] = useState([]);
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState("");
   const [showPassword, setShowPassword] = useState(false);
 
+  // Village list for the viewer scope picker.
+  useEffect(() => {
+    networkApi.projects().then((d) => setVillages(d.projects || [])).catch(() => {});
+  }, []);
+
   function setField(key, value) {
     setForm((prev) => ({ ...prev, [key]: value }));
+  }
+
+  function toggleVillage(id) {
+    setForm((prev) => {
+      const has = prev.villageIds.includes(id);
+      return {
+        ...prev,
+        villageIds: has ? prev.villageIds.filter((x) => x !== id) : [...prev.villageIds, id],
+      };
+    });
   }
 
   function handleGenPassword() {
@@ -263,6 +282,11 @@ function UserFormModal({ mode, user, onClose, onSaved }) {
   async function handleSubmit(e) {
     e.preventDefault();
     setErr("");
+    // A viewer with no villages would see nothing — require at least one.
+    if (form.role === "viewer" && form.villageIds.length === 0) {
+      setErr("Select at least one village for this viewer.");
+      return;
+    }
     setLoading(true);
     try {
       if (isEdit) {
@@ -271,10 +295,19 @@ function UserFormModal({ mode, user, onClose, onSaved }) {
         if (form.email !== user.email) body.email = form.email;
         if (form.role !== user.role) body.role = form.role;
         if (form.password) body.password = form.password;
+        // Send the village set whenever this is (or becomes) a viewer so the
+        // backend replaces it; for admins the backend clears it automatically.
+        if (form.role === "viewer") body.villageIds = form.villageIds;
         await userApi.update(user.id, body);
         toast.success("User updated");
       } else {
-        await userApi.create(form);
+        await userApi.create({
+          email: form.email,
+          password: form.password,
+          name: form.name,
+          role: form.role,
+          villageIds: form.role === "viewer" ? form.villageIds : [],
+        });
         toast.success("User created");
       }
       onSaved();
@@ -434,6 +467,58 @@ function UserFormModal({ mode, user, onClose, onSaved }) {
                 })}
               </div>
             </Field>
+
+            {/* Village scope — only for viewers. Server-enforced: a viewer can
+                only ever see dashboard data for the villages selected here. */}
+            {form.role === "viewer" && (
+              <Field
+                label="Villages"
+                required
+                hint="This viewer's dashboard is limited to the villages you select — enforced server-side."
+              >
+                {villages.length === 0 ? (
+                  <p className="text-[12.5px] text-[var(--text-tertiary)]">
+                    No villages yet — add them under Network first.
+                  </p>
+                ) : (
+                  <div className="max-h-52 overflow-y-auto rounded-md border border-[var(--border-default)] divide-y divide-[var(--border-subtle)]">
+                    {villages.map((v) => {
+                      const checked = form.villageIds.includes(v.id);
+                      return (
+                        <button
+                          key={v.id}
+                          type="button"
+                          onClick={() => toggleVillage(v.id)}
+                          className="w-full flex items-center gap-3 px-3 py-2 text-left hover:bg-[var(--surface-hover)] transition-colors"
+                        >
+                          <span
+                            className={
+                              "shrink-0 h-[18px] w-[18px] rounded flex items-center justify-center border transition-colors " +
+                              (checked
+                                ? "bg-[var(--brand)] border-[var(--brand)] text-[var(--text-on-brand)]"
+                                : "border-[var(--border-strong)] text-transparent")
+                            }
+                          >
+                            <Check size={12} strokeWidth={3} />
+                          </span>
+                          <MapPin size={14} className="shrink-0 text-[var(--text-quaternary)]" />
+                          <span className="min-w-0 flex-1">
+                            <span className="block text-[12.5px] font-medium text-[var(--text-primary)] truncate">
+                              {v.name}
+                            </span>
+                            {v.hostname && (
+                              <span className="block text-[11px] font-mono text-[var(--text-tertiary)] truncate">
+                                {v.hostname}
+                              </span>
+                            )}
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+              </Field>
+            )}
 
             {err && (
               <div

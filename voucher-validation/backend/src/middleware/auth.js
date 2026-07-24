@@ -20,3 +20,69 @@ export function requireAdmin(req, res, next) {
   }
   next();
 }
+
+// Blocks the read-only "viewer" role from an endpoint entirely (403). Used for
+// endpoints a viewer must never reach and that aren't village-scopeable
+// (sync-logs, audit logs, transaction flows, manual assistance, voucher CRUD data,
+// settings). With only admin/viewer roles this is effectively "admin only" today,
+// but the name states the intent for read endpoints that were previously any-authed.
+export function requireNotViewer(req, res, next) {
+  if (req.user?.role === "viewer") {
+    return res.status(403).json({ error: "Not permitted for this account" });
+  }
+  next();
+}
+
+// Attaches req.scope describing which villages the caller may see:
+//   admin  -> { isViewer:false, projectIds:null, groupIds:null }  (null = unrestricted)
+//   viewer -> { isViewer:true, projectIds:[int], groupIds:[str] }  (their assigned
+//             ACTIVE villages, resolved to network_projects.id + ruijie_group_id)
+// Fails CLOSED for viewers: any DB error yields an EMPTY set, never unrestricted.
+// A factory because it needs the pool. Mount AFTER requireAuth on scoped routers.
+export function makeAttachScope(pool) {
+  return async function attachScope(req, res, next) {
+    if (req.user?.role !== "viewer") {
+      req.scope = { isViewer: false, projectIds: null, groupIds: null };
+      return next();
+    }
+    try {
+      const [rows] = await pool.query(
+        `SELECT p.id, p.ruijie_group_id
+           FROM user_villages uv
+           JOIN network_projects p ON p.id = uv.project_id
+          WHERE uv.user_id = ? AND p.is_active = 1`,
+        [req.user.id]
+      );
+      req.scope = {
+        isViewer: true,
+        projectIds: rows.map((r) => Number(r.id)),
+        groupIds: rows
+          .map((r) => r.ruijie_group_id)
+          .filter((g) => g != null && String(g).trim() !== "")
+          .map(String),
+      };
+    } catch (e) {
+      console.error("attachScope failed (failing closed):", e.message);
+      req.scope = { isViewer: true, projectIds: [], groupIds: [] };
+    }
+    return next();
+  };
+}
+
+// Resolve the effective Ruijie group-id filter for a request.
+//   returns null            -> unrestricted (admin, no group requested) => query all
+//   returns [] (empty)      -> restricted to nothing (viewer with no/again out-of-scope)
+//   returns [ids]           -> restrict to these group ids
+// `requested` may be null, a single id string, a comma list, or an array.
+export function effectiveGroupIds(scope, requested) {
+  const reqArr =
+    requested == null || requested === ""
+      ? null
+      : (Array.isArray(requested) ? requested : String(requested).split(","))
+          .map((s) => String(s).trim())
+          .filter(Boolean);
+  if (!scope?.isViewer) return reqArr; // admin: honor request (null = all)
+  const allowed = new Set((scope.groupIds || []).map(String));
+  if (!reqArr) return [...allowed]; // viewer, no explicit request -> their whole set
+  return reqArr.filter((g) => allowed.has(g)); // viewer + request -> intersection
+}

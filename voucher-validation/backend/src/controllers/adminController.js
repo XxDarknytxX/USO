@@ -23,28 +23,53 @@ async function findUserByEmail(pool, email) {
 }
 
 async function insertUser(pool, { email, passwordHash, name, role }) {
+  // Whitelist the role — never trust an arbitrary value into the privileged
+  // column. Anything that isn't exactly "admin" becomes "viewer".
+  const safeRole = role === "admin" ? "admin" : "viewer";
   const [res] = await pool.query(
     "INSERT INTO users (email, password_hash, name, role) VALUES (?, ?, ?, ?)",
-    [email, passwordHash, name || null, role || "viewer"]
+    [email, passwordHash, name || null, safeRole]
   );
-  return { id: res.insertId, email, name, role: role || "viewer" };
+  return { id: res.insertId, email, name, role: safeRole };
+}
+
+// Replace a user's assigned villages. Bulk INSERT IGNORE downgrades a bad/duplicate
+// project_id (FK miss) to a skipped row instead of erroring. Runs on a transaction
+// connection. De-dupes + coerces to positive ints.
+async function insertUserVillages(conn, userId, projectIds) {
+  const ids = [
+    ...new Set((projectIds || []).map(Number).filter((n) => Number.isInteger(n) && n > 0)),
+  ];
+  if (!ids.length) return;
+  const placeholders = ids.map(() => "(?, ?)").join(", ");
+  const params = [];
+  for (const pid of ids) params.push(userId, pid);
+  await conn.query(
+    `INSERT IGNORE INTO user_villages (user_id, project_id) VALUES ${placeholders}`,
+    params
+  );
 }
 
 /** Factory */
 export function makeAdminController(pool) {
   return {
-    // POST /api/register
+    // POST /api/register (admin-only — see routes/auth.js). NEVER trusts a
+    // client-supplied role: registration can only ever create a "viewer".
+    // Role assignment (incl. admins) is done through the admin Users flow
+    // (POST /api/users -> createUser), which is route-validated. Forcing viewer
+    // here means even if this route's guard were ever loosened, it could not
+    // mint an admin.
     register: async (req, res) => {
       const errors = validationResult(req);
       if (!errors.isEmpty()) return send.bad(res, errors.array()[0].msg);
 
-      const { email, password, name, role } = req.body;
+      const { email, password, name } = req.body;
       try {
         const existing = await findUserByEmail(pool, email);
         if (existing) return send.bad(res, "Email already registered");
 
         const passwordHash = await bcrypt.hash(password, 10);
-        const user = await insertUser(pool, { email, passwordHash, name, role });
+        const user = await insertUser(pool, { email, passwordHash, name, role: "viewer" });
         return send.created(res, { id: user.id, email: user.email, role: user.role });
       } catch (e) {
         console.error(e);
@@ -77,7 +102,8 @@ export function makeAdminController(pool) {
       }
     },
 
-    // GET /api/me
+    // GET /api/me — current user + (for viewers) their assigned villages, so the
+    // SPA can seed its scope and drive the viewer-only UI.
     me: async (req, res) => {
       try {
         const [rows] = await pool.query(
@@ -86,7 +112,20 @@ export function makeAdminController(pool) {
         );
         const user = rows[0];
         if (!user) return send.unauthorized(res, "User not found");
-        return send.ok(res, { user });
+        let villages = [];
+        if (user.role === "viewer") {
+          const [vrows] = await pool.query(
+            `SELECT p.id, p.name, p.hostname, p.ruijie_group_id
+               FROM user_villages uv JOIN network_projects p ON p.id = uv.project_id
+              WHERE uv.user_id = ? AND p.is_active = 1
+              ORDER BY p.sort_order, p.name`,
+            [user.id]
+          );
+          villages = vrows.map((r) => ({
+            id: r.id, name: r.name, hostname: r.hostname, ruijieGroupId: r.ruijie_group_id,
+          }));
+        }
+        return send.ok(res, { user: { ...user, villages } });
       } catch (e) {
         console.error(e);
         return send.serverErr(res);
@@ -98,13 +137,18 @@ export function makeAdminController(pool) {
 
     // ---- User management (admin only) ----
 
-    // GET /api/users
+    // GET /api/users — each user + the project ids assigned to them (for the
+    // admin edit form to seed the village multi-select).
     listUsers: async (_req, res) => {
       try {
         const [rows] = await pool.query(
           "SELECT id, email, name, role, created_at FROM users ORDER BY created_at DESC"
         );
-        return send.ok(res, { users: rows });
+        const [uv] = await pool.query("SELECT user_id, project_id FROM user_villages");
+        const byUser = {};
+        for (const r of uv) (byUser[r.user_id] ||= []).push(r.project_id);
+        const users = rows.map((u) => ({ ...u, villageIds: byUser[u.id] || [] }));
+        return send.ok(res, { users });
       } catch (e) {
         console.error(e);
         return send.serverErr(res);
@@ -116,20 +160,28 @@ export function makeAdminController(pool) {
       const errors = validationResult(req);
       if (!errors.isEmpty()) return send.bad(res, errors.array()[0].msg);
 
-      const { email, password, name, role } = req.body;
+      const { email, password, name, role, villageIds } = req.body;
+      const effRole = role || "viewer";
+      const conn = await pool.getConnection();
       try {
-        const existing = await findUserByEmail(pool, email);
-        if (existing) return send.bad(res, "Email already registered");
+        const [dup] = await conn.query("SELECT id FROM users WHERE email = ?", [email]);
+        if (dup[0]) { conn.release(); return send.bad(res, "Email already registered"); }
 
         const passwordHash = await bcrypt.hash(password, 10);
-        const user = await insertUser(pool, {
-          email,
-          passwordHash,
-          name,
-          role: role || "viewer",
-        });
-        return send.created(res, { id: user.id, email: user.email, name: user.name, role: user.role });
+        await conn.beginTransaction();
+        const [ins] = await conn.query(
+          "INSERT INTO users (email, password_hash, name, role) VALUES (?, ?, ?, ?)",
+          [email, passwordHash, name || null, effRole]
+        );
+        const userId = ins.insertId;
+        // Village scope is only meaningful for viewers (admins are unrestricted).
+        if (effRole === "viewer") await insertUserVillages(conn, userId, villageIds);
+        await conn.commit();
+        conn.release();
+        return send.created(res, { id: userId, email, name: name || null, role: effRole });
       } catch (e) {
+        try { await conn.rollback(); } catch { /* ignore */ }
+        conn.release();
         console.error(e);
         return send.serverErr(res);
       }
@@ -141,16 +193,16 @@ export function makeAdminController(pool) {
       if (!errors.isEmpty()) return send.bad(res, errors.array()[0].msg);
 
       const targetId = Number(req.params.id);
-      const { email, password, name, role } = req.body;
+      const { email, password, name, role, villageIds } = req.body;
+      const conn = await pool.getConnection();
       try {
-        // Check user exists
-        const [existing] = await pool.query("SELECT id, email FROM users WHERE id = ?", [targetId]);
-        if (!existing[0]) return send.bad(res, "User not found");
+        const [existing] = await conn.query("SELECT id, email, role FROM users WHERE id = ?", [targetId]);
+        if (!existing[0]) { conn.release(); return send.bad(res, "User not found"); }
 
         // If email changed, check it's not taken by someone else
         if (email && email !== existing[0].email) {
-          const dup = await findUserByEmail(pool, email);
-          if (dup && dup.id !== targetId) return send.bad(res, "Email already in use");
+          const [dup] = await conn.query("SELECT id FROM users WHERE email = ?", [email]);
+          if (dup[0] && dup[0].id !== targetId) { conn.release(); return send.bad(res, "Email already in use"); }
         }
 
         // Build dynamic SET clause
@@ -160,19 +212,40 @@ export function makeAdminController(pool) {
         if (name !== undefined) { sets.push("name = ?"); params.push(name); }
         if (role !== undefined) { sets.push("role = ?"); params.push(role); }
         if (password) {
-          const hash = await bcrypt.hash(password, 10);
           sets.push("password_hash = ?");
-          params.push(hash);
+          params.push(await bcrypt.hash(password, 10));
         }
 
-        if (sets.length === 0) return send.bad(res, "Nothing to update");
+        // Effective role AFTER this update decides village handling.
+        const effRole = role !== undefined ? role : existing[0].role;
+        // Admins are unrestricted -> always clear stale rows. Viewers -> replace the
+        // set only when villageIds was actually sent.
+        const touchesVillages = effRole === "admin" || villageIds !== undefined;
+        if (sets.length === 0 && !touchesVillages) {
+          conn.release();
+          return send.bad(res, "Nothing to update");
+        }
 
-        params.push(targetId);
-        await pool.query(`UPDATE users SET ${sets.join(", ")} WHERE id = ?`, params);
+        await conn.beginTransaction();
+        if (sets.length) {
+          params.push(targetId);
+          await conn.query(`UPDATE users SET ${sets.join(", ")} WHERE id = ?`, params);
+        }
+        if (effRole === "admin") {
+          await conn.query("DELETE FROM user_villages WHERE user_id = ?", [targetId]);
+        } else if (villageIds !== undefined) {
+          await conn.query("DELETE FROM user_villages WHERE user_id = ?", [targetId]);
+          await insertUserVillages(conn, targetId, villageIds);
+        }
+        await conn.commit();
 
-        const [rows] = await pool.query("SELECT id, email, name, role, created_at FROM users WHERE id = ?", [targetId]);
-        return send.ok(res, { user: rows[0] });
+        const [rows] = await conn.query("SELECT id, email, name, role, created_at FROM users WHERE id = ?", [targetId]);
+        const [uv] = await conn.query("SELECT project_id FROM user_villages WHERE user_id = ?", [targetId]);
+        conn.release();
+        return send.ok(res, { user: { ...rows[0], villageIds: uv.map((r) => r.project_id) } });
       } catch (e) {
+        try { await conn.rollback(); } catch { /* ignore */ }
+        conn.release();
         console.error(e);
         return send.serverErr(res);
       }

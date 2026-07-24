@@ -17,6 +17,7 @@ import { makeNetworkController } from "./controllers/networkController.js";
 import { makeNetworkRouter } from "./routes/network.js";
 import { startCollector } from "./services/networkCollector.js";
 import { makeSyncScheduler } from "./services/syncScheduler.js";
+import { makeAttachScope } from "./middleware/auth.js";
 
 const app = express();
 
@@ -81,14 +82,17 @@ const syncScheduler = makeSyncScheduler({
 });
 voucher.setSyncScheduler(syncScheduler);
 
+// Per-request village scope for the read-only viewer role (admin = unrestricted).
+const attachScope = makeAttachScope(pool);
+
 // Routes
 app.use("/api", makeAuthRouter(admin));
-app.use("/api/vouchers", makeVoucherRouter(voucher));
+app.use("/api/vouchers", makeVoucherRouter(voucher, attachScope));
 app.use("/api/settings", makeSettingsRouter(voucher));
 app.use("/api/users", makeUserRouter(admin));
-app.use("/api/portal-config", makePortalConfigRouter(portalConfig));
+app.use("/api/portal-config", makePortalConfigRouter(portalConfig, attachScope));
 app.use("/api/portal", makePortalRouter(portalApi));
-app.use("/api/network", makeNetworkRouter(network));
+app.use("/api/network", makeNetworkRouter(network, attachScope));
 
 // Health check (no secrets exposed)
 app.get("/health", (_req, res) =>

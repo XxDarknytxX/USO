@@ -49,12 +49,15 @@ export default function App() {
               </ProtectedRoute>
             }
           >
+            {/* The only tab a read-only viewer may reach is the Dashboard.
+                Everything else is AdminRoute-wrapped (with two roles,
+                AdminRoute == "block viewers", redirecting them to /dashboard). */}
             <Route path="/dashboard" element={<DashboardRouter />} />
-            <Route path="/overview" element={<OverviewPage />} />
-            <Route path="/vouchers" element={<VouchersPage />} />
-            <Route path="/vouchers/:uuid" element={<VouchersPage />} />
-            <Route path="/activity" element={<ActivityLogPage />} />
-            <Route path="/network" element={<NetworkPage />} />
+            <Route path="/overview" element={<AdminRoute><OverviewPage /></AdminRoute>} />
+            <Route path="/vouchers" element={<AdminRoute><VouchersPage /></AdminRoute>} />
+            <Route path="/vouchers/:uuid" element={<AdminRoute><VouchersPage /></AdminRoute>} />
+            <Route path="/activity" element={<AdminRoute><ActivityLogPage /></AdminRoute>} />
+            <Route path="/network" element={<AdminRoute><NetworkPage /></AdminRoute>} />
             <Route
               path="/sync"
               element={

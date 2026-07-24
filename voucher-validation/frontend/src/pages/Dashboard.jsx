@@ -44,6 +44,7 @@ import PlanBreakdown from "../components/PlanBreakdown";
 import { scopePackages } from "../utils/scopePackages";
 import { api, voucherApi } from "../services/api";
 import { useSite } from "../hooks/useSite";
+import { useAuth } from "../hooks/useAuth";
 import { Modal, Badge, EmptyState, Button } from "../components/ui";
 
 // Categorize package by time_period (minutes)
@@ -76,6 +77,7 @@ const PALETTE_VARS = [
 export default function Dashboard() {
   const navigate = useNavigate();
   const { sites, setActiveSiteId, isSiteVisible, allVisible } = useSite();
+  const { isViewer } = useAuth();
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
   const [voucherStats, setVoucherStats] = useState(null);
@@ -118,11 +120,13 @@ export default function Dashboard() {
 
   async function loadDashboardData() {
     try {
+      // Viewers can't reach sync-logs or manual-assistance (403, server-blocked),
+      // so skip those fetches entirely — they only get stats + (scoped) revenue.
       const [statsData, logsData, revenueData, maData] = await Promise.all([
         api("/vouchers/stats", { auth: true }),
-        api("/vouchers/sync-logs", { auth: true }),
+        isViewer ? Promise.resolve({ logs: [] }) : api("/vouchers/sync-logs", { auth: true }),
         api("/portal-config/revenue", { auth: true }).catch(() => null),
-        api("/portal-config/manual-assistance?status=open", { auth: true }).catch(() => null),
+        isViewer ? Promise.resolve(null) : api("/portal-config/manual-assistance?status=open", { auth: true }).catch(() => null),
       ]);
       setVoucherStats(statsData);
       setSyncLogs(logsData.logs || []);
@@ -375,23 +379,26 @@ export default function Dashboard() {
           </div>
         </div>
 
-        <div className="flex items-center gap-3">
-          {lastSync && (
-            <span className="text-[12px] text-[var(--text-tertiary)]">
-              Last sync · {new Date(lastSync.sync_started_at).toLocaleString()}
-            </span>
-          )}
-          <Button
-            variant="secondary"
-            size="sm"
-            onClick={syncNow}
-            loading={syncing}
-            iconLeft={<RefreshCw size={14} />}
-            title="Pull fresh voucher data from Ruijie Cloud (the only action here that calls Ruijie)"
-          >
-            {syncing ? "Syncing…" : "Sync now"}
-          </Button>
-        </div>
+        {/* Sync is an admin action (and hits Ruijie) — hidden for read-only viewers. */}
+        {!isViewer && (
+          <div className="flex items-center gap-3">
+            {lastSync && (
+              <span className="text-[12px] text-[var(--text-tertiary)]">
+                Last sync · {new Date(lastSync.sync_started_at).toLocaleString()}
+              </span>
+            )}
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={syncNow}
+              loading={syncing}
+              iconLeft={<RefreshCw size={14} />}
+              title="Pull fresh voucher data from Ruijie Cloud (the only action here that calls Ruijie)"
+            >
+              {syncing ? "Syncing…" : "Sync now"}
+            </Button>
+          </div>
+        )}
       </div>
 
       <div className="px-8 py-6 space-y-6">
@@ -774,6 +781,8 @@ export default function Dashboard() {
 
         {/* ----- Charts Row 2 ----- */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          {/* Sync activity is admin-only — sync-logs are blocked for viewers. */}
+          {!isViewer && (
           <ChartCard
             title="Sync activity"
             subtitle="Last 7 syncs"
@@ -852,6 +861,7 @@ export default function Dashboard() {
               </div>
             )}
           </ChartCard>
+          )}
 
           <ChartCard title="Quick overview" icon={<Wifi size={14} />}>
             <div className="space-y-2 overflow-y-auto max-h-[280px] pr-1">

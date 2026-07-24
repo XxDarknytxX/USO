@@ -21,6 +21,8 @@ export function makeUserRouter(controller) {
       body("password").isLength({ min: 6 }).withMessage("Password >= 6 chars"),
       body("name").optional().isString(),
       body("role").optional().isIn(["admin", "viewer"]).withMessage("Role must be admin or viewer"),
+      body("villageIds").optional().isArray().withMessage("villageIds must be an array"),
+      body("villageIds.*").optional().isInt().withMessage("Each village id must be an integer"),
     ],
     controller.createUser
   );
@@ -34,6 +36,8 @@ export function makeUserRouter(controller) {
       body("password").optional().isLength({ min: 6 }).withMessage("Password >= 6 chars"),
       body("name").optional().isString(),
       body("role").optional().isIn(["admin", "viewer"]).withMessage("Role must be admin or viewer"),
+      body("villageIds").optional().isArray().withMessage("villageIds must be an array"),
+      body("villageIds.*").optional().isInt().withMessage("Each village id must be an integer"),
     ],
     controller.updateUser
   );

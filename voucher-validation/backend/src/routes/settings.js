@@ -1,11 +1,13 @@
 // src/routes/settings.js
 import { Router } from "express";
 import { body } from "express-validator";
-import { requireAuth } from "../middleware/auth.js";
+import { requireAuth, requireNotViewer } from "../middleware/auth.js";
 
 export function makeSettingsRouter(controller) {
   const router = Router();
-  router.use(requireAuth);
+  // Settings are staff-only; the read-only viewer role has no business here
+  // (reading or writing the sync schedule / app settings).
+  router.use(requireAuth, requireNotViewer);
 
   // GET /api/settings
   router.get("/", controller.getSettings);

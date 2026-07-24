@@ -3,6 +3,7 @@ import { validationResult } from "express-validator";
 import crypto from "crypto";
 import RuijieService from "../services/ruijieService.js";
 import { parseVoucherExcelBuffer } from "../services/excelVoucherParser.js";
+import { effectiveGroupIds } from "../middleware/auth.js";
 
 const send = {
   ok: (res, data = {}) => res.json(data),
@@ -27,9 +28,11 @@ async function getVoucherByUuid(pool, uuid) {
   return rows[0] || null;
 }
 
-async function getVoucherStats(pool, groupId) {
-  const where = groupId ? 'WHERE group_id = ?' : '';
-  const params = groupId ? [groupId] : [];
+// groupIds: null/undefined = all villages; [] = none; [ids] = restrict to those.
+async function getVoucherStats(pool, groupIds) {
+  if (Array.isArray(groupIds) && groupIds.length === 0) return [];
+  const where = Array.isArray(groupIds) ? `WHERE group_id IN (${groupIds.map(() => '?').join(',')})` : '';
+  const params = Array.isArray(groupIds) ? groupIds : [];
   const [rows] = await pool.query(`
     SELECT
       package_name,
@@ -54,8 +57,11 @@ async function getVoucherStats(pool, groupId) {
   return rows;
 }
 
-// Per-site rollup for the all-sites dashboard view.
-async function getStatsPerSite(pool) {
+// Per-site rollup for the all-sites dashboard view. groupIds clamps it (viewer scope).
+async function getStatsPerSite(pool, groupIds) {
+  if (Array.isArray(groupIds) && groupIds.length === 0) return [];
+  const where = Array.isArray(groupIds) ? `WHERE group_id IN (${groupIds.map(() => '?').join(',')})` : '';
+  const params = Array.isArray(groupIds) ? groupIds : [];
   const [rows] = await pool.query(`
     SELECT
       group_id,
@@ -68,8 +74,9 @@ async function getStatsPerSite(pool) {
       SUM(used_quota) AS total_used_quota_mb,
       SUM(current_clients) AS currently_in_use
     FROM vouchers
+    ${where}
     GROUP BY group_id
-  `);
+  `, params);
   return rows;
 }
 
@@ -77,7 +84,10 @@ async function getStatsPerSite(pool) {
 // charts/tables to just the villages enabled in the "All Villages" scope
 // (Settings). Small result set: sites × plans. Same status/quota columns as the
 // per-package rollup, plus group_id so the frontend can sum in-scope villages.
-async function getStatsPerSitePackage(pool) {
+async function getStatsPerSitePackage(pool, groupIds) {
+  if (Array.isArray(groupIds) && groupIds.length === 0) return [];
+  const where = Array.isArray(groupIds) ? `WHERE group_id IN (${groupIds.map(() => '?').join(',')})` : '';
+  const params = Array.isArray(groupIds) ? groupIds : [];
   const [rows] = await pool.query(`
     SELECT
       group_id,
@@ -92,8 +102,9 @@ async function getStatsPerSitePackage(pool) {
       SUM(used_quota) AS total_used_quota_mb,
       SUM(current_clients) AS currently_in_use
     FROM vouchers
+    ${where}
     GROUP BY group_id, package_name
-  `);
+  `, params);
   return rows;
 }
 
@@ -670,15 +681,22 @@ export function makeVoucherController(pool) {
   return {
     getStats: async (req, res) => {
       try {
-        const groupId = req.query.groupId || null;
-        const [stats, historicalStats] = await Promise.all([getVoucherStats(pool, groupId), getHistoricalStats(pool)]);
+        const scope = req.scope || { isViewer: false };
+        const singleGroup = req.query.groupId || null;
+        // Effective group filter: admin -> requested (null = all); viewer -> their
+        // assigned set, or the requested group intersected with it. A viewer who
+        // resolves to no villages gets [] -> an EMPTY payload, never the unscoped all.
+        const gids = effectiveGroupIds(scope, singleGroup);
+        const stats = await getVoucherStats(pool, gids);
+        // vouchers_historical has no group_id, so it can't be village-scoped —
+        // viewers get none; admins keep the global archived rollup.
+        const historicalStats = scope.isViewer ? [] : await getHistoricalStats(pool);
         const totalVouchers = stats.reduce((sum, item) => sum + Number(item.total || 0), 0);
         const totalHistorical = historicalStats.reduce((sum, item) => sum + Number(item.total_historical || 0), 0);
-        // When no site is selected, include per-site + per-(site,package) rollups
-        // so the all-villages dashboard can scope its charts/tables to the
-        // villages enabled in the "All Villages" scope.
-        const perSite = groupId ? undefined : await getStatsPerSite(pool);
-        const packageSiteStats = groupId ? undefined : await getStatsPerSitePackage(pool);
+        // Per-site + per-(site,package) rollups only when NOT drilled into a single
+        // village — scoped by gids so the all-villages view sums only allowed villages.
+        const perSite = singleGroup ? undefined : await getStatsPerSite(pool, gids);
+        const packageSiteStats = singleGroup ? undefined : await getStatsPerSitePackage(pool, gids);
         return send.ok(res, { packageStats: stats, packageSiteStats, historicalStats, perSite, totalVouchers, totalHistorical, lastSync: await getLastSyncTime(pool) });
       } catch (e) { console.error(e); return send.serverErr(res); }
     },
@@ -686,9 +704,30 @@ export function makeVoucherController(pool) {
     getVouchers: async (req, res) => {
       try {
         const { page, limit, status, packageName, userGroupId, includeHistorical, groupId, groupIds, phone } = req.query;
+        const scope = req.scope || { isViewer: false };
+        const pg = parseInt(page) || 1;
+        const lim = parseInt(limit) || 10;
+
+        let effGroupId = groupId;
+        let effGroupIds = groupIds;
+        let effIncludeHistorical = includeHistorical === 'true';
+        if (scope.isViewer) {
+          // Clamp to the viewer's villages regardless of what was requested. An empty
+          // set means no access -> return empty (NOT the unscoped list). Force the
+          // IN(...) path and never include historical (it has no group_id to scope).
+          const eff = effectiveGroupIds(scope, groupIds || groupId || null);
+          if (!eff.length) {
+            return send.ok(res, { vouchers: [], total: 0, page: pg, limit: lim, totalPages: 0 });
+          }
+          effGroupId = null;
+          effGroupIds = eff.join(',');
+          effIncludeHistorical = false;
+        }
+
         const result = await getVoucherList(pool, {
-          page: parseInt(page) || 1, limit: parseInt(limit) || 10,
-          status, packageName, userGroupId, groupId, groupIds, phone, includeHistorical: includeHistorical === 'true'
+          page: pg, limit: lim,
+          status, packageName, userGroupId, groupId: effGroupId, groupIds: effGroupIds, phone,
+          includeHistorical: effIncludeHistorical,
         });
         return send.ok(res, result);
       } catch (e) { console.error(e); return send.serverErr(res); }

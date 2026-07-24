@@ -36,11 +36,18 @@ export function makeNetworkController(pool) {
 
   return {
     // GET /api/network/projects
-    listProjects: async (_req, res) => {
+    listProjects: async (req, res) => {
       try {
-        const [rows] = await pool.query(
-          "SELECT * FROM network_projects ORDER BY sort_order, name"
-        );
+        const scope = req.scope || { isViewer: false };
+        let sql = "SELECT * FROM network_projects ORDER BY sort_order, name";
+        let params = [];
+        if (scope.isViewer) {
+          const ids = scope.projectIds || [];
+          if (!ids.length) return send.ok(res, { projects: [] });
+          sql = `SELECT * FROM network_projects WHERE id IN (${ids.map(() => "?").join(",")}) ORDER BY sort_order, name`;
+          params = ids;
+        }
+        const [rows] = await pool.query(sql, params);
         return send.ok(res, { projects: rows.map(mapProject) });
       } catch (e) {
         console.error(e);
@@ -146,6 +153,13 @@ export function makeNetworkController(pool) {
         const project = rows[0];
         if (!project) return send.notFound(res, "Project not found");
 
+        // Viewer scope: a viewer may only see health for their assigned villages.
+        // Return 404 (not 403) so we don't reveal that other projects exist.
+        const scope = req.scope || { isViewer: false };
+        if (scope.isViewer && !(scope.projectIds || []).includes(Number(project.id))) {
+          return send.notFound(res, "Project not found");
+        }
+
         const buildPayload = (h) => ({
           project: mapProject(project),
           cloudSync: h.cloudSync,
@@ -210,9 +224,24 @@ export function makeNetworkController(pool) {
     getOverview: async (req, res) => {
       try {
         const uptimeHours = Math.min(720, Math.max(1, Number(req.query.uptimeHours) || 24));
-        const [projects] = await pool.query(
-          "SELECT * FROM network_projects WHERE is_active = 1 ORDER BY sort_order, name"
-        );
+        const scope = req.scope || { isViewer: false };
+        // Scope to the viewer's villages. Empty set -> projects stays [] and the
+        // normal path below yields an empty sites/summary of the correct shape
+        // (never fall through to all villages).
+        let projects = [];
+        if (!scope.isViewer) {
+          [projects] = await pool.query(
+            "SELECT * FROM network_projects WHERE is_active = 1 ORDER BY sort_order, name"
+          );
+        } else {
+          const ids = scope.projectIds || [];
+          if (ids.length) {
+            [projects] = await pool.query(
+              `SELECT * FROM network_projects WHERE is_active = 1 AND id IN (${ids.map(() => "?").join(",")}) ORDER BY sort_order, name`,
+              ids
+            );
+          }
+        }
         const [statusRows] = await pool.query("SELECT * FROM network_status");
         const statusByProject = {};
         for (const s of statusRows) statusByProject[s.project_id] = s;
@@ -283,13 +312,24 @@ export function makeNetworkController(pool) {
       try {
         const hours = Math.min(720, Math.max(1, Number(req.query.hours) || 24));
         const groupId = req.query.groupId ? String(req.query.groupId) : null;
+        const scope = req.scope || { isViewer: false };
         const bucketFmt = hours <= 168 ? "%Y-%m-%d %H:00:00" : "%Y-%m-%d 00:00:00";
         const params = [hours];
         let projFilter = "";
         if (groupId) {
+          // Viewer requesting a specific village must own it, else empty trend.
+          if (scope.isViewer && !(scope.groupIds || []).map(String).includes(groupId)) {
+            return send.ok(res, { points: [], hours, groupId });
+          }
           projFilter =
             "AND h.project_id = (SELECT id FROM network_projects WHERE ruijie_group_id = ? LIMIT 1)";
           params.push(groupId);
+        } else if (scope.isViewer) {
+          // Aggregate trend across the viewer's villages only (never all).
+          const ids = scope.projectIds || [];
+          if (!ids.length) return send.ok(res, { points: [], hours, groupId: null });
+          projFilter = `AND h.project_id IN (${ids.map(() => "?").join(",")})`;
+          params.push(...ids);
         }
         const [rows] = await pool.query(
           `SELECT bucket,
