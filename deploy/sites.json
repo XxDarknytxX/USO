@@ -15,6 +15,9 @@
     { "name": "soso", "host": "soso.vodafonefiji.cloud", "port": 5012, "groupId": "7855422" },
     { "name": "muanisolo", "host": "muanisolo.vodafonefiji.cloud", "port": 5013, "groupId": "7855420" },
     { "name": "dravuwalu", "host": "dravuwalu.vodafonefiji.cloud", "port": 5014, "groupId": "7855405" },
-    { "name": "vunisei", "host": "vunisei.vodafonefiji.cloud", "port": 5015, "groupId": "7857061" }
+    { "name": "vunisei", "host": "vunisei.vodafonefiji.cloud", "port": 5015, "groupId": "7857061" },
+    { "name": "naqalotu", "host": "naqalotu.vodafonefiji.cloud", "port": 5016, "groupId": "7857259" },
+    { "name": "tawava", "host": "tawava.vodafonefiji.cloud", "port": 5017, "groupId": "7857260" },
+    { "name": "yakita", "host": "yakita.vodafonefiji.cloud", "port": 5018, "groupId": "7857261" }
   ]
 }
