@@ -18,6 +18,20 @@
     { "name": "vunisei", "host": "vunisei.vodafonefiji.cloud", "port": 5015, "groupId": "7857061" },
     { "name": "naqalotu", "host": "naqalotu.vodafonefiji.cloud", "port": 5016, "groupId": "7857259" },
     { "name": "tawava", "host": "tawava.vodafonefiji.cloud", "port": 5017, "groupId": "7857260" },
-    { "name": "yakita", "host": "yakita.vodafonefiji.cloud", "port": 5018, "groupId": "7857261" }
+    { "name": "yakita", "host": "yakita.vodafonefiji.cloud", "port": 5018, "groupId": "7857261" },
+    { "name": "kadavu", "host": "kadavu.vodafonefiji.cloud", "port": 5019, "groupId": "7857392" },
+    { "name": "nacomoto", "host": "nacomoto.vodafonefiji.cloud", "port": 5020, "groupId": "7857393" },
+    { "name": "tiliva", "host": "tiliva.vodafonefiji.cloud", "port": 5021, "groupId": "7857394" },
+    { "name": "lomanikoro", "host": "lomanikoro.vodafonefiji.cloud", "port": 5022, "groupId": "7857396" },
+    { "name": "matasawalevu", "host": "matasawalevu.vodafonefiji.cloud", "port": 5023, "groupId": "7857398" },
+    { "name": "nakaugasele", "host": "nakaugasele.vodafonefiji.cloud", "port": 5024, "groupId": "7857400" },
+    { "name": "nakaunakoro", "host": "nakaunakoro.vodafonefiji.cloud", "port": 5025, "groupId": "7857401" },
+    { "name": "nakoronawa", "host": "nakoronawa.vodafonefiji.cloud", "port": 5026, "groupId": "7857404" },
+    { "name": "namajiu", "host": "namajiu.vodafonefiji.cloud", "port": 5027, "groupId": "7857409" },
+    { "name": "nukuvou", "host": "nukuvou.vodafonefiji.cloud", "port": 5028, "groupId": "7857444" },
+    { "name": "vacalea", "host": "vacalea.vodafonefiji.cloud", "port": 5029, "groupId": "7857445" },
+    { "name": "levuka", "host": "levuka.vodafonefiji.cloud", "port": 5030, "groupId": "7857446" },
+    { "name": "korovou", "host": "korovou.vodafonefiji.cloud", "port": 5031, "groupId": "7857447" },
+    { "name": "natokalau", "host": "natokalau.vodafonefiji.cloud", "port": 5032, "groupId": "7857448" }
   ]
 }
