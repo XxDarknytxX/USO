@@ -11,11 +11,10 @@ import { Toaster } from "react-hot-toast";
 import {
   LayoutDashboard, Gauge, Network, Ticket, History, RefreshCw, Globe,
   FileText, GitBranch, Users, Settings, Menu, X, ChevronLeft, ChevronRight,
-  ChevronDown, Sun, Moon, LogOut, Shield, Eye, LifeBuoy,
+  ChevronDown, LogOut, Shield, Eye, LifeBuoy, UserCircle,
 } from "lucide-react";
 
 import { useAuth } from "../../hooks/useAuth";
-import { useTheme } from "../../hooks/useTheme";
 import { SiteProvider, useSite } from "../../hooks/useSite";
 import VodafoneLogo from "../ui/VodafoneLogo";
 import FloatingBlobs from "../ui/FloatingBlobs";
@@ -78,9 +77,7 @@ function Shell() {
   const navigate = useNavigate();
   const location = useLocation();
   const { email, role, isAdmin, isViewer, logout } = useAuth();
-  const { theme, toggle } = useTheme();
   const { loading: siteLoading } = useSite();
-  const isDark = theme === "dark";
 
   const [mobileOpen, setMobileOpen] = useState(false);
   const [collapsed, setCollapsed] = useState(() => localStorage.getItem("vv:sidebarCollapsed") === "1");
@@ -256,9 +253,18 @@ function Shell() {
           </div>
         </nav>
 
-        {/* Footer — user identity */}
+        {/* Footer — user identity → Profile */}
         <div className="border-t border-[var(--border-default)] shrink-0 px-4 py-4">
-          <div className={cn("w-full flex items-center h-12 rounded-xl", expanded && "overflow-hidden")}>
+          <button
+            onClick={() => navigate("/profile")}
+            title={!expanded ? `${displayName} — view profile` : "View profile"}
+            className={cn(
+              "w-full flex items-center h-12 rounded-xl text-left transition-colors duration-150",
+              expanded && "overflow-hidden",
+              "hover:bg-[var(--bg-surface)]",
+              "focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]"
+            )}
+          >
             <div className="w-10 shrink-0 flex items-center justify-center">
               <div className="relative h-10 w-10 rounded-xl flex items-center justify-center bg-[var(--accent)]/10 text-[var(--accent)] border border-[var(--accent)]/15 text-sm font-semibold">
                 {initial}
@@ -266,14 +272,19 @@ function Shell() {
               </div>
             </div>
             {expanded && (
-              <div className="min-w-0 flex-1 ml-3">
-                <p className="text-sm font-semibold text-[var(--fg-primary)] truncate leading-snug">{displayName}</p>
-                <p className="flex items-center gap-1 text-[11px] text-[var(--fg-muted)] truncate mt-0.5">
-                  {isAdmin ? <Shield size={10} /> : <Eye size={10} />} {roleLabel}
-                </p>
-              </div>
+              <>
+                <div className="min-w-0 flex-1 ml-3">
+                  <p className="text-sm font-semibold text-[var(--fg-primary)] truncate leading-snug">{displayName}</p>
+                  <p className="flex items-center gap-1 text-[11px] text-[var(--fg-muted)] truncate mt-0.5">
+                    {isAdmin ? <Shield size={10} /> : <Eye size={10} />} {roleLabel}
+                  </p>
+                </div>
+                <span className="shrink-0 pr-1 text-[var(--fg-muted)]">
+                  <ChevronRight size={14} />
+                </span>
+              </>
             )}
-          </div>
+          </button>
         </div>
       </aside>
 
@@ -296,18 +307,6 @@ function Shell() {
             </div>
 
             <div className="flex items-center gap-2 shrink-0">
-              {/* Theme toggle */}
-              <button
-                onClick={toggle}
-                className="p-2.5 rounded-lg text-[var(--fg-muted)] border border-[var(--border-default)] hover:text-[var(--fg-primary)] hover:bg-[var(--bg-surface)] hover:border-[var(--border-hover)] transition-all duration-150"
-                aria-label={isDark ? "Light mode" : "Dark mode"}
-                title={isDark ? "Light mode" : "Dark mode"}
-              >
-                {isDark ? <Sun size={18} /> : <Moon size={18} />}
-              </button>
-
-              <div className="w-px h-6 bg-[var(--border-default)] mx-1 hidden sm:block" />
-
               {/* User menu */}
               <div className="relative" ref={userMenuRef}>
                 <button
@@ -334,10 +333,10 @@ function Shell() {
                     </div>
                     <div className="py-1">
                       <button
-                        onClick={() => { setShowUserMenu(false); toggle(); }}
+                        onClick={() => { setShowUserMenu(false); navigate("/profile"); }}
                         className="w-full flex items-center gap-2.5 px-4 py-2.5 text-sm font-medium text-[var(--fg-secondary)] hover:bg-[var(--bg-surface)] hover:text-[var(--fg-primary)] transition-colors duration-150"
                       >
-                        {isDark ? <Sun size={16} /> : <Moon size={16} />} {isDark ? "Light mode" : "Dark mode"}
+                        <UserCircle size={16} /> Profile
                       </button>
                       <div className="mx-3 my-1 h-px bg-[var(--border-default)]" />
                       <button

@@ -17,6 +17,7 @@ const PortalConfigPage = lazy(() => import("./pages/PortalConfigPage"));
 const PortalAuditLogPage = lazy(() => import("./pages/PortalAuditLogPage"));
 const TransactionFlowPage = lazy(() => import("./pages/TransactionFlowPage"));
 const ManualAssistancePage = lazy(() => import("./pages/ManualAssistancePage"));
+const ProfilePage = lazy(() => import("./pages/ProfilePage"));
 
 function ProtectedRoute({ children }) {
   const token = localStorage.getItem("token");
@@ -53,6 +54,8 @@ export default function App() {
                 Everything else is AdminRoute-wrapped (with two roles,
                 AdminRoute == "block viewers", redirecting them to /dashboard). */}
             <Route path="/dashboard" element={<DashboardRouter />} />
+            {/* Profile: every signed-in user (incl. viewers) — not admin-gated. */}
+            <Route path="/profile" element={<ProfilePage />} />
             <Route path="/overview" element={<AdminRoute><OverviewPage /></AdminRoute>} />
             <Route path="/vouchers" element={<AdminRoute><VouchersPage /></AdminRoute>} />
             <Route path="/vouchers/:uuid" element={<AdminRoute><VouchersPage /></AdminRoute>} />
