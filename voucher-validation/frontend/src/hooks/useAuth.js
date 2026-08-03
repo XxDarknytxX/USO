@@ -23,6 +23,7 @@ export function useAuth() {
       token,
       role,
       email: payload?.email || "",
+      name: payload?.name || "",
       isAdmin: role === "admin",
       isViewer: role === "viewer",
       logout: () => {

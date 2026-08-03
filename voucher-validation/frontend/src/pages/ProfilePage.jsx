@@ -81,10 +81,10 @@ function ThemeCard({ mode, active, onClick }) {
 
 export default function ProfilePage() {
   const navigate = useNavigate();
-  const { email, role, isAdmin, logout } = useAuth();
+  const { email, name, role, isAdmin, logout } = useAuth();
   const { theme, setTheme } = useTheme();
 
-  const displayName = email || "User";
+  const displayName = name?.trim() || (email ? email.split("@")[0] : "User");
   const initial = displayName[0].toUpperCase();
   const roleLabel = role ? role.charAt(0).toUpperCase() + role.slice(1) : "User";
 
@@ -107,6 +107,7 @@ export default function ProfilePage() {
             </div>
             <div className="min-w-0 flex-1">
               <p className="text-base font-semibold text-[var(--fg-primary)] truncate leading-snug">{displayName}</p>
+              {email && <p className="text-[13px] text-[var(--fg-muted)] truncate mt-0.5">{email}</p>}
               <span className="inline-flex items-center gap-1.5 mt-2 px-2.5 py-1 rounded-full text-[11px] font-medium bg-[var(--accent)]/10 text-[var(--accent)]">
                 {isAdmin ? <Shield size={11} /> : <Eye size={11} />} {roleLabel}
               </span>

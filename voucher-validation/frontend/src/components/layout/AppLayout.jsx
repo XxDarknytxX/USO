@@ -77,7 +77,7 @@ export default function AppLayout() {
 function Shell() {
   const navigate = useNavigate();
   const location = useLocation();
-  const { email, role, isAdmin, isViewer, logout } = useAuth();
+  const { email, name, role, isAdmin, isViewer, logout } = useAuth();
   const { loading: siteLoading } = useSite();
 
   const [mobileOpen, setMobileOpen] = useState(false);
@@ -88,10 +88,10 @@ function Shell() {
   const expanded = !collapsed || mobileOpen;
   const sidebarWidth = mobileOpen ? SIDEBAR_EXPANDED : collapsed ? SIDEBAR_COLLAPSED : SIDEBAR_EXPANDED;
 
-  // Show the name (the part before @) rather than the full email — the full
-  // address overflows the sidebar footer. The full email still shows in the
-  // user-menu dropdown. Mirrors how Service Desk renders the name.
-  const displayName = email ? email.split("@")[0] : "User";
+  // Prefer the user's real name; fall back to the email's local part (never the
+  // full address — it overflows the sidebar footer). The full email still shows
+  // in the user-menu dropdown. Mirrors how Service Desk renders the name.
+  const displayName = name?.trim() || (email ? email.split("@")[0] : "User");
   const initial = displayName[0].toUpperCase();
   const roleLabel = role ? role.charAt(0).toUpperCase() + role.slice(1) : "User";
 
