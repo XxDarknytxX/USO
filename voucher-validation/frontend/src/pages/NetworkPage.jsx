@@ -261,6 +261,19 @@ function ProjectCard({ project, isAdmin, onOpen, onDelete }) {
 }
 
 /* ------------ Add project modal ------------------------------------------ */
+// Village portals are served at <slug>.vodafonefiji.cloud (matches the hosts in
+// deploy/sites.json). Derive that default from the site name so admins don't
+// have to retype it for every village.
+const PORTAL_DOMAIN = "vodafonefiji.cloud";
+function deriveHostname(name) {
+  const slug = (name || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-") // spaces / punctuation -> hyphen
+    .replace(/^-+|-+$/g, ""); // trim leading/trailing hyphens
+  return slug ? `${slug}.${PORTAL_DOMAIN}` : "";
+}
+
 function AddProjectModal({ onClose, onSaved }) {
   const [form, setForm] = useState({
     name: "",
@@ -271,7 +284,22 @@ function AddProjectModal({ onClose, onSaved }) {
   const [saving, setSaving] = useState(false);
   const [discovered, setDiscovered] = useState([]);
   const [discovering, setDiscovering] = useState(false);
+  // Tracks whether the admin has manually edited the hostname. Until they do,
+  // the hostname auto-follows the site name; clearing it re-arms the default.
+  const [hostnameEdited, setHostnameEdited] = useState(false);
   const set = (k, v) => setForm((p) => ({ ...p, [k]: v }));
+
+  function onNameChange(value) {
+    setForm((p) => ({
+      ...p,
+      name: value,
+      hostname: hostnameEdited ? p.hostname : deriveHostname(value),
+    }));
+  }
+  function onHostnameChange(value) {
+    setHostnameEdited(value.trim() !== "");
+    set("hostname", value);
+  }
 
   // Fetch Ruijie network groups ON DEMAND only. This is a live Ruijie Cloud
   // call, so it must NOT fire on form open — the admin clicks "Load from Ruijie"
@@ -288,11 +316,15 @@ function AddProjectModal({ onClose, onSaved }) {
   function pickDiscovered(groupId) {
     const g = discovered.find((x) => String(x.groupId) === String(groupId));
     if (!g) return;
-    setForm((p) => ({
-      ...p,
-      ruijieGroupId: String(g.groupId),
-      name: p.name?.trim() ? p.name : g.name || `Group ${g.groupId}`,
-    }));
+    setForm((p) => {
+      const nextName = p.name?.trim() ? p.name : g.name || `Group ${g.groupId}`;
+      return {
+        ...p,
+        ruijieGroupId: String(g.groupId),
+        name: nextName,
+        hostname: hostnameEdited ? p.hostname : deriveHostname(nextName),
+      };
+    });
   }
 
   async function submit(e) {
@@ -363,14 +395,14 @@ function AddProjectModal({ onClose, onSaved }) {
               </div>
             </Field>
             <Field label="Site name" required hint="The village name shown in the switcher, e.g. “Nadi Village”.">
-              <Input value={form.name} onChange={(e) => set("name", e.target.value)} placeholder="Nadi Village" />
+              <Input value={form.name} onChange={(e) => onNameChange(e.target.value)} placeholder="Nadi Village" />
             </Field>
-            <Field label="Portal hostname" hint="Optional — the captive portal domain this network serves.">
+            <Field label="Portal hostname" hint="Auto-filled as sitename.vodafonefiji.cloud — edit to override.">
               <Input
                 mono
                 value={form.hostname}
-                onChange={(e) => set("hostname", e.target.value)}
-                placeholder="portal.vodafone.com.fj"
+                onChange={(e) => onHostnameChange(e.target.value)}
+                placeholder={deriveHostname(form.name) || "korovou.vodafonefiji.cloud"}
               />
             </Field>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
