@@ -281,6 +281,18 @@ const initiatePayment = async (req, res) => {
     });
   }
 
+  // Don't take money for a plan with no vouchers left. The claim step would fail
+  // AFTER payment (the "paid but no voucher" case), so block it up front. The
+  // FOR UPDATE claim remains the backstop for the last-voucher race.
+  if (selectedPlan.soldOut) {
+    log(`>>>> Blocked payment for sold-out plan: ${selectedPlan.name} (${planId})`);
+    return res.status(409).json({
+      ok: false,
+      error: 'This plan just sold out — please choose another.',
+      soldOut: true,
+    });
+  }
+
   try {
     // Create or update session record (includes MAC address from captive portal)
     await TransactionDB.createOrUpdateSession({

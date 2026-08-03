@@ -105,7 +105,9 @@ export default function MainPage() {
     ];
     return order.map((c) => {
       const ps = groups[c];
-      const min = Math.min(...ps.map((p) => priceNum(p.price)));
+      const avail = ps.filter((p) => !p.soldOut);
+      const priced = avail.length ? avail : ps; // "from" ignores sold-out when it can
+      const min = Math.min(...priced.map((p) => priceNum(p.price)));
       return {
         id: c,
         name: titleCase(c),
@@ -113,6 +115,7 @@ export default function MainPage() {
         fromPrice: `$${min.toFixed(2)}`,
         period: periodOf(c),
         count: ps.length,
+        allSoldOut: ps.length > 0 && avail.length === 0,
         hasPopular: ps.some((p) => p.popular),
         points: [
           dataRangeLabel(ps),
@@ -306,7 +309,7 @@ function CategoryCard({ cat, featured, index = 0, onOpen }) {
       <button
         onClick={onOpen}
         className={`group w-full h-full text-left rounded-3xl p-6 sm:p-7 lg:p-8 xl:p-10 flex flex-col animate-enter transition-all duration-300
-          ${featured
+          ${cat.allSoldOut ? 'opacity-70 ' : ''}${featured
             ? 'bg-white/[0.07] backdrop-blur-md border border-white/15 shadow-[0_36px_90px_-30px_rgba(0,0,0,0.85)]'
             : 'bg-white/[0.02] border border-edge hover:bg-white/[0.045] hover:border-edge-hover'}`}
         style={{ animationDelay: `${index * 90}ms` }}
@@ -334,11 +337,19 @@ function CategoryCard({ cat, featured, index = 0, onOpen }) {
 
         {/* CTA */}
         <span className={`w-full inline-flex items-center justify-center gap-2 rounded-xl py-3.5 lg:py-4 text-[14.5px] lg:text-[15px] font-semibold transition-all duration-200
-          ${featured
-            ? 'bg-vf text-white group-hover:bg-vf-hover shadow-lg shadow-vf/25'
-            : 'bg-white/[0.05] text-ink border border-edge group-hover:bg-white/[0.1] group-hover:border-edge-hover'}`}>
-          View {cat.count} plan{cat.count !== 1 ? 's' : ''}
-          <FaArrowRight className="text-[10px] transition-transform duration-200 group-hover:translate-x-0.5" />
+          ${cat.allSoldOut
+            ? 'bg-white/[0.04] text-ink-4 border border-edge'
+            : featured
+              ? 'bg-vf text-white group-hover:bg-vf-hover shadow-lg shadow-vf/25'
+              : 'bg-white/[0.05] text-ink border border-edge group-hover:bg-white/[0.1] group-hover:border-edge-hover'}`}>
+          {cat.allSoldOut ? (
+            'Sold out'
+          ) : (
+            <>
+              View {cat.count} plan{cat.count !== 1 ? 's' : ''}
+              <FaArrowRight className="text-[10px] transition-transform duration-200 group-hover:translate-x-0.5" />
+            </>
+          )}
         </span>
       </button>
     </div>
@@ -438,6 +449,7 @@ function PlansModal({ category, featured, onClose, onBuy, onError }) {
 /* ── A single plan card inside the modal ── */
 function ModalPlanCard({ plan, popular, onBuy, onError }) {
   const [busy, setBusy] = useState(false);
+  const soldOut = !!plan.soldOut;
   const period = periodOf(plan.category);
   const dataLabel = formatData(plan.data);
 
@@ -454,6 +466,7 @@ function ModalPlanCard({ plan, popular, onBuy, onError }) {
   ])].slice(0, 4);
 
   const buy = async () => {
+    if (soldOut) return;
     setBusy(true);
     try { await onBuy(plan); }
     catch (e) { onError?.(e.message || 'Purchase failed.'); }
@@ -461,17 +474,23 @@ function ModalPlanCard({ plan, popular, onBuy, onError }) {
   };
 
   return (
-    <div className={`group relative flex flex-col rounded-2xl overflow-hidden transition-all duration-300 hover:-translate-y-1
-      ${popular
-        ? 'border border-vf/50 bg-gradient-to-b from-vf/[0.15] via-vf/[0.03] to-transparent shadow-[0_30px_70px_-32px_rgba(230,0,0,0.65)]'
-        : 'border border-edge bg-white/[0.02] hover:bg-white/[0.04] hover:border-edge-hover'}`}>
+    <div className={`group relative flex flex-col rounded-2xl overflow-hidden transition-all duration-300
+      ${soldOut
+        ? 'border border-edge bg-white/[0.015] opacity-60 saturate-[0.4]'
+        : popular
+          ? 'border border-vf/50 bg-gradient-to-b from-vf/[0.15] via-vf/[0.03] to-transparent shadow-[0_30px_70px_-32px_rgba(230,0,0,0.65)] hover:-translate-y-1'
+          : 'border border-edge bg-white/[0.02] hover:bg-white/[0.04] hover:border-edge-hover hover:-translate-y-1'}`}>
 
-      {/* Popular ribbon */}
-      {popular && (
+      {/* Ribbon — "sold out" takes precedence over "most popular" */}
+      {soldOut ? (
+        <div className="flex items-center justify-center gap-1.5 h-8 bg-white/[0.08] text-ink-3 text-[10.5px] font-bold uppercase tracking-[0.14em] shrink-0 border-b border-edge">
+          Sold out
+        </div>
+      ) : popular ? (
         <div className="flex items-center justify-center gap-1.5 h-8 bg-vf text-white text-[10.5px] font-bold uppercase tracking-[0.14em] shrink-0">
           <FaStar className="text-[9px]" /> Most popular
         </div>
-      )}
+      ) : null}
 
       <div className="flex flex-col flex-1 p-6 sm:p-7">
         {/* Name + blurb */}
@@ -516,15 +535,17 @@ function ModalPlanCard({ plan, popular, onBuy, onError }) {
 
         <button
           onClick={buy}
-          disabled={busy}
+          disabled={busy || soldOut}
           className={`w-full flex items-center justify-center gap-2 rounded-xl text-sm font-semibold py-3.5 transition-all duration-200 outline-none
-            ${busy
+            ${soldOut || busy
               ? 'bg-white/5 text-ink-5 cursor-not-allowed'
               : popular
                 ? 'bg-vf hover:bg-vf-hover text-white shadow-lg shadow-vf/25 active:scale-[0.98]'
                 : 'bg-white/[0.06] hover:bg-white/[0.12] text-ink border border-edge active:scale-[0.98]'}`}
         >
-          {busy ? (
+          {soldOut ? (
+            'Sold out'
+          ) : busy ? (
             <>
               <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
               Processing…

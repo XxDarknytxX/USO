@@ -69,21 +69,60 @@ export function makePortalApiController(pool) {
           params
         );
 
+        // Tally AVAILABLE (unused, unclaimed) vouchers per user group so a plan
+        // with none left can be shown "sold out" and blocked before payment.
+        // Mirrors the claim-voucher matching exactly: status '1', not disabled,
+        // not already claimed, matched by user_group_id OR (site group_id + name).
+        const availWhere = [
+          "v.status = '1'",
+          "v.disable_status = 0",
+          "v.id NOT IN (SELECT vc.voucher_id FROM voucher_claims vc WHERE vc.status IN ('claimed','used','manually_assigned') AND vc.voucher_id IS NOT NULL)",
+        ];
+        const availParams = [];
+        if (groupId) { availWhere.push('v.group_id = ?'); availParams.push(groupId); }
+        const [availRows] = await pool.query(
+          `SELECT v.user_group_id AS ugid, v.group_id AS gid, v.user_group_name AS ugname, COUNT(*) AS cnt
+             FROM vouchers v
+            WHERE ${availWhere.join(' AND ')}
+            GROUP BY v.user_group_id, v.group_id, v.user_group_name`,
+          availParams
+        );
+        const availableFor = (p) => {
+          const pid = p.user_group_id != null ? String(p.user_group_id) : '';
+          const pgid = p.group_id != null ? String(p.group_id) : '';
+          const pname = (p.user_group_name || '').toLowerCase();
+          let n = 0;
+          for (const r of availRows) {
+            const byId = pid !== '' && r.ugid != null && String(r.ugid) === pid;
+            const byName =
+              pgid !== '' && pname !== '' && r.gid != null &&
+              String(r.gid) === pgid && (r.ugname || '').toLowerCase() === pname;
+            if (byId || byName) n += Number(r.cnt);
+          }
+          return n;
+        };
+
         // Format to match the exact shape the USO Portal frontend expects
-        const formatted = plans.map(p => ({
-          id: p.plan_key,
-          name: p.name,
-          data: p.data_allowance,
-          icon: p.icon,
-          category: p.category,
-          price: `$${Number(p.price).toFixed(2)}`,
-          popular: !!p.popular,
-          features: typeof p.features === 'string' ? JSON.parse(p.features) : p.features,
-          description: p.description || '',
-          // Extra fields for voucher claim
-          userGroupId: p.user_group_id,
-          planConfigId: p.id,
-        }));
+        const formatted = plans.map(p => {
+          const availableCount = availableFor(p);
+          return {
+            id: p.plan_key,
+            name: p.name,
+            data: p.data_allowance,
+            icon: p.icon,
+            category: p.category,
+            price: `$${Number(p.price).toFixed(2)}`,
+            popular: !!p.popular,
+            features: typeof p.features === 'string' ? JSON.parse(p.features) : p.features,
+            description: p.description || '',
+            // Extra fields for voucher claim
+            userGroupId: p.user_group_id,
+            planConfigId: p.id,
+            // Availability — so the portal can show "sold out" + block purchase.
+            availableCount,
+            soldOut: availableCount === 0,
+          };
+        });
 
         return res.json(formatted);
       } catch (e) { console.error(e); return send.serverErr(res); }
