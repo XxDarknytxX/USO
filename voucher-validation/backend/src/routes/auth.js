@@ -31,6 +31,9 @@ export function makeAuthRouter(controller) {
   );
 
   router.get("/me", requireAuth, controller.me);
+  // Per-user UI preferences — synced across the user's devices.
+  router.get("/me/preferences", requireAuth, controller.getPreferences);
+  router.put("/me/preferences", requireAuth, controller.savePreferences);
   router.get("/dashboard", requireAuth, controller.dashboard);
 
   return router;

@@ -132,6 +132,71 @@ export function makeAdminController(pool) {
       }
     },
 
+    // GET /api/me/preferences — per-user UI prefs (village display filter, active
+    // scope). Stored server-side so a user's settings sync across their devices
+    // instead of living in one browser's localStorage.
+    getPreferences: async (req, res) => {
+      try {
+        const [rows] = await pool.query(
+          "SELECT prefs FROM user_preferences WHERE user_id = ?",
+          [req.user.id]
+        );
+        let prefs = {};
+        if (rows.length && rows[0].prefs) {
+          prefs = typeof rows[0].prefs === "string" ? JSON.parse(rows[0].prefs) : rows[0].prefs;
+        }
+        return send.ok(res, { prefs });
+      } catch (e) {
+        console.error(e);
+        return send.serverErr(res);
+      }
+    },
+
+    // PUT /api/me/preferences { prefs } — MERGE the given keys into the user's
+    // stored prefs, so a partial save never clobbers other settings.
+    savePreferences: async (req, res) => {
+      const incoming = req.body?.prefs;
+      if (!incoming || typeof incoming !== "object" || Array.isArray(incoming)) {
+        return res.status(400).json({ error: "prefs must be an object" });
+      }
+      // Atomic read-merge-write: lock the user's row (FOR UPDATE) so two of the
+      // same user's devices saving different keys at once can't clobber each
+      // other — the merge preserves keys only if the read+write are serialized.
+      const conn = await pool.getConnection();
+      try {
+        await conn.beginTransaction();
+        // Ensure the row exists so FOR UPDATE always has something to lock —
+        // this serializes even two brand-new-user first writes (the second
+        // INSERT IGNORE blocks on the first, then reads its committed value).
+        await conn.query(
+          "INSERT IGNORE INTO user_preferences (user_id, prefs) VALUES (?, '{}')",
+          [req.user.id]
+        );
+        const [rows] = await conn.query(
+          "SELECT prefs FROM user_preferences WHERE user_id = ? FOR UPDATE",
+          [req.user.id]
+        );
+        let current = {};
+        if (rows.length && rows[0].prefs) {
+          current = typeof rows[0].prefs === "string" ? JSON.parse(rows[0].prefs) : rows[0].prefs;
+        }
+        const merged = { ...current, ...incoming };
+        await conn.query(
+          `INSERT INTO user_preferences (user_id, prefs) VALUES (?, ?)
+           ON DUPLICATE KEY UPDATE prefs = VALUES(prefs), updated_at = CURRENT_TIMESTAMP`,
+          [req.user.id, JSON.stringify(merged)]
+        );
+        await conn.commit();
+        return send.ok(res, { prefs: merged });
+      } catch (e) {
+        try { await conn.rollback(); } catch { /* ignore */ }
+        console.error(e);
+        return send.serverErr(res);
+      } finally {
+        conn.release();
+      }
+    },
+
     // GET /api/dashboard (placeholder)
     dashboard: async (_req, res) => send.ok(res, { widgets: [] }),
 

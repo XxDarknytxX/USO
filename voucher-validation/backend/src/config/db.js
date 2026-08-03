@@ -196,6 +196,15 @@ export async function getPool() {
       INDEX idx_email (email),
       INDEX idx_updated (updated_at)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
+
+    // Per-user UI preferences (e.g. the village display filter + active scope),
+    // stored server-side so a user's settings sync across their devices instead
+    // of living in one browser's localStorage. One JSON blob per user.
+    `CREATE TABLE IF NOT EXISTS user_preferences (
+      user_id INT NOT NULL PRIMARY KEY,
+      prefs JSON NOT NULL,
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
   ];
 
   for (const sql of tableCreations) {

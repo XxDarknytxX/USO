@@ -154,6 +154,10 @@ export const networkApi = {
 // User management API helpers
 export const userApi = {
   me: () => api("/me"),
+  // Per-user UI preferences (village display filter, active scope) — synced
+  // across the user's devices instead of living in one browser's localStorage.
+  preferences: () => api("/me/preferences"),
+  savePreferences: (prefs) => api("/me/preferences", { method: "PUT", body: { prefs } }),
   list: () => api("/users"),
   create: (body) => api("/users", { method: "POST", body }),
   update: (id, body) => api(`/users/${id}`, { method: "PUT", body }),

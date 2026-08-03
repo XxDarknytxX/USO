@@ -5,10 +5,11 @@
 //     an id → that village; everything rescopes to it.
 //   • visibleSiteIds — a DISPLAY FILTER for the Overview board + Network tab:
 //     which villages to show. null → all; an array → that subset.
-// Both persist in localStorage.
+// Both are saved as a PER-USER server preference (synced across the user's
+// devices), with localStorage kept as an instant cache/fallback.
 
-import { createContext, useContext, useState, useEffect, useCallback } from "react";
-import { networkApi } from "../services/api";
+import { createContext, useContext, useState, useEffect, useCallback, useRef } from "react";
+import { networkApi, userApi } from "../services/api";
 
 const SiteContext = createContext(null);
 const STORAGE_KEY = "vv:activeSiteId";
@@ -37,30 +38,88 @@ export function SiteProvider({ children }) {
   const [visibleSiteIds, setVisibleState] = useState(readVisible); // null = all
   const [loading, setLoading] = useState(true);
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    try {
-      const data = await networkApi.projects();
-      const list = data.projects || [];
-      setSites(list);
-      // Keep the persisted scope if that village still exists. Compare as strings
-      // so a stored id can never be dropped over a number-vs-string mismatch
-      // (which would silently reset the scope to "All Villages" on reload).
-      setActiveSiteIdState((cur) =>
-        cur != null && list.some((s) => String(s.id) === String(cur)) ? cur : null
-      );
-      // Prune the visible set to sites that still exist; empty → treat as all.
-      setVisibleState((cur) => {
-        if (cur == null) return null;
-        const kept = cur.filter((id) => list.some((s) => String(s.id) === String(id)));
-        return kept.length && kept.length < list.length ? kept : null;
-      });
-    } catch {
-      setSites([]);
-    } finally {
-      setLoading(false);
-    }
+  // Debounced server sync — batches rapid village toggles into one PUT. The
+  // backend merges atomically, so sending one key never clobbers the others.
+  const pendingPrefs = useRef({});
+  const saveTimer = useRef(null);
+  const loadSeq = useRef(0);
+  const schedulePrefSave = useCallback((partial) => {
+    pendingPrefs.current = { ...pendingPrefs.current, ...partial };
+    if (saveTimer.current) clearTimeout(saveTimer.current);
+    saveTimer.current = setTimeout(() => {
+      const toSave = pendingPrefs.current;
+      pendingPrefs.current = {};
+      saveTimer.current = null;
+      userApi.savePreferences(toSave).catch((e) => console.warn("pref sync failed:", e.message));
+    }, 400);
   }, []);
+
+  const load = useCallback(async () => {
+    const seq = ++loadSeq.current; // guards overlapping loads (StrictMode / reload)
+    setLoading(true);
+
+    // Fetch projects + prefs independently so we can tell "no server pref" apart
+    // from "the prefs fetch FAILED" — conflating them would let a transient error
+    // migrate this device's stale localStorage over real, synced server prefs.
+    const [projRes, prefsRes] = await Promise.all([
+      networkApi.projects().then((d) => ({ ok: true, d })).catch(() => ({ ok: false })),
+      userApi.preferences().then((p) => ({ ok: true, prefs: p?.prefs || {} })).catch(() => ({ ok: false })),
+    ]);
+    if (seq !== loadSeq.current) return; // a newer load superseded this one
+
+    if (!projRes.ok) {
+      setSites([]);
+      setLoading(false);
+      return;
+    }
+    const list = projRes.d.projects || [];
+    setSites(list);
+
+    const prefsOk = prefsRes.ok;
+    const serverPrefs = prefsRes.prefs || {};
+    const hasServerActive = prefsOk && serverPrefs.activeSiteId !== undefined;
+    const hasServerVisible = prefsOk && serverPrefs.visibleSiteIds !== undefined;
+
+    // Don't clobber a choice the user made WHILE this load was in flight — a
+    // key that's queued for save wins over whatever the server returned. Use
+    // hasOwnProperty (not truthiness): null is a valid pending value ("all").
+    const pending = pendingPrefs.current || {};
+    const activePending = Object.prototype.hasOwnProperty.call(pending, "activeSiteId");
+    const visiblePending = Object.prototype.hasOwnProperty.call(pending, "visibleSiteIds");
+
+    const migrate = {};
+
+    // Active scope: server pref wins (synced), else the local cache. Compare as
+    // strings so a number-vs-string id can never be silently dropped.
+    if (!activePending) {
+      const rawActive = hasServerActive ? serverPrefs.activeSiteId : readActive();
+      const nextActive =
+        rawActive != null && list.some((s) => String(s.id) === String(rawActive)) ? Number(rawActive) : null;
+      setActiveSiteIdState(nextActive);
+      localStorage.setItem(STORAGE_KEY, nextActive == null ? "all" : String(nextActive));
+      // Migrate local→server ONLY when we KNOW the server has no such pref.
+      if (prefsOk && !hasServerActive && nextActive != null) migrate.activeSiteId = nextActive;
+    }
+
+    // Visible filter: same precedence; prune to existing sites; empty/full → all.
+    if (!visiblePending) {
+      const rawVisible = hasServerVisible ? serverPrefs.visibleSiteIds : readVisible();
+      let nextVisible = null;
+      if (Array.isArray(rawVisible)) {
+        const kept = rawVisible.map(Number).filter((id) => list.some((s) => String(s.id) === String(id)));
+        nextVisible = kept.length && kept.length < list.length ? kept : null;
+      }
+      setVisibleState(nextVisible);
+      if (nextVisible == null) localStorage.removeItem(VISIBLE_KEY);
+      else localStorage.setItem(VISIBLE_KEY, JSON.stringify(nextVisible));
+      if (prefsOk && !hasServerVisible && nextVisible != null) migrate.visibleSiteIds = nextVisible;
+    }
+
+    // One-time migration for existing users (server empty, localStorage set).
+    if (Object.keys(migrate).length) schedulePrefSave(migrate);
+
+    setLoading(false);
+  }, [schedulePrefSave]);
 
   useEffect(() => {
     load();
@@ -70,7 +129,8 @@ export function SiteProvider({ children }) {
     const next = id == null || id === "all" ? null : Number(id);
     setActiveSiteIdState(next);
     localStorage.setItem(STORAGE_KEY, next == null ? "all" : String(next));
-  }, []);
+    schedulePrefSave({ activeSiteId: next });
+  }, [schedulePrefSave]);
 
   // Persist visible selection. Passing null (or a full set) means "all".
   const setVisibleSiteIds = useCallback(
@@ -81,8 +141,9 @@ export function SiteProvider({ children }) {
       setVisibleState(next);
       if (next == null) localStorage.removeItem(VISIBLE_KEY);
       else localStorage.setItem(VISIBLE_KEY, JSON.stringify(next));
+      schedulePrefSave({ visibleSiteIds: next });
     },
-    [sites]
+    [sites, schedulePrefSave]
   );
 
   const isSiteVisible = useCallback(
