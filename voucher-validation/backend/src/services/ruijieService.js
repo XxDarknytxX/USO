@@ -336,19 +336,41 @@ class RuijieService {
    * Download a previously-exported voucher .xlsx as a Buffer. The report is
    * generated asynchronously, so we poll until the bytes are ready. A JSON body
    * means "not ready"/error; a throttle (code 44 / HTTP 429) aborts immediately —
-   * retrying would burn more quota. The poll window (default 10 × 12s = 120s)
-   * matches the vendor's expectation that large-site reports can take a while.
-   * GET /report?path={fileName}.
+   * retrying would burn more quota.
+   *
+   * Measured: Ruijie has the file ready in ~1.6–2.9s (150–400 vouchers). So we
+   * poll on a FAST BACKOFF — ~1s, 1.5s, 2.25s… widening toward 12s — instead of a
+   * flat interval. This catches the common case in ~2–5s (vs a flat 12s poll that
+   * turned every ~2s wait into a 12s one — ~10s of idle time per village) while
+   * still tolerating a genuinely slow large-site report within the same ~120s
+   * ceiling. GET /report?path={fileName}.
+   *
+   * Back-compat: pass `intervalMs` to pin a flat gap (disables backoff), and/or
+   * `attempts` to hard-cap the poll count.
    */
-  async downloadVoucherExcel(fileName, { attempts = 10, intervalMs = 12000 } = {}) {
+  async downloadVoucherExcel(fileName, opts = {}) {
+    const {
+      initialMs = 1000,       // first poll gap (report is usually ready by ~2–3s)
+      maxIntervalMs = 12000,  // cap for the long tail
+      factor = 1.5,           // backoff growth
+      budgetMs = 120000,      // total wall-clock ceiling (unchanged from the old 10×12s)
+      intervalMs = null,      // back-compat: a flat interval pins the gap (no backoff)
+      attempts = null,        // back-compat: optional hard cap on poll count
+    } = opts;
+
     const accessToken = await this.getAccessToken();
     const url = new URL(this.buildUrl('/report'));
     url.searchParams.set('access_token', accessToken);
     url.searchParams.set('ishttps', 'false');
     url.searchParams.set('path', fileName);
 
+    const start = Date.now();
     let lastErr;
-    for (let attempt = 1; attempt <= attempts; attempt++) {
+    let attempt = 0;
+    let delay = intervalMs != null ? intervalMs : initialMs;
+
+    for (;;) {
+      attempt++;
       const r = await ruijieFetchBinary(url.toString(), { method: 'GET', headers: { Accept: '*/*' } });
 
       // Accept when the bytes are Excel by content-type OR by the .xlsx/ZIP magic
@@ -361,9 +383,15 @@ class RuijieService {
         throw new Error(`Voucher report download throttled (code=${r.body?.code ?? r.status}) — aborting to protect quota`);
       }
       lastErr = new Error(
-        `Voucher report not ready (attempt ${attempt}/${attempts}, status=${r.status}, contentType=${r.contentType || 'none'}, code=${r.body?.code ?? ''})`
+        `Voucher report not ready (attempt ${attempt}, status=${r.status}, contentType=${r.contentType || 'none'}, code=${r.body?.code ?? ''})`
       );
-      if (attempt < attempts) await _sleep(intervalMs);
+
+      // Stop on a legacy attempt cap, or once the next sleep would blow the budget.
+      if (attempts != null && attempt >= attempts) break;
+      if (Date.now() - start + delay > budgetMs) break;
+
+      await _sleep(delay);
+      if (intervalMs == null) delay = Math.min(maxIntervalMs, Math.round(delay * factor));
     }
     throw lastErr;
   }
