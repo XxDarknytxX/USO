@@ -181,6 +181,21 @@ export async function getPool() {
       checked_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
       INDEX idx_proj_time (project_id, checked_at)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
+
+    // M-PAiSA number → email mapping, ingested from the periodic customer report
+    // (a UTF-16 tab-separated SQL export). `number` is the key: re-uploading a
+    // report updates existing rows and inserts new ones (never duplicates).
+    `CREATE TABLE IF NOT EXISTS mpaisa_mappings (
+      number VARCHAR(32) NOT NULL PRIMARY KEY,
+      email VARCHAR(255) NULL,
+      email_status VARCHAR(32) NULL,
+      account_status VARCHAR(32) NULL,
+      source_logtime DATETIME NULL,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      INDEX idx_email (email),
+      INDEX idx_updated (updated_at)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
   ];
 
   for (const sql of tableCreations) {

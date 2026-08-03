@@ -11,7 +11,7 @@ import { Toaster } from "react-hot-toast";
 import {
   LayoutDashboard, Gauge, Network, Ticket, History, RefreshCw, Globe,
   FileText, GitBranch, Users, Settings, Menu, X, ChevronLeft, ChevronRight,
-  ChevronDown, LogOut, Shield, Eye, LifeBuoy, UserCircle,
+  ChevronDown, LogOut, Shield, Eye, LifeBuoy, UserCircle, Wallet,
 } from "lucide-react";
 
 import { useAuth } from "../../hooks/useAuth";
@@ -53,6 +53,7 @@ const navSections = [
       { to: "/portal-audit", label: "Portal Logs", Icon: FileText },
       { to: "/portal-flows", label: "Txn Flows", Icon: GitBranch },
       { to: "/manual-assistance", label: "Manual Assistance", Icon: LifeBuoy },
+      { to: "/mpaisa", label: "M-PAiSA Mapping", Icon: Wallet },
     ],
   },
   {
@@ -87,7 +88,10 @@ function Shell() {
   const expanded = !collapsed || mobileOpen;
   const sidebarWidth = mobileOpen ? SIDEBAR_EXPANDED : collapsed ? SIDEBAR_COLLAPSED : SIDEBAR_EXPANDED;
 
-  const displayName = email || "User";
+  // Show the name (the part before @) rather than the full email — the full
+  // address overflows the sidebar footer. The full email still shows in the
+  // user-menu dropdown. Mirrors how Service Desk renders the name.
+  const displayName = email ? email.split("@")[0] : "User";
   const initial = displayName[0].toUpperCase();
   const roleLabel = role ? role.charAt(0).toUpperCase() + role.slice(1) : "User";
 
@@ -327,6 +331,7 @@ function Shell() {
                   <div className="absolute right-0 mt-[18px] w-56 bg-[var(--bg-elevated)] rounded-xl overflow-hidden border border-[var(--border-default)] shadow-[var(--shadow-elevated)] animate-slide-down">
                     <div className="px-4 py-3 border-b border-[var(--border-default)]">
                       <p className="text-sm font-semibold text-[var(--fg-primary)] truncate">{displayName}</p>
+                      {email && <p className="text-xs text-[var(--fg-muted)] truncate mt-0.5">{email}</p>}
                       <span className="inline-flex items-center gap-1 mt-2 px-2 py-0.5 rounded-full text-[10px] font-medium bg-[var(--accent)]/10 text-[var(--accent)]">
                         {isAdmin ? <Shield size={10} /> : <Eye size={10} />} {roleLabel}
                       </span>

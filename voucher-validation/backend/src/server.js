@@ -15,6 +15,8 @@ import { makePortalConfigRouter } from "./routes/portalConfig.js";
 import { makePortalRouter } from "./routes/portal.js";
 import { makeNetworkController } from "./controllers/networkController.js";
 import { makeNetworkRouter } from "./routes/network.js";
+import { makeMpaisaController } from "./controllers/mpaisaController.js";
+import { makeMpaisaRouter } from "./routes/mpaisa.js";
 import { startCollector } from "./services/networkCollector.js";
 import { makeSyncScheduler } from "./services/syncScheduler.js";
 import { makeAttachScope } from "./middleware/auth.js";
@@ -45,6 +47,10 @@ app.use(
     credentials: true,
   })
 );
+// The M-PAiSA report upload carries a whole customer report as JSON text — give
+// just that route a larger body limit. The global parser below then skips a body
+// already parsed here (body-parser marks req._body once parsed).
+app.use("/api/mpaisa/upload", express.json({ limit: "25mb" }));
 app.use(express.json());
 
 // Boot env check (presence only — never log secret values)
@@ -72,6 +78,7 @@ const voucher = makeVoucherController(pool);
 const portalConfig = makePortalConfigController(pool);
 const portalApi = makePortalApiController(pool);
 const network = makeNetworkController(pool);
+const mpaisa = makeMpaisaController(pool);
 
 // Automatic Excel voucher sync — interval + on/off configured from the admin
 // Settings page (app_settings: sync_enabled / sync_interval_minutes). Lives in
@@ -93,6 +100,7 @@ app.use("/api/users", makeUserRouter(admin));
 app.use("/api/portal-config", makePortalConfigRouter(portalConfig, attachScope));
 app.use("/api/portal", makePortalRouter(portalApi));
 app.use("/api/network", makeNetworkRouter(network, attachScope));
+app.use("/api/mpaisa", makeMpaisaRouter(mpaisa));
 
 // Health check (no secrets exposed)
 app.get("/health", (_req, res) =>

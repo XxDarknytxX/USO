@@ -159,3 +159,12 @@ export const userApi = {
   update: (id, body) => api(`/users/${id}`, { method: "PUT", body }),
   remove: (id) => api(`/users/${id}`, { method: "DELETE" }),
 };
+
+// M-PAiSA number→email mapping. `upload` sends the report as decoded text.
+export const mpaisaApi = {
+  list: (params = {}) => {
+    const qs = new URLSearchParams(params).toString();
+    return api(`/mpaisa${qs ? `?${qs}` : ""}`);
+  },
+  upload: (content) => api("/mpaisa/upload", { method: "POST", body: { content } }),
+};
