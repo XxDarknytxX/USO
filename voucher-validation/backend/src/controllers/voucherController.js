@@ -686,7 +686,10 @@ export function makeVoucherController(pool) {
         // Effective group filter: admin -> requested (null = all); viewer -> their
         // assigned set, or the requested group intersected with it. A viewer who
         // resolves to no villages gets [] -> an EMPTY payload, never the unscoped all.
-        const gids = effectiveGroupIds(scope, singleGroup);
+        // Requested = a single village (groupId) OR the visible subset of the "All
+        // Villages" display filter (groupIds).
+        const requested = req.query.groupIds || req.query.groupId || null;
+        const gids = effectiveGroupIds(scope, requested);
         const stats = await getVoucherStats(pool, gids);
         // vouchers_historical has no group_id, so it can't be village-scoped —
         // viewers get none; admins keep the global archived rollup.
@@ -753,17 +756,27 @@ export function makeVoucherController(pool) {
 
     searchVouchers: async (req, res) => {
       try {
-        const { q, page, limit, groupId } = req.query;
+        const { q, page, limit } = req.query;
         if (!q || q.trim().length < 2) return send.bad(res, 'Search query must be at least 2 characters');
         const pg = parseInt(page) || 1;
         const lim = parseInt(limit) || 20;
         const offset = (pg - 1) * lim;
+
+        // Scope: single village (groupId) or the visible subset (groupIds), clamped
+        // to the viewer's villages. null = all (admin); [] = none → empty result.
+        const scope = req.scope || { isViewer: false };
+        const gids = effectiveGroupIds(scope, req.query.groupIds || req.query.groupId || null);
+        if (Array.isArray(gids) && gids.length === 0) {
+          return send.ok(res, { vouchers: [], total: 0, page: pg, limit: lim, totalPages: 0 });
+        }
+
         const like = `%${q.trim()}%`;
         // Parenthesized so the optional site filter ANDs correctly with the OR group.
         const searchFields = '(voucher_code LIKE ? OR first_name LIKE ? OR last_name LIKE ? OR email LIKE ? OR phone LIKE ? OR comment LIKE ? OR name_ref LIKE ? OR package_name LIKE ?)';
         const searchParams = Array(8).fill(like);
-        const where = groupId ? `${searchFields} AND group_id = ?` : searchFields;
-        const whereParams = groupId ? [...searchParams, groupId] : searchParams;
+        const siteClause = Array.isArray(gids) ? ` AND group_id IN (${gids.map(() => '?').join(',')})` : '';
+        const where = `${searchFields}${siteClause}`;
+        const whereParams = Array.isArray(gids) ? [...searchParams, ...gids] : searchParams;
 
         const [[countRow]] = await pool.query(`SELECT COUNT(*) AS total FROM vouchers WHERE ${where}`, whereParams);
         const [rows] = await pool.query(

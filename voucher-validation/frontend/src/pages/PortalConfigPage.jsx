@@ -94,7 +94,7 @@ const EMPTY_FORM = {
 // ---------------------------------------------------------------------------
 export default function PortalConfigPage() {
   const { isAdmin } = useAuth();
-  const { activeGroupId } = useSite();
+  const { activeGroupId, visibleSiteIds, sites } = useSite();
 
   const [plans, setPlans] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -111,7 +111,19 @@ export default function PortalConfigPage() {
     try {
       const params = {};
       if (categoryFilter) params.category = categoryFilter;
-      if (activeGroupId) params.groupId = activeGroupId;
+      if (activeGroupId) {
+        // A single village is selected → just that village.
+        params.groupId = activeGroupId;
+      } else if (visibleSiteIds) {
+        // "All Villages" with some villages hidden by the display filter → show
+        // only the visible ones (map project ids → their Ruijie group ids).
+        const idset = new Set(visibleSiteIds.map(String));
+        const ids = sites
+          .filter((s) => idset.has(String(s.id)))
+          .map((s) => s.ruijieGroupId)
+          .filter(Boolean);
+        if (ids.length) params.groupIds = ids.join(",");
+      }
       const data = await portalConfigApi.list(params);
       setPlans(data.plans || []);
     } catch (err) {
@@ -119,7 +131,7 @@ export default function PortalConfigPage() {
     } finally {
       setLoading(false);
     }
-  }, [categoryFilter, activeGroupId]);
+  }, [categoryFilter, activeGroupId, visibleSiteIds, sites]);
 
   useEffect(() => {
     fetchPlans();

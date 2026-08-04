@@ -42,7 +42,23 @@ export default function VouchersPage() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const { isAdmin } = useAuth();
-  const { activeSite, activeGroupId, sites } = useSite();
+  const { activeSite, activeGroupId, sites, visibleSiteIds } = useSite();
+
+  // Query params that scope requests to the current view: a single village
+  // (groupId), the visible subset of the "All Villages" display filter
+  // (groupIds), or nothing (truly all villages).
+  const scopeParams = useMemo(() => {
+    if (activeGroupId) return { groupId: activeGroupId };
+    if (visibleSiteIds) {
+      const idset = new Set(visibleSiteIds.map(String));
+      const ids = sites
+        .filter((s) => idset.has(String(s.id)))
+        .map((s) => s.ruijieGroupId)
+        .filter(Boolean);
+      if (ids.length) return { groupIds: ids.join(",") };
+    }
+    return {};
+  }, [activeGroupId, visibleSiteIds, sites]);
 
   const [vouchers, setVouchers] = useState([]);
   const [total, setTotal] = useState(0);
@@ -71,19 +87,18 @@ export default function VouchersPage() {
 
   useEffect(() => {
     voucherApi
-      .stats(activeGroupId ? { groupId: activeGroupId } : {})
+      .stats(scopeParams)
       .then((data) => {
         const names = (data.packageStats || []).map((p) => p.package_name).sort();
         setPackages(names);
       })
       .catch(() => {});
-  }, [activeGroupId]);
+  }, [scopeParams]);
 
   const fetchVouchers = useCallback(async () => {
     setLoading(true);
     try {
-      const params = { page: String(page), limit: String(limit) };
-      if (activeGroupId) params.groupId = activeGroupId;
+      const params = { page: String(page), limit: String(limit), ...scopeParams };
       if (statusFilter) params.status = statusFilter;
       if (packageFilter) params.packageName = packageFilter;
 
@@ -105,7 +120,7 @@ export default function VouchersPage() {
     } finally {
       setLoading(false);
     }
-  }, [page, limit, statusFilter, packageFilter, searchQuery, phoneFilter, viewMode, activeGroupId]);
+  }, [page, limit, statusFilter, packageFilter, searchQuery, phoneFilter, viewMode, scopeParams]);
 
   useEffect(() => {
     fetchVouchers();

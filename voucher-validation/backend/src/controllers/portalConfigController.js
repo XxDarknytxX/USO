@@ -55,13 +55,24 @@ export function makePortalConfigController(pool) {
     // GET /api/portal-config/plans
     getPlans: async (req, res) => {
       try {
-        const { category, active, groupId } = req.query;
+        const { category, active, groupId, groupIds } = req.query;
         const where = [];
         const params = [];
 
         if (category) { where.push('p.category = ?'); params.push(category); }
         if (active !== undefined) { where.push('p.is_active = ?'); params.push(active === 'true' ? 1 : 0); }
-        if (groupId) { where.push('p.group_id = ?'); params.push(groupId); }
+        if (groupId) {
+          where.push('p.group_id = ?');
+          params.push(groupId);
+        } else if (groupIds) {
+          // Subset of villages — the admin's "All Villages" display filter with
+          // some sites removed. Comma-separated group ids → p.group_id IN (...).
+          const ids = String(groupIds).split(',').map((s) => s.trim()).filter(Boolean);
+          if (ids.length) {
+            where.push(`p.group_id IN (${ids.map(() => '?').join(',')})`);
+            params.push(...ids);
+          }
+        }
 
         const whereClause = where.length ? `WHERE ${where.join(' AND ')}` : '';
 
