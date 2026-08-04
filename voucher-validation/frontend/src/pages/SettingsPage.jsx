@@ -181,9 +181,12 @@ export default function SettingsPage() {
         className="mx-auto max-w-4xl xl:max-w-6xl"
       />
 
-      {/* Centered; two masonry columns on wide screens so the panels fill the
-          width instead of hugging the left edge. */}
-      <div className="mt-6 mx-auto max-w-4xl xl:max-w-6xl columns-1 xl:columns-2 [column-gap:1.25rem] [&>*]:mb-5 [&>*]:break-inside-avoid">
+      {/* Centered; the panels sit two-up on wide screens (single column when
+          narrow) so they fill the width without dead space. */}
+      <div className="mt-6 mx-auto max-w-4xl xl:max-w-6xl grid grid-cols-1 xl:grid-cols-2 gap-5 items-start">
+        {/* Left column: short System info stacked above the tall SMTP form so
+            the two columns end up roughly the same height. */}
+        <div className="space-y-5">
         {/* System info */}
         <Panel
           title="System information"
@@ -224,74 +227,6 @@ export default function SettingsPage() {
               >
                 Operational
               </Badge>
-            </div>
-          </div>
-        </Panel>
-
-        {/* Voucher sync schedule */}
-        <Panel
-          title="Voucher sync"
-          subtitle="How often the portal pulls the latest vouchers from Ruijie (Excel export). Turn it off to pause all automatic syncing — you can still sync on demand from the Dashboard."
-          icon={<RefreshCw size={15} />}
-        >
-          <div className="space-y-5">
-            <Toggle
-              checked={syncEnabled}
-              onChange={setSyncEnabled}
-              label="Automatic sync"
-              hint={
-                syncEnabled
-                  ? "Vouchers refresh automatically on the schedule below."
-                  : "Automatic syncing is paused."
-              }
-            />
-
-            <Field
-              label="Sync frequency"
-              hint="Minimum 5 minutes to protect the Ruijie API rate limit. More villages = more calls per cycle."
-              className="max-w-xs"
-            >
-              <Select
-                value={syncInterval}
-                onChange={(e) => setSyncInterval(Number(e.target.value))}
-                disabled={!syncEnabled}
-              >
-                {intervalChoices.map((o) => (
-                  <option key={o.v} value={o.v}>
-                    {o.label}
-                  </option>
-                ))}
-              </Select>
-            </Field>
-
-            {syncStatus && (
-              <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[11.5px] text-[var(--text-tertiary)]">
-                <Badge tone={syncStatus.enabled ? "success" : "neutral"}>
-                  {syncStatus.enabled
-                    ? `Auto-sync on · every ${syncStatus.intervalMinutes} min`
-                    : "Auto-sync off"}
-                </Badge>
-                {syncStatus.lastSync && (
-                  <span>
-                    Last sync{" "}
-                    {relTime(
-                      syncStatus.lastSync.sync_completed_at || syncStatus.lastSync.sync_started_at
-                    )}{" "}
-                    · <span className="capitalize">{syncStatus.lastSync.status}</span>
-                  </span>
-                )}
-              </div>
-            )}
-
-            <div className="flex justify-end border-t border-[var(--border-default)] pt-4">
-              <Button
-                variant="primary"
-                onClick={saveSyncSettings}
-                loading={savingSync}
-                disabled={!syncDirty || savingSync}
-              >
-                Save changes
-              </Button>
             </div>
           </div>
         </Panel>
@@ -364,6 +299,77 @@ export default function SettingsPage() {
             </div>
           </div>
         </Panel>
+        </div>
+
+        {/* Right column: sync schedule + the (scrollable) village scope. */}
+        <div className="space-y-5">
+        {/* Voucher sync schedule */}
+        <Panel
+          title="Voucher sync"
+          subtitle="How often the portal pulls the latest vouchers from Ruijie (Excel export). Turn it off to pause all automatic syncing — you can still sync on demand from the Dashboard."
+          icon={<RefreshCw size={15} />}
+        >
+          <div className="space-y-5">
+            <Toggle
+              checked={syncEnabled}
+              onChange={setSyncEnabled}
+              label="Automatic sync"
+              hint={
+                syncEnabled
+                  ? "Vouchers refresh automatically on the schedule below."
+                  : "Automatic syncing is paused."
+              }
+            />
+
+            <Field
+              label="Sync frequency"
+              hint="Minimum 5 minutes to protect the Ruijie API rate limit. More villages = more calls per cycle."
+              className="max-w-xs"
+            >
+              <Select
+                value={syncInterval}
+                onChange={(e) => setSyncInterval(Number(e.target.value))}
+                disabled={!syncEnabled}
+              >
+                {intervalChoices.map((o) => (
+                  <option key={o.v} value={o.v}>
+                    {o.label}
+                  </option>
+                ))}
+              </Select>
+            </Field>
+
+            {syncStatus && (
+              <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[11.5px] text-[var(--text-tertiary)]">
+                <Badge tone={syncStatus.enabled ? "success" : "neutral"}>
+                  {syncStatus.enabled
+                    ? `Auto-sync on · every ${syncStatus.intervalMinutes} min`
+                    : "Auto-sync off"}
+                </Badge>
+                {syncStatus.lastSync && (
+                  <span>
+                    Last sync{" "}
+                    {relTime(
+                      syncStatus.lastSync.sync_completed_at || syncStatus.lastSync.sync_started_at
+                    )}{" "}
+                    · <span className="capitalize">{syncStatus.lastSync.status}</span>
+                  </span>
+                )}
+              </div>
+            )}
+
+            <div className="flex justify-end border-t border-[var(--border-default)] pt-4">
+              <Button
+                variant="primary"
+                onClick={saveSyncSettings}
+                loading={savingSync}
+                disabled={!syncDirty || savingSync}
+              >
+                Save changes
+              </Button>
+            </div>
+          </div>
+        </Panel>
 
         {/* All Villages scope */}
         <Panel
@@ -378,7 +384,7 @@ export default function SettingsPage() {
             </div>
           }
         >
-          <div className="flex flex-col divide-y divide-[var(--border-default)]">
+          <div className="flex flex-col divide-y divide-[var(--border-default)] max-h-[340px] overflow-y-auto scrollbar-none">
             {sites.length === 0 ? (
               <div className="px-5 py-4 text-[12.5px] text-[var(--fg-muted)]">
                 No villages yet — add them under Network.
@@ -420,34 +426,7 @@ export default function SettingsPage() {
             </div>
           )}
         </Panel>
-
-        {/* App settings */}
-        {settings.length > 0 && (
-          <Panel title="Application settings" padding={false}>
-            <div className="flex flex-col divide-y divide-[var(--border-default)]">
-              {settings.map((s) => (
-                <div
-                  key={s.setting_key}
-                  className="flex items-center justify-between px-5 py-3 hover:bg-[var(--bg-surface)] transition-colors"
-                >
-                  <div>
-                    <p className="text-[12.5px] font-medium text-[var(--fg-primary)]">
-                      {s.setting_key}
-                    </p>
-                    {s.description && (
-                      <p className="text-[11.5px] text-[var(--fg-muted)] mt-0.5">
-                        {s.description}
-                      </p>
-                    )}
-                  </div>
-                  <span className="text-[12.5px] font-mono text-[var(--fg-secondary)]">
-                    {s.setting_value}
-                  </span>
-                </div>
-              ))}
-            </div>
-          </Panel>
-        )}
+        </div>
       </div>
     </div>
   );
