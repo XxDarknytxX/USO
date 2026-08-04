@@ -178,9 +178,12 @@ export default function SettingsPage() {
         title="Settings"
         subtitle="Environment configuration and runtime status."
         icon={<Settings size={20} />}
+        className="mx-auto max-w-4xl xl:max-w-6xl"
       />
 
-      <div className="mt-6 max-w-3xl space-y-5">
+      {/* Centered; two masonry columns on wide screens so the panels fill the
+          width instead of hugging the left edge. */}
+      <div className="mt-6 mx-auto max-w-4xl xl:max-w-6xl columns-1 xl:columns-2 [column-gap:1.25rem] [&>*]:mb-5 [&>*]:break-inside-avoid">
         {/* System info */}
         <Panel
           title="System information"
