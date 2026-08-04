@@ -53,6 +53,8 @@ export default function SettingsPage() {
   const [smtpHasPassword, setSmtpHasPassword] = useState(false);
   const [origSmtp, setOrigSmtp] = useState(null);
   const [savingSmtp, setSavingSmtp] = useState(false);
+  const [testEmail, setTestEmail] = useState("");
+  const [sendingTest, setSendingTest] = useState(false);
   const setSmtpField = (k, v) => setSmtp((s) => ({ ...s, [k]: v }));
   const smtpDirty =
     origSmtp != null && (JSON.stringify(smtp) !== JSON.stringify(origSmtp) || smtpPassword.trim() !== "");
@@ -153,6 +155,21 @@ export default function SettingsPage() {
       toast.error(e?.message || "Failed to save SMTP settings");
     } finally {
       setSavingSmtp(false);
+    }
+  }
+
+  async function sendTest() {
+    const to = testEmail.trim();
+    setSendingTest(true);
+    const tid = toast.loading("Sending test email…");
+    try {
+      await settingsApi.testSmtp(to);
+      toast.success(`Test email sent to ${to}`, { id: tid });
+    } catch (e) {
+      // Surface the SMTP server's error (auth failed, connection refused, …).
+      toast.error(e?.message || "Failed to send test email", { id: tid, duration: 7000 });
+    } finally {
+      setSendingTest(false);
     }
   }
 
@@ -297,6 +314,31 @@ export default function SettingsPage() {
               <Button variant="primary" onClick={saveSmtp} loading={savingSmtp} disabled={!smtpDirty || savingSmtp}>
                 Save SMTP settings
               </Button>
+            </div>
+
+            {/* Send a test email using the saved config */}
+            <div className="border-t border-[var(--border-default)] pt-4 space-y-2">
+              <p className="text-[12.5px] font-medium text-[var(--fg-secondary)]">Send a test email</p>
+              <div className="flex flex-col sm:flex-row gap-2">
+                <Input
+                  type="email"
+                  value={testEmail}
+                  onChange={(e) => setTestEmail(e.target.value)}
+                  placeholder="recipient@example.com"
+                  className="flex-1"
+                />
+                <Button
+                  variant="secondary"
+                  onClick={sendTest}
+                  loading={sendingTest}
+                  disabled={!testEmail.trim() || sendingTest}
+                >
+                  Send test
+                </Button>
+              </div>
+              <p className="text-[11px] text-[var(--fg-muted)]">
+                Uses the saved settings above — save first if you just changed them.
+              </p>
             </div>
           </div>
         </Panel>

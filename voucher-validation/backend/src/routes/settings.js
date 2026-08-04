@@ -18,6 +18,8 @@ export function makeSettingsRouter(controller) {
   // SMTP (outgoing email) config. GET never returns the stored password.
   router.get("/smtp", controller.getSmtpSettings);
   router.put("/smtp", controller.updateSmtpSettings);
+  // Send a test email using the saved config.
+  router.post("/smtp/test", controller.sendTestEmail);
 
   // PUT /api/settings/sync — atomically set the sync schedule (enabled + interval)
   router.put(

@@ -99,6 +99,7 @@ export const settingsApi = {
   // hasPassword); leave the password field blank on save to keep the stored one.
   getSmtp: () => api("/settings/smtp"),
   updateSmtp: (config) => api("/settings/smtp", { method: "PUT", body: config }),
+  testSmtp: (to) => api("/settings/smtp/test", { method: "POST", body: { to } }),
 };
 
 // Portal Audit Log API helpers
