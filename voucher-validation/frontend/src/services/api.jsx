@@ -95,6 +95,10 @@ export const settingsApi = {
   // Atomic schedule update — both keys committed together server-side, single reload.
   updateSync: (enabled, intervalMinutes) =>
     api("/settings/sync", { method: "PUT", body: { enabled, intervalMinutes } }),
+  // SMTP (outgoing email) config. getSmtp never returns the password (only
+  // hasPassword); leave the password field blank on save to keep the stored one.
+  getSmtp: () => api("/settings/smtp"),
+  updateSmtp: (config) => api("/settings/smtp", { method: "PUT", body: config }),
 };
 
 // Portal Audit Log API helpers

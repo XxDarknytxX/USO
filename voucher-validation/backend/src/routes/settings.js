@@ -15,6 +15,10 @@ export function makeSettingsRouter(controller) {
   // GET /api/settings/sync-status — automatic-sync scheduler state + last sync
   router.get("/sync-status", controller.getSyncStatus);
 
+  // SMTP (outgoing email) config. GET never returns the stored password.
+  router.get("/smtp", controller.getSmtpSettings);
+  router.put("/smtp", controller.updateSmtpSettings);
+
   // PUT /api/settings/sync — atomically set the sync schedule (enabled + interval)
   router.put(
     "/sync",

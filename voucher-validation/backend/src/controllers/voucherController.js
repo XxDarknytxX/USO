@@ -1273,6 +1273,65 @@ export function makeVoucherController(pool) {
       } catch (e) { console.error(e); return send.serverErr(res); }
     },
 
+    // GET /api/settings/smtp — SMTP config for the (future) email sender. The
+    // password is NEVER returned to the client — only whether one is set.
+    getSmtpSettings: async (_req, res) => {
+      try {
+        const [rows] = await pool.query('SELECT * FROM smtp_settings WHERE id = 1');
+        const r = rows[0] || {};
+        return send.ok(res, {
+          smtp: {
+            enabled: !!r.enabled,
+            host: r.host || '',
+            port: r.port ?? null,
+            secure: r.secure == null ? true : !!r.secure,
+            username: r.username || '',
+            fromName: r.from_name || '',
+            fromEmail: r.from_email || '',
+            hasPassword: !!r.password,
+            updatedAt: r.updated_at || null,
+          },
+        });
+      } catch (e) { console.error(e); return send.serverErr(res); }
+    },
+
+    // PUT /api/settings/smtp — upsert the single config row. A blank/omitted
+    // password keeps the stored one (so admins never have to retype it). The
+    // password is persisted server-side only.
+    updateSmtpSettings: async (req, res) => {
+      try {
+        const b = req.body || {};
+        const enabled = b.enabled ? 1 : 0;
+        const host = b.host ? String(b.host).trim() : null;
+        const port = (b.port === '' || b.port == null) ? null : parseInt(b.port, 10);
+        if (port != null && (!Number.isInteger(port) || port < 1 || port > 65535)) {
+          return send.bad(res, 'Port must be between 1 and 65535');
+        }
+        const secure = b.secure ? 1 : 0;
+        const username = b.username ? String(b.username).trim() : null;
+        const fromName = b.fromName ? String(b.fromName).trim() : null;
+        const fromEmail = b.fromEmail ? String(b.fromEmail).trim() : null;
+        if (fromEmail && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(fromEmail)) {
+          return send.bad(res, 'From email is not a valid address');
+        }
+        // Keep the existing password when none is supplied in the request.
+        const supplied = (b.password != null && String(b.password) !== '') ? String(b.password) : null;
+        const [existing] = await pool.query('SELECT password FROM smtp_settings WHERE id = 1');
+        const password = supplied != null ? supplied : (existing[0]?.password ?? null);
+
+        await pool.query(
+          `INSERT INTO smtp_settings (id, enabled, host, port, secure, username, password, from_name, from_email, updated_by)
+           VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+           ON DUPLICATE KEY UPDATE
+             enabled = VALUES(enabled), host = VALUES(host), port = VALUES(port), secure = VALUES(secure),
+             username = VALUES(username), password = VALUES(password), from_name = VALUES(from_name),
+             from_email = VALUES(from_email), updated_by = VALUES(updated_by), updated_at = CURRENT_TIMESTAMP`,
+          [enabled, host, port, secure, username, password, fromName, fromEmail, req.user?.id ?? null]
+        );
+        return send.ok(res, { success: true });
+      } catch (e) { console.error(e); return send.serverErr(res); }
+    },
+
     // Automatic-sync scheduler status for the Settings UI (current enabled/interval
     // + the most recent sync-log row for a "last synced" line).
     getSyncStatus: async (_req, res) => {

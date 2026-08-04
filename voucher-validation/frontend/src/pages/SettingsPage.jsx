@@ -2,12 +2,12 @@
 // System information + read-only app settings.
 
 import { useEffect, useState } from "react";
-import { Settings, Server, Eye, EyeOff, MapPin, Check, Globe2, RefreshCw } from "lucide-react";
+import { Settings, Server, Eye, EyeOff, MapPin, Check, Globe2, RefreshCw, Mail } from "lucide-react";
 import toast from "react-hot-toast";
 
 import { settingsApi } from "../services/api";
 import { useSite } from "../hooks/useSite";
-import { Button, Panel, Badge, PageHeader, Toggle, Select, Field } from "../components/ui";
+import { Button, Panel, Badge, PageHeader, Toggle, Select, Field, Input } from "../components/ui";
 
 // Sync-frequency presets. Floor is 5 min to protect the Ruijie account-wide rate
 // limit (the backend clamps to the same range regardless of what's sent).
@@ -47,6 +47,16 @@ export default function SettingsPage() {
   const [savingSync, setSavingSync] = useState(false);
   const [syncStatus, setSyncStatus] = useState(null);
 
+  // SMTP (outgoing email) config
+  const [smtp, setSmtp] = useState({ enabled: false, host: "", port: "", secure: true, username: "", fromName: "", fromEmail: "" });
+  const [smtpPassword, setSmtpPassword] = useState(""); // write-only; blank = keep the stored one
+  const [smtpHasPassword, setSmtpHasPassword] = useState(false);
+  const [origSmtp, setOrigSmtp] = useState(null);
+  const [savingSmtp, setSavingSmtp] = useState(false);
+  const setSmtpField = (k, v) => setSmtp((s) => ({ ...s, [k]: v }));
+  const smtpDirty =
+    origSmtp != null && (JSON.stringify(smtp) !== JSON.stringify(origSmtp) || smtpPassword.trim() !== "");
+
   const syncDirty = syncEnabled !== origSync.enabled || syncInterval !== origSync.interval;
 
   // If the stored interval isn't one of the presets (e.g. set directly in the DB),
@@ -57,6 +67,7 @@ export default function SettingsPage() {
 
   useEffect(() => {
     loadSettings();
+    loadSmtp();
   }, []);
 
   async function loadSettings() {
@@ -104,6 +115,44 @@ export default function SettingsPage() {
       loadSettings();
     } finally {
       setSavingSync(false);
+    }
+  }
+
+  async function loadSmtp() {
+    try {
+      const { smtp: s } = await settingsApi.getSmtp();
+      const val = {
+        enabled: !!s.enabled,
+        host: s.host || "",
+        port: s.port ?? "",
+        secure: s.secure !== false,
+        username: s.username || "",
+        fromName: s.fromName || "",
+        fromEmail: s.fromEmail || "",
+      };
+      setSmtp(val);
+      setOrigSmtp(val);
+      setSmtpHasPassword(!!s.hasPassword);
+      setSmtpPassword("");
+    } catch {
+      // No config yet — baseline the current defaults so the form isn't "dirty".
+      setOrigSmtp((prev) => prev ?? { enabled: false, host: "", port: "", secure: true, username: "", fromName: "", fromEmail: "" });
+    }
+  }
+
+  async function saveSmtp() {
+    setSavingSmtp(true);
+    try {
+      const body = { ...smtp, port: smtp.port === "" ? null : Number(smtp.port) };
+      if (smtpPassword.trim() !== "") body.password = smtpPassword; // omit → keep stored
+      await settingsApi.updateSmtp(body);
+      toast.success("SMTP settings saved");
+      setSmtpPassword("");
+      await loadSmtp();
+    } catch (e) {
+      toast.error(e?.message || "Failed to save SMTP settings");
+    } finally {
+      setSavingSmtp(false);
     }
   }
 
@@ -239,6 +288,75 @@ export default function SettingsPage() {
                 disabled={!syncDirty || savingSync}
               >
                 Save changes
+              </Button>
+            </div>
+          </div>
+        </Panel>
+
+        {/* Email (SMTP) */}
+        <Panel
+          title="Email (SMTP)"
+          subtitle="Outgoing mail server for upcoming email features. Not wired to anything yet — safe to configure ahead of time."
+          icon={<Mail size={15} />}
+        >
+          <div className="space-y-5">
+            <Toggle
+              checked={smtp.enabled}
+              onChange={(v) => setSmtpField("enabled", v)}
+              label="Enable email sending"
+              hint={smtp.enabled ? "The app may send email once the feature is live." : "Email sending is off."}
+            />
+
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+              <div className="sm:col-span-2">
+                <Field label="SMTP host">
+                  <Input value={smtp.host} onChange={(e) => setSmtpField("host", e.target.value)} placeholder="smtp.example.com" />
+                </Field>
+              </div>
+              <Field label="Port">
+                <Input
+                  value={smtp.port}
+                  onChange={(e) => setSmtpField("port", e.target.value.replace(/[^0-9]/g, ""))}
+                  placeholder="587"
+                  inputMode="numeric"
+                />
+              </Field>
+            </div>
+
+            <Toggle
+              checked={smtp.secure}
+              onChange={(v) => setSmtpField("secure", v)}
+              label="Use TLS/SSL"
+              hint="On for port 465 (SSL) or 587 (STARTTLS)."
+            />
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <Field label="Username">
+                <Input value={smtp.username} onChange={(e) => setSmtpField("username", e.target.value)} placeholder="user@example.com" autoComplete="off" />
+              </Field>
+              <Field label="Password" hint={smtpHasPassword ? "A password is stored — leave blank to keep it." : undefined}>
+                <Input
+                  type="password"
+                  value={smtpPassword}
+                  onChange={(e) => setSmtpPassword(e.target.value)}
+                  placeholder={smtpHasPassword ? "•••••••• (unchanged)" : "SMTP password"}
+                  autoComplete="new-password"
+                />
+              </Field>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <Field label="From name">
+                <Input value={smtp.fromName} onChange={(e) => setSmtpField("fromName", e.target.value)} placeholder="Vodafone Fiji USO" />
+              </Field>
+              <Field label="From email">
+                <Input type="email" value={smtp.fromEmail} onChange={(e) => setSmtpField("fromEmail", e.target.value)} placeholder="no-reply@vodafone.com.fj" />
+              </Field>
+            </div>
+
+            <div className="flex justify-end border-t border-[var(--border-default)] pt-4">
+              <Button variant="primary" onClick={saveSmtp} loading={savingSmtp} disabled={!smtpDirty || savingSmtp}>
+                Save SMTP settings
               </Button>
             </div>
           </div>

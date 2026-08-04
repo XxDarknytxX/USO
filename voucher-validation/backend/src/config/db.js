@@ -205,6 +205,24 @@ export async function getPool() {
       prefs JSON NOT NULL,
       updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
+
+    // SMTP (outgoing email) config — a single row (id=1). Kept OUT of app_settings
+    // because that table is returned wholesale to the client; the password here is
+    // never sent back. Not wired to any sender yet — configured ahead of upcoming
+    // email features.
+    `CREATE TABLE IF NOT EXISTS smtp_settings (
+      id INT NOT NULL PRIMARY KEY,
+      enabled BOOLEAN NOT NULL DEFAULT 0,
+      host VARCHAR(255) NULL,
+      port INT NULL,
+      secure BOOLEAN NOT NULL DEFAULT 1,
+      username VARCHAR(255) NULL,
+      password VARCHAR(512) NULL,
+      from_name VARCHAR(255) NULL,
+      from_email VARCHAR(255) NULL,
+      updated_by INT NULL,
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
   ];
 
   for (const sql of tableCreations) {
