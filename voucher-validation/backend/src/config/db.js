@@ -216,6 +216,7 @@ export async function getPool() {
       host VARCHAR(255) NULL,
       port INT NULL,
       secure BOOLEAN NOT NULL DEFAULT 1,
+      encryption VARCHAR(16) NOT NULL DEFAULT 'starttls',
       username VARCHAR(255) NULL,
       password VARCHAR(512) NULL,
       from_name VARCHAR(255) NULL,
@@ -254,6 +255,16 @@ export async function getPool() {
   for (const sql of auditIndexMigrations) {
     try { await pool.query(sql); console.log(`Migration OK: ${sql.slice(0, 60)}...`); }
     catch (e) { if (e.code !== 'ER_DUP_KEYNAME') { /* ignore */ } }
+  }
+
+  // SMTP: add the `encryption` column (STARTTLS/SSL/none) to tables created with
+  // only the older `secure` boolean.
+  const smtpMigrations = [
+    `ALTER TABLE smtp_settings ADD COLUMN encryption VARCHAR(16) NOT NULL DEFAULT 'starttls' AFTER secure`,
+  ];
+  for (const sql of smtpMigrations) {
+    try { await pool.query(sql); console.log(`Migration OK: ${sql.slice(0, 60)}...`); }
+    catch (e) { if (e.code !== 'ER_DUP_FIELDNAME') { /* ignore */ } }
   }
 
   // 'manually_assigned' claim status — a paid-but-auth-failed voucher stays

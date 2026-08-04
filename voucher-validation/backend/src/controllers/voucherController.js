@@ -1284,7 +1284,7 @@ export function makeVoucherController(pool) {
             enabled: !!r.enabled,
             host: r.host || '',
             port: r.port ?? null,
-            secure: r.secure == null ? true : !!r.secure,
+            encryption: r.encryption || 'starttls', // 'starttls' | 'ssl' | 'none'
             username: r.username || '',
             fromName: r.from_name || '',
             fromEmail: r.from_email || '',
@@ -1307,7 +1307,9 @@ export function makeVoucherController(pool) {
         if (port != null && (!Number.isInteger(port) || port < 1 || port > 65535)) {
           return send.bad(res, 'Port must be between 1 and 65535');
         }
-        const secure = b.secure ? 1 : 0;
+        const ALLOWED_ENC = ['starttls', 'ssl', 'none'];
+        const encryption = ALLOWED_ENC.includes(String(b.encryption)) ? String(b.encryption) : 'starttls';
+        const secure = encryption === 'ssl' ? 1 : 0; // implicit TLS (465) vs STARTTLS (587) / none
         const username = b.username ? String(b.username).trim() : null;
         const fromName = b.fromName ? String(b.fromName).trim() : null;
         const fromEmail = b.fromEmail ? String(b.fromEmail).trim() : null;
@@ -1320,13 +1322,14 @@ export function makeVoucherController(pool) {
         const password = supplied != null ? supplied : (existing[0]?.password ?? null);
 
         await pool.query(
-          `INSERT INTO smtp_settings (id, enabled, host, port, secure, username, password, from_name, from_email, updated_by)
-           VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          `INSERT INTO smtp_settings (id, enabled, host, port, secure, encryption, username, password, from_name, from_email, updated_by)
+           VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
            ON DUPLICATE KEY UPDATE
              enabled = VALUES(enabled), host = VALUES(host), port = VALUES(port), secure = VALUES(secure),
+             encryption = VALUES(encryption),
              username = VALUES(username), password = VALUES(password), from_name = VALUES(from_name),
              from_email = VALUES(from_email), updated_by = VALUES(updated_by), updated_at = CURRENT_TIMESTAMP`,
-          [enabled, host, port, secure, username, password, fromName, fromEmail, req.user?.id ?? null]
+          [enabled, host, port, secure, encryption, username, password, fromName, fromEmail, req.user?.id ?? null]
         );
         return send.ok(res, { success: true });
       } catch (e) { console.error(e); return send.serverErr(res); }

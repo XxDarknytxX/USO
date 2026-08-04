@@ -48,7 +48,7 @@ export default function SettingsPage() {
   const [syncStatus, setSyncStatus] = useState(null);
 
   // SMTP (outgoing email) config
-  const [smtp, setSmtp] = useState({ enabled: false, host: "", port: "", secure: true, username: "", fromName: "", fromEmail: "" });
+  const [smtp, setSmtp] = useState({ enabled: false, host: "", port: "", encryption: "starttls", username: "", fromName: "", fromEmail: "" });
   const [smtpPassword, setSmtpPassword] = useState(""); // write-only; blank = keep the stored one
   const [smtpHasPassword, setSmtpHasPassword] = useState(false);
   const [origSmtp, setOrigSmtp] = useState(null);
@@ -125,7 +125,7 @@ export default function SettingsPage() {
         enabled: !!s.enabled,
         host: s.host || "",
         port: s.port ?? "",
-        secure: s.secure !== false,
+        encryption: s.encryption || "starttls",
         username: s.username || "",
         fromName: s.fromName || "",
         fromEmail: s.fromEmail || "",
@@ -136,7 +136,7 @@ export default function SettingsPage() {
       setSmtpPassword("");
     } catch {
       // No config yet — baseline the current defaults so the form isn't "dirty".
-      setOrigSmtp((prev) => prev ?? { enabled: false, host: "", port: "", secure: true, username: "", fromName: "", fromEmail: "" });
+      setOrigSmtp((prev) => prev ?? { enabled: false, host: "", port: "", encryption: "starttls", username: "", fromName: "", fromEmail: "" });
     }
   }
 
@@ -261,12 +261,13 @@ export default function SettingsPage() {
               </Field>
             </div>
 
-            <Toggle
-              checked={smtp.secure}
-              onChange={(v) => setSmtpField("secure", v)}
-              label="Use TLS/SSL"
-              hint="On for port 465 (SSL) or 587 (STARTTLS)."
-            />
+            <Field label="Encryption" hint="STARTTLS uses port 587; SSL/TLS uses port 465." className="max-w-xs">
+              <Select value={smtp.encryption} onChange={(e) => setSmtpField("encryption", e.target.value)}>
+                <option value="starttls">STARTTLS</option>
+                <option value="ssl">SSL/TLS</option>
+                <option value="none">None</option>
+              </Select>
+            </Field>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <Field label="Username">
