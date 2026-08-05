@@ -410,7 +410,6 @@ export default function Dashboard() {
           </div>
         )}
         </div>
-        )}
       </div>
 
       <div className="px-8 py-6 space-y-6">
