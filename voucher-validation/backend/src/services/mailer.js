@@ -340,7 +340,7 @@ export function buildReceipt({ voucherCode, statusUrl, planName, dataAllowance, 
   // ("Daily Wi-Fi - 2 GB"). Plain ASCII hyphen, never an em or en dash.
   const planLine = planName ? `${planName}${dataAllowance ? ` - ${dataAllowance}` : ""}` : null;
 
-  const subject = "Your Vodafone Fiji Wi-Fi voucher (payment successful)";
+  const subject = "Vodafone Wi-Fi Voucher";
 
   const text = [
     "PAYMENT SUCCESSFUL",
@@ -352,8 +352,9 @@ export function buildReceipt({ voucherCode, statusUrl, planName, dataAllowance, 
     amt ? `Amount paid: ${amt}` : null,
     "",
     "HOW TO GET ONLINE",
-    "If your device did not connect automatically, open the Wi-Fi portal and enter",
-    "the voucher code above to get online.",
+    "If your device did not connect automatically, open the Wi-Fi portal and",
+    "scroll to the bottom of the page. That is where you enter the voucher code",
+    "above to get online.",
     statusUrl ? "" : null,
     statusUrl ? `Check your connection or reconnect here:\n${statusUrl}` : null,
     "",
@@ -408,7 +409,7 @@ export function buildReceipt({ voucherCode, statusUrl, planName, dataAllowance, 
 
               <h2 style="color:#333333;margin:0 0 10px 0;font-family:${FONT};font-size:18px;font-weight:bold;line-height:24px;mso-line-height-rule:exactly;">How to get online</h2>
               <p style="color:#666666;font-family:${FONT};font-size:15px;line-height:24px;mso-line-height-rule:exactly;margin:0 0 8px 0;">
-                If your device did not connect automatically, open the Wi-Fi portal and enter the voucher code above to get online.
+                If your device did not connect automatically, open the Wi-Fi portal and <strong>scroll to the bottom of the page</strong>. That is where you enter the voucher code above to get online.
               </p>
 
               ${
