@@ -35,17 +35,28 @@ const RED = "#e60000";
 const FONT = "Arial, Helvetica, sans-serif";
 const MONO = "'Courier New', Courier, monospace";
 
-// A diagonal shift within the Vodafone red hue: a lighter tint into a deeper
-// shade, hue held at 0 so it stays unmistakably brand red rather than drifting
-// orange or pink. Both stops are just lightness moves off #e60000.
-//
-// Outlook's Word engine ignores background-image entirely, so EVERY gradient
-// surface below must also carry the solid bgcolor attribute + background-color
-// underneath. Outlook then renders flat Vodafone red, which is the same result
-// as before this change; every other client gets the gradient painted on top.
-const RED_LIGHT = "#ff1a1a";
-const RED_DARK = "#b00000";
-const RED_GRADIENT = `linear-gradient(135deg, ${RED_LIGHT} 0%, ${RED} 55%, ${RED_DARK} 100%)`;
+// The hero gradient from the Vodafone Fiji scope document
+// (linear-gradient(120deg, #e60000 0%, #a10707 60%, #7a0303 100%)), weighted
+// further toward its dark end: the mid stop lands at 42% instead of 60% so the
+// deep red occupies most of the sweep, and the final stop is one step darker.
+// All three are Vodafone palette reds (brand-600 / brand-800 / brand-940).
+const GRAD_FROM = "#e60000";
+const GRAD_MID = "#a10707";
+const GRAD_TO = "#6d0202";
+const RED_GRADIENT = `linear-gradient(120deg, ${GRAD_FROM} 0%, ${GRAD_MID} 42%, ${GRAD_TO} 100%)`;
+
+// The same document lays a soft white radial glow over its cover hero. Applied
+// only to the title band here, matching how the doc uses it on the cover but
+// not on its smaller total cards.
+const GRAD_GLOW = "radial-gradient(80% 120% at 88% -10%, rgba(255,255,255,.20), transparent 55%)";
+
+// Outlook's Word engine ignores background-image entirely, so every gradient
+// surface must also carry a solid bgcolor attribute + background-color. That
+// flat colour stands in for the WHOLE gradient there, so it is the gradient's
+// midpoint rather than bright brand red: otherwise Outlook would show a vivid
+// red block where every other client shows a deep one. Plain #e60000 stays the
+// accent colour for borders, links and eyebrows.
+const GRAD_FALLBACK = GRAD_MID;
 
 // Corner rounding. IMPORTANT: a radius only clips the background of the SAME
 // element. Painting a background on a table AND on its td while rounding only
@@ -145,7 +156,7 @@ function button({ href, label }) {
                   <td align="center" style="font-family:${FONT};">
                     <table role="presentation" cellspacing="0" cellpadding="0" border="0" align="center" style="border-collapse:separate;mso-table-lspace:0pt;mso-table-rspace:0pt;">
                       <tr>
-                        <td align="center" bgcolor="${RED}" style="background-color:${RED};background-image:${RED_GRADIENT};border-radius:${BLOCK_RADIUS};padding:15px 30px;font-family:${FONT};">
+                        <td align="center" bgcolor="${GRAD_FALLBACK}" style="background-color:${GRAD_FALLBACK};background-image:${RED_GRADIENT};border-radius:${BLOCK_RADIUS};padding:15px 30px;font-family:${FONT};">
                           <a href="${h}" style="display:inline-block;color:#ffffff;font-family:${FONT};font-size:16px;font-weight:bold;line-height:20px;mso-line-height-rule:exactly;text-decoration:none;border:none;"><span style="color:#ffffff;text-decoration:none;">${l}</span></a>
                         </td>
                       </tr>
@@ -268,7 +279,7 @@ function shell({ preheader, title, subtitle, body }) {
             <td align="center" valign="top" bgcolor="#ffffff" style="background-color:#ffffff;padding:0 30px;font-family:${FONT};">
               <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="border-collapse:collapse;mso-table-lspace:0pt;mso-table-rspace:0pt;">
                 <tr>
-                  <td align="center" valign="top" bgcolor="${RED}" style="background-color:${RED};background-image:${RED_GRADIENT};border-radius:${BLOCK_RADIUS};padding:26px 24px;text-align:center;font-family:${FONT};">
+                  <td align="center" valign="top" bgcolor="${GRAD_FALLBACK}" style="background-color:${GRAD_FALLBACK};background-image:${GRAD_GLOW}, ${RED_GRADIENT};border-radius:${BLOCK_RADIUS};padding:26px 24px;text-align:center;font-family:${FONT};">
                     <h1 style="color:#ffffff;margin:0;font-family:${FONT};font-size:24px;font-weight:bold;line-height:30px;mso-line-height-rule:exactly;">
                       <!--[if mso]><span style="font-family:${FONT};font-size:22px;"><![endif]-->${esc(title)}<!--[if mso]></span><![endif]-->
                     </h1>
@@ -365,7 +376,7 @@ export function buildReceipt({ voucherCode, statusUrl, planName, dataAllowance, 
               <!-- Voucher code -->
               <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="border-collapse:collapse;mso-table-lspace:0pt;mso-table-rspace:0pt;margin:0 0 26px 0;">
                 <tr>
-                  <td align="center" bgcolor="${RED}" style="background-color:${RED};background-image:${RED_GRADIENT};border-radius:${BLOCK_RADIUS};padding:22px 20px;font-family:${FONT};">
+                  <td align="center" bgcolor="${GRAD_FALLBACK}" style="background-color:${GRAD_FALLBACK};background-image:${RED_GRADIENT};border-radius:${BLOCK_RADIUS};padding:22px 20px;font-family:${FONT};">
                     <p style="margin:0 0 8px 0;font-family:${FONT};font-size:12px;color:#ffffff;text-transform:uppercase;letter-spacing:1px;font-weight:bold;line-height:16px;mso-line-height-rule:exactly;">Your voucher code</p>
                     <p style="margin:0;font-family:${MONO};font-size:26px;font-weight:bold;letter-spacing:2px;color:#ffffff;line-height:34px;mso-line-height-rule:exactly;word-break:break-all;">${esc(code)}</p>
                   </td>
