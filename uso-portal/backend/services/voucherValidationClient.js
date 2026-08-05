@@ -202,10 +202,10 @@ async function sendAuditLog(event) {
  * customer's email from the M-PAiSA mapping and only sends when the receipt
  * feature is enabled for this site. Best-effort — never throws.
  */
-async function sendReceipt({ phone, voucherCode, host, planName, dataAllowance, amount }) {
+async function sendReceipt({ phone, voucherCode, host, planName, dataAllowance, amount, transactionId }) {
   try {
     const { data } = await getClient().post('/api/portal/receipt', {
-      phone, voucherCode, host, planName, dataAllowance, amount,
+      phone, voucherCode, host, planName, dataAllowance, amount, transactionId,
     });
     if (data?.sent) log(`Receipt emailed to ${data.to} for voucher ${voucherCode}`);
     else log(`Receipt not sent (${data?.reason || 'unknown'}) for voucher ${voucherCode}`);

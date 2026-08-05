@@ -866,6 +866,7 @@ const paymentCallback = async (req, res) => {
           planName: plan.name,
           dataAllowance: plan.data || null,
           amount: transaction.amount != null ? parseFloat(transaction.amount) : null,
+          transactionId: tID,
         }).catch(() => {});
       } catch (claimError) {
         log(`XXXX Voucher claim error: ${claimError.message}`);

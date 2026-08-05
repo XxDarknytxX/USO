@@ -1,7 +1,8 @@
 // src/controllers/voucherController.js
 import { validationResult } from "express-validator";
 import crypto from "crypto";
-import { loadSmtpTransport } from "../services/mailer.js";
+import { loadSmtpTransport, renderTemplate } from "../services/mailer.js";
+import { logEmailEvent } from "../services/emailLog.js";
 import RuijieService from "../services/ruijieService.js";
 import { parseVoucherExcelBuffer } from "../services/excelVoucherParser.js";
 import { effectiveGroupIds } from "../middleware/auth.js";
@@ -1340,23 +1341,38 @@ export function makeVoucherController(pool) {
     // config, to verify it works. Surfaces the SMTP error on failure so an admin
     // can debug (auth failed, connection refused, relay denied, …).
     sendTestEmail: async (req, res) => {
+      const to = String(req.body?.to || '').trim();
+      const templateId = String(req.body?.template || 'connection').trim();
+      const sentBy = req.user?.email || null;
       try {
-        const to = String(req.body?.to || '').trim();
         if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(to)) return send.bad(res, 'Enter a valid recipient email address.');
 
         const smtp = await loadSmtpTransport(pool);
         if (!smtp) return send.bad(res, 'Save SMTP settings first — no host is configured.');
+
+        // Send the actual template (with sample data) so it can be reviewed in a
+        // real inbox. Unknown ids fall back to the plain connection test.
+        const tpl = renderTemplate(templateId);
         const info = await smtp.transport.sendMail({
           from: smtp.from || to,
           to,
-          subject: 'Voucher Manager — SMTP test',
-          text: 'This is a test email from the Voucher Validation admin portal. If you received it, your SMTP settings are working.',
-          html: '<p>This is a test email from the <strong>Voucher Validation</strong> admin portal.</p><p>If you received it, your SMTP settings are working. ✅</p>',
+          subject: tpl.subject,
+          text: tpl.text,
+          html: tpl.html,
+          attachments: tpl.attachments,
         });
 
+        logEmailEvent(pool, {
+          eventType: 'test_email_sent', status: 'sent', to, template: templateId,
+          subject: tpl.subject, message: `Test email (${templateId}) sent to ${to}`, sentBy,
+        });
         return send.ok(res, { success: true, accepted: info.accepted || [], messageId: info.messageId || null });
       } catch (e) {
         console.error('[smtp] test send failed:', e.message);
+        logEmailEvent(pool, {
+          eventType: 'test_email_failed', status: 'failed', to, template: templateId,
+          message: `Test email (${templateId}) failed`, error: e.message, sentBy,
+        });
         // 502: the request was fine, the upstream mail server rejected/failed.
         return res.status(502).json({ error: e.message || 'SMTP send failed' });
       }

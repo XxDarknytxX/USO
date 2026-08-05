@@ -54,6 +54,7 @@ export default function SettingsPage() {
   const [origSmtp, setOrigSmtp] = useState(null);
   const [savingSmtp, setSavingSmtp] = useState(false);
   const [testEmail, setTestEmail] = useState("");
+  const [testTemplate, setTestTemplate] = useState("connection");
   const [sendingTest, setSendingTest] = useState(false);
   const setSmtpField = (k, v) => setSmtp((s) => ({ ...s, [k]: v }));
   const smtpDirty =
@@ -189,7 +190,7 @@ export default function SettingsPage() {
     setSendingTest(true);
     const tid = toast.loading("Sending test email…");
     try {
-      await settingsApi.testSmtp(to);
+      await settingsApi.testSmtp(to, testTemplate);
       toast.success(`Test email sent to ${to}`, { id: tid });
     } catch (e) {
       // Surface the SMTP server's error (auth failed, connection refused, …).
@@ -359,10 +360,19 @@ export default function SettingsPage() {
               </Button>
             </div>
 
-            {/* Send a test email using the saved config */}
+            {/* Send a test email using the saved config. Pick which template to
+                send so email designs can be reviewed in a real inbox. */}
             <div className="border-t border-[var(--border-default)] pt-4 space-y-2">
               <p className="text-[12.5px] font-medium text-[var(--fg-secondary)]">Send a test email</p>
               <div className="flex flex-col sm:flex-row gap-2">
+                <Select
+                  value={testTemplate}
+                  onChange={(e) => setTestTemplate(e.target.value)}
+                  className="sm:w-44"
+                >
+                  <option value="connection">Connection test</option>
+                  <option value="receipt">Purchase receipt</option>
+                </Select>
                 <Input
                   type="email"
                   value={testEmail}
@@ -380,7 +390,7 @@ export default function SettingsPage() {
                 </Button>
               </div>
               <p className="text-[11px] text-[var(--fg-muted)]">
-                Uses the saved settings above — save first if you just changed them.
+                Sends the selected template (with sample data) using the saved settings above — save first if you just changed them. Every test send is recorded in Portal Logs.
               </p>
             </div>
 

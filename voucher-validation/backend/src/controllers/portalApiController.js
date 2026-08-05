@@ -6,6 +6,7 @@
 // the per-request live lookups were removed to stop the `code: 44` API throttle.
 
 import { loadSmtpTransport, buildReceipt } from "../services/mailer.js";
+import { logEmailEvent } from "../services/emailLog.js";
 
 const send = {
   ok: (res, data = {}) => res.json(data),
@@ -161,8 +162,27 @@ export function makePortalApiController(pool) {
     // the email from the M-PAiSA mapping and only sends when the feature is enabled
     // AND this site is in the allowed group set. Always 200s (best-effort).
     sendPurchaseReceipt: async (req, res) => {
+      const { phone, voucherCode, host, planName, dataAllowance, amount, transactionId } = req.body || {};
+      // Common identity fields for every log row this request may write.
+      const base = {
+        voucherCode: voucherCode || null,
+        phone: phone || null,
+        amount: amount ?? null,
+        transactionId: transactionId || null,
+      };
+      // Per-customer skip (no phone / no mapping / no SMTP): worth logging so the
+      // Portal Logs page shows who did NOT get a receipt and why. Configuration
+      // skips (feature off, site not enabled) are NOT logged — they are expected
+      // filtering, not a delivery failure, and would swamp the log.
+      const skip = (reason, groupId = null) => {
+        logEmailEvent(pool, {
+          eventType: 'receipt_email_skipped', status: 'skipped', reason,
+          message: `Receipt not sent: ${reason}`, groupId, ...base,
+        });
+        return send.ok(res, { sent: false, reason, ...(groupId != null ? { groupId } : {}) });
+      };
+
       try {
-        const { phone, voucherCode, host, planName, dataAllowance, amount } = req.body || {};
         if (!voucherCode) return send.ok(res, { sent: false, reason: 'missing_voucher' });
 
         // Feature settings (app_settings): master toggle + allowed site group ids.
@@ -198,7 +218,7 @@ export function makePortalApiController(pool) {
         // the last 7 digits, since the callback and the report export can format
         // the same number differently.
         const digits = String(phone || '').replace(/\D/g, '');
-        if (!digits) return send.ok(res, { sent: false, reason: 'no_phone' });
+        if (!digits) return skip('no_phone', groupId);
         const cands = new Set([digits]);
         if (digits.length === 10 && digits.startsWith('679')) cands.add(digits.slice(3));
         if (digits.length > 7) cands.add(digits.slice(-7)); // Fiji numbers are 7 digits
@@ -208,18 +228,41 @@ export function makePortalApiController(pool) {
           list
         );
         const email = mr[0]?.email || null;
-        if (!email) return send.ok(res, { sent: false, reason: 'no_mapping' });
+        if (!email) return skip('no_mapping', groupId);
 
         const smtp = await loadSmtpTransport(pool);
-        if (!smtp) return send.ok(res, { sent: false, reason: 'smtp_not_configured' });
+        if (!smtp) return skip('smtp_not_configured', groupId);
 
         const statusUrl = hostNorm ? `https://${hostNorm}/status` : null;
         const mail = buildReceipt({ voucherCode, statusUrl, planName, dataAllowance, amount });
-        await smtp.transport.sendMail({ from: smtp.from, to: email, subject: mail.subject, text: mail.text, html: mail.html });
+        try {
+          await smtp.transport.sendMail({
+            from: smtp.from, to: email,
+            subject: mail.subject, text: mail.text, html: mail.html,
+            attachments: mail.attachments,
+          });
+        } catch (sendErr) {
+          console.error('[receipt] SMTP send failed:', sendErr.message);
+          logEmailEvent(pool, {
+            eventType: 'receipt_email_failed', status: 'failed', reason: 'send_error',
+            to: email, subject: mail.subject, template: 'receipt',
+            message: `Receipt send failed to ${email}`, error: sendErr.message, groupId, ...base,
+          });
+          return send.ok(res, { sent: false, reason: 'send_error', error: sendErr.message });
+        }
         log(`Receipt emailed to ${email} for voucher ${voucherCode} (group ${groupId})`);
+        logEmailEvent(pool, {
+          eventType: 'receipt_email_sent', status: 'sent',
+          to: email, subject: mail.subject, template: 'receipt',
+          message: `Receipt emailed to ${email}`, groupId, ...base,
+        });
         return send.ok(res, { sent: true, to: email });
       } catch (e) {
         console.error('[receipt] send failed:', e.message);
+        logEmailEvent(pool, {
+          eventType: 'receipt_email_failed', status: 'failed', reason: 'error',
+          message: 'Receipt handler error', error: e.message, ...base,
+        });
         return send.ok(res, { sent: false, reason: 'error', error: e.message });
       }
     },

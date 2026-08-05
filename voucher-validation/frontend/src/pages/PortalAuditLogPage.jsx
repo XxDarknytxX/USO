@@ -37,6 +37,11 @@ const EVENT_TYPES = [
   "no_session_id",
   "manual_assistance_created",
   "case_creation_failed",
+  "receipt_email_sent",
+  "receipt_email_failed",
+  "receipt_email_skipped",
+  "test_email_sent",
+  "test_email_failed",
   "system_error",
 ];
 
@@ -58,6 +63,11 @@ const EVENT_TONES = {
   no_session_id: "warning",
   manual_assistance_created: "warning",
   case_creation_failed: "danger",
+  receipt_email_sent: "success",
+  receipt_email_failed: "danger",
+  receipt_email_skipped: "warning",
+  test_email_sent: "info",
+  test_email_failed: "danger",
   system_error: "danger",
 };
 
