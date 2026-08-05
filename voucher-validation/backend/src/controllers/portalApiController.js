@@ -5,6 +5,8 @@
 // served from the local mirror (refreshed by the manual POST /api/vouchers/sync);
 // the per-request live lookups were removed to stop the `code: 44` API throttle.
 
+import { loadSmtpTransport, buildReceipt } from "../services/mailer.js";
+
 const send = {
   ok: (res, data = {}) => res.json(data),
   bad: (res, msg = "Bad request") => res.status(400).json({ error: msg }),
@@ -152,6 +154,74 @@ export function makePortalApiController(pool) {
 
         return res.json(result);
       } catch (e) { console.error(e); return send.serverErr(res); }
+    },
+
+    // POST /api/portal/receipt — email a purchase receipt to the customer.
+    // Called (fire-and-forget) by USO Portal after a voucher is claimed. Looks up
+    // the email from the M-PAiSA mapping and only sends when the feature is enabled
+    // AND this site is in the allowed group set. Always 200s (best-effort).
+    sendPurchaseReceipt: async (req, res) => {
+      try {
+        const { phone, voucherCode, host, planName, dataAllowance, amount } = req.body || {};
+        if (!voucherCode) return send.ok(res, { sent: false, reason: 'missing_voucher' });
+
+        // Feature settings (app_settings): master toggle + allowed site group ids.
+        const [srows] = await pool.query(
+          "SELECT setting_key, setting_value FROM app_settings WHERE setting_key IN ('receipt_emails_enabled','receipt_group_ids')"
+        );
+        const s = Object.fromEntries(srows.map((r) => [r.setting_key, r.setting_value]));
+        if (String(s.receipt_emails_enabled || '').toLowerCase() !== 'true') {
+          return send.ok(res, { sent: false, reason: 'disabled' });
+        }
+        const allowed = String(s.receipt_group_ids || '7847952')
+          .split(',').map((x) => x.trim()).filter(Boolean);
+
+        // Resolve this site's Ruijie group id: from the portal host, else the voucher.
+        const hostNorm = String(host || '').split(':')[0].trim().toLowerCase();
+        let groupId = null;
+        if (hostNorm) {
+          const [pr] = await pool.query(
+            'SELECT ruijie_group_id FROM network_projects WHERE LOWER(hostname) = ? LIMIT 1', [hostNorm]
+          );
+          groupId = pr[0]?.ruijie_group_id || null;
+        }
+        if (!groupId) {
+          const [vr] = await pool.query('SELECT group_id FROM vouchers WHERE voucher_code = ? LIMIT 1', [voucherCode]);
+          groupId = vr[0]?.group_id || null;
+        }
+        if (!groupId || !allowed.includes(String(groupId))) {
+          return send.ok(res, { sent: false, reason: 'site_not_enabled', groupId: groupId || null });
+        }
+
+        // Customer email from the M-PAiSA mapping. Match the phone tolerantly:
+        // strip non-digits, and also try without a Fiji country code (679…) and
+        // the last 7 digits, since the callback and the report export can format
+        // the same number differently.
+        const digits = String(phone || '').replace(/\D/g, '');
+        if (!digits) return send.ok(res, { sent: false, reason: 'no_phone' });
+        const cands = new Set([digits]);
+        if (digits.length === 10 && digits.startsWith('679')) cands.add(digits.slice(3));
+        if (digits.length > 7) cands.add(digits.slice(-7)); // Fiji numbers are 7 digits
+        const list = [...cands];
+        const [mr] = await pool.query(
+          `SELECT email FROM mpaisa_mappings WHERE number IN (${list.map(() => '?').join(',')}) LIMIT 1`,
+          list
+        );
+        const email = mr[0]?.email || null;
+        if (!email) return send.ok(res, { sent: false, reason: 'no_mapping' });
+
+        const smtp = await loadSmtpTransport(pool);
+        if (!smtp) return send.ok(res, { sent: false, reason: 'smtp_not_configured' });
+
+        const statusUrl = hostNorm ? `https://${hostNorm}/status` : null;
+        const mail = buildReceipt({ voucherCode, statusUrl, planName, dataAllowance, amount });
+        await smtp.transport.sendMail({ from: smtp.from, to: email, subject: mail.subject, text: mail.text, html: mail.html });
+        log(`Receipt emailed to ${email} for voucher ${voucherCode} (group ${groupId})`);
+        return send.ok(res, { sent: true, to: email });
+      } catch (e) {
+        console.error('[receipt] send failed:', e.message);
+        return send.ok(res, { sent: false, reason: 'error', error: e.message });
+      }
     },
 
     // POST /api/portal/claim-voucher

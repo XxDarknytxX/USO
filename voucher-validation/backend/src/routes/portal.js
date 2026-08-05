@@ -22,6 +22,9 @@ export function makePortalRouter(controller) {
   // Voucher usage status (for user-facing status page)
   router.get("/voucher-status/:voucherCode", controller.getVoucherStatus);
 
+  // Purchase-receipt email (fire-and-forget from USO Portal after a claim)
+  router.post("/receipt", controller.sendPurchaseReceipt);
+
   // Audit log ingestion
   router.post("/audit-log", controller.ingestAuditLog);
 

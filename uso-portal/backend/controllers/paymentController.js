@@ -855,6 +855,18 @@ const paymentCallback = async (req, res) => {
             clientIp: transaction.client_ip || null,
           },
         });
+
+        // Purchase-receipt email — VV looks up the customer's email from the
+        // M-PAiSA mapping and sends only if the feature is enabled for this site.
+        // Fire-and-forget; must never affect the payment/auth response.
+        vvClient.sendReceipt({
+          phone: customerphonenumber,
+          voucherCode,
+          host: req.headers.host || null,
+          planName: plan.name,
+          dataAllowance: plan.data || null,
+          amount: transaction.amount != null ? parseFloat(transaction.amount) : null,
+        }).catch(() => {});
       } catch (claimError) {
         log(`XXXX Voucher claim error: ${claimError.message}`);
 

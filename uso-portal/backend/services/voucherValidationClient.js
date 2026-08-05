@@ -198,6 +198,25 @@ async function sendAuditLog(event) {
 }
 
 /**
+ * Fire a purchase-receipt email via Voucher Validation. VV looks up the
+ * customer's email from the M-PAiSA mapping and only sends when the receipt
+ * feature is enabled for this site. Best-effort — never throws.
+ */
+async function sendReceipt({ phone, voucherCode, host, planName, dataAllowance, amount }) {
+  try {
+    const { data } = await getClient().post('/api/portal/receipt', {
+      phone, voucherCode, host, planName, dataAllowance, amount,
+    });
+    if (data?.sent) log(`Receipt emailed to ${data.to} for voucher ${voucherCode}`);
+    else log(`Receipt not sent (${data?.reason || 'unknown'}) for voucher ${voucherCode}`);
+    return data;
+  } catch (err) {
+    log('sendReceipt failed:', err.message);
+    return { sent: false, error: err.message };
+  }
+}
+
+/**
  * Fetch voucher usage status by voucher code.
  * Short cache (10s) since this is polled frequently from the status page.
  * Stale cache limited to 5 minutes max to prevent serving outdated data forever.
@@ -262,6 +281,7 @@ module.exports = {
   reserveVoucherForManual,
   markVoucherUsed,
   sendAuditLog,
+  sendReceipt,
   invalidateCache,
   fetchVoucherStatus,
 };

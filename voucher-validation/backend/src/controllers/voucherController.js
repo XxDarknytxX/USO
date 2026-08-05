@@ -1,7 +1,7 @@
 // src/controllers/voucherController.js
 import { validationResult } from "express-validator";
 import crypto from "crypto";
-import nodemailer from "nodemailer";
+import { loadSmtpTransport } from "../services/mailer.js";
 import RuijieService from "../services/ruijieService.js";
 import { parseVoucherExcelBuffer } from "../services/excelVoucherParser.js";
 import { effectiveGroupIds } from "../middleware/auth.js";
@@ -1344,26 +1344,10 @@ export function makeVoucherController(pool) {
         const to = String(req.body?.to || '').trim();
         if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(to)) return send.bad(res, 'Enter a valid recipient email address.');
 
-        const [rows] = await pool.query('SELECT * FROM smtp_settings WHERE id = 1');
-        const c = rows[0];
-        if (!c || !c.host) return send.bad(res, 'Save SMTP settings first — no host is configured.');
-
-        const enc = c.encryption || 'starttls';
-        const port = c.port || (enc === 'ssl' ? 465 : 587);
-        const transport = nodemailer.createTransport({
-          host: c.host,
-          port,
-          secure: enc === 'ssl',          // implicit TLS (465)
-          requireTLS: enc === 'starttls', // force the STARTTLS upgrade (587)
-          auth: c.username ? { user: c.username, pass: c.password || '' } : undefined,
-          connectionTimeout: 15000,
-          greetingTimeout: 15000,
-        });
-
-        const fromEmail = c.from_email || c.username || to;
-        const from = c.from_name ? `"${c.from_name}" <${fromEmail}>` : fromEmail;
-        const info = await transport.sendMail({
-          from,
+        const smtp = await loadSmtpTransport(pool);
+        if (!smtp) return send.bad(res, 'Save SMTP settings first — no host is configured.');
+        const info = await smtp.transport.sendMail({
+          from: smtp.from || to,
           to,
           subject: 'Voucher Manager — SMTP test',
           text: 'This is a test email from the Voucher Validation admin portal. If you received it, your SMTP settings are working.',

@@ -59,6 +59,14 @@ export default function SettingsPage() {
   const smtpDirty =
     origSmtp != null && (JSON.stringify(smtp) !== JSON.stringify(origSmtp) || smtpPassword.trim() !== "");
 
+  // Purchase-receipt emails (test on USO_2 first; enable/disable + site scope)
+  const [receiptsEnabled, setReceiptsEnabled] = useState(false);
+  const [receiptGroupIds, setReceiptGroupIds] = useState("7847952");
+  const [origReceipts, setOrigReceipts] = useState({ enabled: false, groupIds: "7847952" });
+  const [savingReceipts, setSavingReceipts] = useState(false);
+  const receiptsDirty =
+    receiptsEnabled !== origReceipts.enabled || receiptGroupIds.trim() !== origReceipts.groupIds;
+
   const syncDirty = syncEnabled !== origSync.enabled || syncInterval !== origSync.interval;
 
   // If the stored interval isn't one of the presets (e.g. set directly in the DB),
@@ -85,6 +93,12 @@ export default function SettingsPage() {
       setSyncEnabled(enabled);
       setSyncInterval(interval);
       setOrigSync({ enabled, interval });
+
+      const rEnabled = String(byKey.receipt_emails_enabled || "").toLowerCase() === "true";
+      const rGids = byKey.receipt_group_ids || "7847952";
+      setReceiptsEnabled(rEnabled);
+      setReceiptGroupIds(rGids);
+      setOrigReceipts({ enabled: rEnabled, groupIds: rGids });
     } catch {
       // Settings table may be empty — that's fine.
     } finally {
@@ -170,6 +184,22 @@ export default function SettingsPage() {
       toast.error(e?.message || "Failed to send test email", { id: tid, duration: 7000 });
     } finally {
       setSendingTest(false);
+    }
+  }
+
+  async function saveReceipts() {
+    setSavingReceipts(true);
+    try {
+      await Promise.all([
+        settingsApi.update("receipt_emails_enabled", receiptsEnabled ? "true" : "false", "boolean"),
+        settingsApi.update("receipt_group_ids", receiptGroupIds.trim(), "string"),
+      ]);
+      setOrigReceipts({ enabled: receiptsEnabled, groupIds: receiptGroupIds.trim() });
+      toast.success("Receipt settings saved");
+    } catch (e) {
+      toast.error(e?.message || "Failed to save receipt settings");
+    } finally {
+      setSavingReceipts(false);
     }
   }
 
@@ -339,6 +369,38 @@ export default function SettingsPage() {
               <p className="text-[11px] text-[var(--fg-muted)]">
                 Uses the saved settings above — save first if you just changed them.
               </p>
+            </div>
+
+            {/* Purchase receipts */}
+            <div className="border-t border-[var(--border-default)] pt-4 space-y-3">
+              <Toggle
+                checked={receiptsEnabled}
+                onChange={setReceiptsEnabled}
+                label="Email purchase receipts"
+                hint="On a successful purchase, email a receipt (voucher code, status link, shared-pool note) to the customer's email from the M-PAiSA mapping."
+              />
+              <Field
+                label="Sites (Ruijie group IDs)"
+                hint="Comma-separated — only these sites send receipts. USO_2 = 7847952."
+                className="max-w-xs"
+              >
+                <Input
+                  value={receiptGroupIds}
+                  onChange={(e) => setReceiptGroupIds(e.target.value)}
+                  placeholder="7847952"
+                  mono
+                />
+              </Field>
+              <div className="flex justify-end">
+                <Button
+                  variant="secondary"
+                  onClick={saveReceipts}
+                  loading={savingReceipts}
+                  disabled={!receiptsDirty || savingReceipts}
+                >
+                  Save receipt settings
+                </Button>
+              </div>
             </div>
           </div>
         </Panel>
