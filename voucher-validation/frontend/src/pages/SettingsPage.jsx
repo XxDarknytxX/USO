@@ -687,7 +687,7 @@ export default function SettingsPage() {
                 <Input value={sl.tokenUrl} onChange={(e) => setSlField("tokenUrl", e.target.value)} placeholder="https://www.starlink.com/api/auth/connect/token" mono />
               </Field>
               <Field label="API base URL">
-                <Input value={sl.apiBaseUrl} onChange={(e) => setSlField("apiBaseUrl", e.target.value)} placeholder="https://web-api.starlink.com/enterprise" mono />
+                <Input value={sl.apiBaseUrl} onChange={(e) => setSlField("apiBaseUrl", e.target.value)} placeholder="https://starlink.com/api/public" mono />
               </Field>
             </div>
 
