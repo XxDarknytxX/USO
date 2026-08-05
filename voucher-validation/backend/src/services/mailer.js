@@ -98,14 +98,57 @@ export function logoAttachment() {
   };
 }
 
+// One shared transport for the whole process, rebuilt only when the saved SMTP
+// settings actually change. See loadSmtpTransport for why this is cached.
+let _cachedSmtp = null;
+
+/** Fields that, if any change, mean the transport must be rebuilt. */
+function smtpFingerprint(c) {
+  return JSON.stringify([
+    c.host, c.port, c.encryption, c.username, c.password,
+    c.from_name, c.from_email,
+    // updated_at alone is not enough: two saves inside the same second share a
+    // timestamp. The values above cover that; this covers a same-value re-save.
+    c.updated_at instanceof Date ? c.updated_at.getTime() : c.updated_at,
+  ]);
+}
+
 /**
- * Build a nodemailer transport from the stored SMTP config, or null when no
- * host is configured. `from` is the display sender.
+ * The shared nodemailer transport built from the stored SMTP config, or null
+ * when no host is configured. `from` is the display sender.
+ *
+ * SENDS ARE SERIALIZED. Receipts are fired per purchase and nothing upstream
+ * co-ordinates them: the payment callback calls the Voucher Validation API
+ * fire-and-forget, so two customers paying at the same moment produce two
+ * concurrent requests. Building a fresh transport per send (the previous
+ * behaviour) meant each one opened its own SMTP connection and logged in
+ * separately, in parallel. Providers cap that hard: Office 365 allows only a
+ * few concurrent connections per mailbox and 30 messages a minute, and over
+ * either limit it rejects with a 4.7.0 throttling error. The receipt is
+ * best-effort with no retry, so a throttled send is a receipt the customer
+ * never gets.
+ *
+ * `pool: true` with `maxConnections: 1` makes nodemailer hold ONE connection
+ * and queue every sendMail behind it, so concurrent callers are serialized
+ * automatically with no queue of our own. `rateLimit` keeps a burst inside the
+ * provider's per-minute allowance. This is process-wide, which is sufficient
+ * because voucher-validation runs as a single PM2 instance (instances: 1,
+ * exec_mode: 'fork' in deploy/ecosystem.config.cjs) — if that ever becomes a
+ * cluster, each worker would get its own pool and the cap would multiply.
  */
-export async function loadSmtpTransport(pool) {
-  const [rows] = await pool.query("SELECT * FROM smtp_settings WHERE id = 1");
+export async function loadSmtpTransport(dbPool) {
+  const [rows] = await dbPool.query("SELECT * FROM smtp_settings WHERE id = 1");
   const c = rows[0];
   if (!c || !c.host) return null;
+
+  const fingerprint = smtpFingerprint(c);
+  if (_cachedSmtp && _cachedSmtp.fingerprint === fingerprint) return _cachedSmtp;
+
+  // Settings changed (or first use): drop the old pool before replacing it, or
+  // its idle connection would be leaked for the life of the process.
+  if (_cachedSmtp?.transport) {
+    try { _cachedSmtp.transport.close(); } catch { /* best effort */ }
+  }
 
   const enc = c.encryption || "starttls";
   const port = c.port || (enc === "ssl" ? 465 : 587);
@@ -117,11 +160,18 @@ export async function loadSmtpTransport(pool) {
     auth: c.username ? { user: c.username, pass: c.password || "" } : undefined,
     connectionTimeout: 15000,
     greetingTimeout: 15000,
+    // Serialization + throttling, see the note above.
+    pool: true,
+    maxConnections: 1, // never more than one SMTP conversation at a time
+    maxMessages: 100, // recycle the connection periodically
+    rateDelta: 60000,
+    rateLimit: 30, // <= 30 messages per minute (the Office 365 ceiling)
   });
 
   const fromEmail = c.from_email || c.username || null;
   const from = c.from_name ? `"${c.from_name}" <${fromEmail}>` : fromEmail;
-  return { transport, from, config: c };
+  _cachedSmtp = { fingerprint, transport, from, config: c };
+  return _cachedSmtp;
 }
 
 function esc(s) {
