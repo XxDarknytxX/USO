@@ -36,6 +36,12 @@ const MONO = "'Courier New', Courier, monospace";
 // The Vodafone speechmark, embedded inline (cid:) so it renders without the
 // recipient's client having to fetch a remote image, and so it survives Gmail's
 // image proxy and Outlook's remote-content blocking. Read once at startup.
+//
+// The asset MUST keep its alpha channel. Flattening it onto white paints a white
+// card around the mark, which is glaringly wrong in Outlook's dark theme (Outlook
+// desktop repaints the surrounding cell dark and ignores our light-only hint, but
+// it cannot repaint pixels baked into the image). Transparent, the red mark reads
+// correctly on both the light and the dark surface.
 let _logoBuf = null;
 try {
   _logoBuf = readFileSync(join(__dirname, "..", "assets", "vodafone-logo.png"));
@@ -297,7 +303,9 @@ export function buildReceipt({ voucherCode, statusUrl, planName, dataAllowance, 
   const code = voucherCode == null ? "" : String(voucherCode);
   const amt =
     amount != null && !Number.isNaN(Number(amount)) ? `FJD ${Number(amount).toFixed(2)}` : null;
-  const planLine = planName ? `${planName}${dataAllowance ? `, ${dataAllowance}` : ""}` : null;
+  // A hyphen reads better than a comma between the plan and its allowance
+  // ("Daily Wi-Fi - 2 GB"). Plain ASCII hyphen, never an em or en dash.
+  const planLine = planName ? `${planName}${dataAllowance ? ` - ${dataAllowance}` : ""}` : null;
 
   const subject = "Your Vodafone Fiji Wi-Fi voucher (payment successful)";
 
@@ -401,7 +409,7 @@ export function buildReceipt({ voucherCode, statusUrl, planName, dataAllowance, 
     subject,
     text,
     html: shell({
-      preheader: code ? `Voucher ${code}, payment successful` : "Payment successful",
+      preheader: code ? `Voucher ${code} - payment successful` : "Payment successful",
       title: "Payment successful",
       subtitle: "Your Wi-Fi voucher is ready to use",
       body,
@@ -415,7 +423,7 @@ export function buildReceipt({ voucherCode, statusUrl, planName, dataAllowance, 
  * templates so the test-send path is uniform.
  */
 export function buildConnectionTest() {
-  const subject = "Vodafone Fiji Voucher Manager, SMTP test";
+  const subject = "Vodafone Fiji Voucher Manager - SMTP test";
   const text = [
     "SMTP SETTINGS ARE WORKING",
     "",
