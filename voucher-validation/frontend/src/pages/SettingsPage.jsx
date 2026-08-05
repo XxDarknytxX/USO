@@ -59,13 +59,25 @@ export default function SettingsPage() {
   const smtpDirty =
     origSmtp != null && (JSON.stringify(smtp) !== JSON.stringify(origSmtp) || smtpPassword.trim() !== "");
 
-  // Purchase-receipt emails (test on USO_2 first; enable/disable + site scope)
+  // Purchase-receipt emails (test on USO_2 first; enable/disable + site scope).
+  // Stored as a comma list of Ruijie group ids, but picked from the village list.
   const [receiptsEnabled, setReceiptsEnabled] = useState(false);
   const [receiptGroupIds, setReceiptGroupIds] = useState("7847952");
   const [origReceipts, setOrigReceipts] = useState({ enabled: false, groupIds: "7847952" });
   const [savingReceipts, setSavingReceipts] = useState(false);
+  const normGroups = (v) =>
+    String(v || "").split(",").map((x) => x.trim()).filter(Boolean).sort().join(",");
+  const receiptSet = new Set(receiptGroupIds.split(",").map((x) => x.trim()).filter(Boolean));
+  const isReceiptSite = (gid) => receiptSet.has(String(gid));
+  const toggleReceiptSite = (gid) => {
+    const g = String(gid);
+    const next = new Set(receiptSet);
+    if (next.has(g)) next.delete(g);
+    else next.add(g);
+    setReceiptGroupIds([...next].join(","));
+  };
   const receiptsDirty =
-    receiptsEnabled !== origReceipts.enabled || receiptGroupIds.trim() !== origReceipts.groupIds;
+    receiptsEnabled !== origReceipts.enabled || normGroups(receiptGroupIds) !== normGroups(origReceipts.groupIds);
 
   const syncDirty = syncEnabled !== origSync.enabled || syncInterval !== origSync.interval;
 
@@ -190,11 +202,12 @@ export default function SettingsPage() {
   async function saveReceipts() {
     setSavingReceipts(true);
     try {
+      const gids = normGroups(receiptGroupIds);
       await Promise.all([
         settingsApi.update("receipt_emails_enabled", receiptsEnabled ? "true" : "false", "boolean"),
-        settingsApi.update("receipt_group_ids", receiptGroupIds.trim(), "string"),
+        settingsApi.update("receipt_group_ids", gids, "string"),
       ]);
-      setOrigReceipts({ enabled: receiptsEnabled, groupIds: receiptGroupIds.trim() });
+      setOrigReceipts({ enabled: receiptsEnabled, groupIds: gids });
       toast.success("Receipt settings saved");
     } catch (e) {
       toast.error(e?.message || "Failed to save receipt settings");
@@ -379,18 +392,49 @@ export default function SettingsPage() {
                 label="Email purchase receipts"
                 hint="On a successful purchase, email a receipt (voucher code, status link, shared-pool note) to the customer's email from the M-PAiSA mapping."
               />
-              <Field
-                label="Sites (Ruijie group IDs)"
-                hint="Comma-separated — only these sites send receipts. USO_2 = 7847952."
-                className="max-w-xs"
-              >
-                <Input
-                  value={receiptGroupIds}
-                  onChange={(e) => setReceiptGroupIds(e.target.value)}
-                  placeholder="7847952"
-                  mono
-                />
-              </Field>
+              <div>
+                <p className="text-sm font-medium text-[var(--fg-primary)]">Sites</p>
+                <p className="text-[11.5px] text-[var(--fg-muted)] mt-0.5 mb-2">
+                  Only the selected villages send receipts. Start with USO_2.
+                </p>
+                <div className="rounded-lg border border-[var(--border-default)] divide-y divide-[var(--border-default)] max-h-[220px] overflow-y-auto scrollbar-none">
+                  {sites.length === 0 ? (
+                    <div className="px-3 py-3 text-[12.5px] text-[var(--fg-muted)]">
+                      No villages yet — add them under Network.
+                    </div>
+                  ) : (
+                    sites.map((s) => {
+                      const gid = s.ruijieGroupId;
+                      const on = gid ? isReceiptSite(gid) : false;
+                      return (
+                        <button
+                          key={s.id}
+                          type="button"
+                          disabled={!gid}
+                          onClick={() => gid && toggleReceiptSite(gid)}
+                          className="w-full flex items-center gap-3 px-3 py-2.5 text-left hover:bg-[var(--bg-surface)] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                          <span
+                            className={
+                              "shrink-0 h-[18px] w-[18px] rounded flex items-center justify-center border transition-colors " +
+                              (on
+                                ? "bg-[var(--accent)] border-[var(--accent)] text-white"
+                                : "border-[var(--border-strong)] text-transparent")
+                            }
+                          >
+                            <Check size={12} strokeWidth={3} />
+                          </span>
+                          <span className="min-w-0 flex-1">
+                            <span className="block text-[12.5px] font-medium text-[var(--fg-primary)] truncate">{s.name}</span>
+                            {gid && <span className="block text-[10.5px] font-mono text-[var(--fg-muted)] truncate">{gid}</span>}
+                          </span>
+                          {!gid && <span className="text-[10px] text-[var(--fg-muted)] shrink-0">no group id</span>}
+                        </button>
+                      );
+                    })
+                  )}
+                </div>
+              </div>
               <div className="flex justify-end">
                 <Button
                   variant="secondary"
