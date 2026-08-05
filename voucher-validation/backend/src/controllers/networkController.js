@@ -207,7 +207,7 @@ export function makeNetworkController(pool) {
           });
         }
 
-        const { cycles = [], fetchedAt, stale } = usageRes.value;
+        const { cycles = [], fetchedAt, stale, reason } = usageRes.value;
         const cycle = cycles[cycleIndex] || null;
         return send.ok(res, {
           configured: true,
@@ -217,6 +217,13 @@ export function makeNetworkController(pool) {
           cycle: cycle ? { startDate: cycle.startDate, endDate: cycle.endDate } : null,
           days: cycle?.days || [],
           totals: cycle?.totals || null,
+          // Why the chart is empty, when it is: "no results for this service
+          // line" is a very different problem from "no usage yet this cycle".
+          reason:
+            reason ||
+            (cycles.length && !cycle
+              ? `Starlink only returned ${cycles.length} billing cycle(s), so this one is not available yet.`
+              : null),
           fetchedAt,
           stale: !!stale,
         });

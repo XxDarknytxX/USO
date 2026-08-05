@@ -174,8 +174,12 @@ export default function StarlinkPanel({ projectId }) {
       {days.length === 0 ? (
         <EmptyState
           icon={Satellite}
-          title={data?.error ? "Starlink data unavailable" : "No usage recorded this cycle"}
-          description={data?.error || "Usage appears once the kit reports data for this billing cycle."}
+          title={data?.error ? "Starlink data unavailable" : "No usage to show"}
+          description={
+            data?.error ||
+            data?.reason ||
+            "Usage appears once the kit reports data for this billing cycle."
+          }
         />
       ) : (
         <>

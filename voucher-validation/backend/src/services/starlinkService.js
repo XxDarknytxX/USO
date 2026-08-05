@@ -1,33 +1,30 @@
 // src/services/starlinkService.js
 // Reads data usage from the Starlink Enterprise v2 API for one service line.
 //
-// Ported from the Starlink WebApp Production Build (routes/usage.js,
-// services/telemetryPoller.js), but deliberately NOT a straight copy. That app
-// authenticates and fetches live on every request with no cache and no pacing.
-// This codebase has already paid for that pattern once: Ruijie Cloud returns
-// `code: 44` ("Too many requests") at the ACCOUNT level and stays throttled for
-// a long window, and retrying amplifies it. So everything here is built to make
-// as few outbound calls as possible:
+// Ported from the Starlink WebApp Production Build (routes/usage.js), and it
+// now polls the SAME WAY that app does: live on every request, no response
+// cache, no pacing, no circuit breaker.
 //
-//   * ONE call returns THREE billing cycles, so the Current/Previous/2-ago
-//     selector is sliced from a single cached response and costs nothing extra.
-//   * A 15-minute fresh cache, and a 24-hour stale cache that is served (marked
-//     stale) rather than erroring when the API is down.
-//   * Single-flight: N dashboards opening the same village collapse into one
-//     request.
-//   * A process-wide serialized limiter with >=300ms spacing. NO RETRY anywhere
-//     — retrying a throttled account is what made code:44 worse.
-//   * A circuit breaker: on 429, or 3 consecutive failures, stop calling for
-//     10 minutes and serve cache.
+// An earlier version of this file carried the defences built for Ruijie Cloud
+// (15-minute cache, serialized limiter, 10-minute circuit breaker after three
+// failures). Those exist because Ruijie throttles at the ACCOUNT level with
+// `code: 44` and stays throttled for a long window. Starlink's Enterprise API
+// does not behave that way, and the caching actively hurt: a first fetch made
+// against a wrong base URL tripped the breaker, and the dashboard then reported
+// "unavailable" for ten minutes even after the URL was corrected, while an
+// empty result stayed pinned for fifteen.
 //
-// There is no background poller and no all-villages aggregate. Never add a loop
-// that iterates villages calling this; that is exactly the mistake that took
-// the Ruijie integration down.
+// Two things are deliberately KEPT, because neither delays or staleness data:
+//   * Token caching — a bearer token is reused until it is nearly expired
+//     rather than re-authenticating on every call (the source's telemetry
+//     poller does the same; its usage route re-auths each time, wastefully).
+//   * Single-flight — N dashboards opening the SAME village at the SAME moment
+//     collapse into one in-flight request. This cannot serve stale data; it
+//     only avoids firing identical simultaneous calls.
 //
-// State is module-level, which is sound because voucher-validation runs as a
-// single PM2 process (instances: 1, exec_mode 'fork' in
-// deploy/ecosystem.config.cjs). Under cluster mode each worker would get its
-// own limiter and the effective outbound rate would multiply.
+// Still no retry: a failed call fails and the UI says so, rather than
+// multiplying load. And still no background poller and no loop over villages —
+// one dashboard open is one service line.
 
 // node-fetch, not axios: axios is not a dependency of this backend, and
 // ruijieService.js (the module this one is modelled on) already uses node-fetch.
@@ -56,25 +53,16 @@ async function fetchJson(url, { timeoutMs = 60000, ...options } = {}) {
   }
 }
 
-const FRESH_MS = 15 * 60 * 1000; // serve from cache without calling
-const STALE_MS = 24 * 60 * 60 * 1000; // serve stale rather than fail
-const LINE_TTL_MS = 6 * 60 * 60 * 1000; // kit metadata barely changes
-const MIN_GAP_MS = 300; // spacing between outbound calls
-const CIRCUIT_MS = 10 * 60 * 1000; // cool-off after throttling
-const CONFIG_TTL_MS = 60 * 1000; // re-read credentials at most once a minute
+const CONFIG_TTL_MS = 15 * 1000; // re-read saved credentials at most this often
 
 let _config = null;
 let _configAt = 0;
 let _token = null;
 let _tokenExpiresAt = 0;
 
-const _limiter = { chain: Promise.resolve(), lastAt: 0 };
-const _circuit = { openUntil: 0, consecutiveErrors: 0 };
-const _usageCache = new Map(); // serviceLineNumber -> { at, payload }
-const _lineCache = new Map(); // serviceLineNumber -> { at, payload }
-const _inflight = new Map(); // key -> Promise
+const _inflight = new Map(); // key -> Promise (single-flight only, no caching)
 
-/** Thrown when we refuse to call out (circuit open) or the call failed. */
+/** Thrown when a Starlink call fails or the API rejects the request. */
 class StarlinkError extends Error {
   constructor(message, code) {
     super(message);
@@ -106,49 +94,20 @@ export async function loadConfig(pool) {
 }
 
 /**
- * Every outbound Starlink request goes through here: serialized, paced, and
- * refused outright while the circuit is open. No retry — see the file header.
+ * Runs one Starlink request. No pacing, no breaker, no retry — the same way the
+ * Starlink portal calls this API. The only special handling is that a 401/403
+ * drops the cached token so the next call re-authenticates.
  */
-function starlinkFetch(doRequest) {
-  const run = async () => {
-    if (Date.now() < _circuit.openUntil) {
-      const secs = Math.ceil((_circuit.openUntil - Date.now()) / 1000);
-      throw new StarlinkError(`Starlink calls paused for ${secs}s after throttling`, "circuit_open");
+async function starlinkFetch(doRequest) {
+  try {
+    return await doRequest();
+  } catch (e) {
+    if (e.status === 401 || e.status === 403) {
+      _token = null;
+      _tokenExpiresAt = 0;
     }
-    const wait = Math.max(0, _limiter.lastAt + MIN_GAP_MS - Date.now());
-    if (wait) await new Promise((r) => setTimeout(r, wait));
-    _limiter.lastAt = Date.now();
-
-    try {
-      const out = await doRequest();
-      _circuit.consecutiveErrors = 0;
-      return out;
-    } catch (e) {
-      const status = e.status;
-      if (status === 401 || status === 403) {
-        // Stale token: clear it so the next call re-authenticates. Not counted
-        // as a throttling signal.
-        _token = null;
-        _tokenExpiresAt = 0;
-        throw e;
-      }
-      _circuit.consecutiveErrors += 1;
-      if (status === 429 || _circuit.consecutiveErrors >= 3) {
-        _circuit.openUntil = Date.now() + CIRCUIT_MS;
-        _circuit.consecutiveErrors = 0;
-        log(`circuit OPEN for ${CIRCUIT_MS / 60000} min (status ${status || "n/a"})`);
-      }
-      throw e;
-    }
-  };
-
-  // Chain so only one Starlink conversation happens at a time process-wide.
-  const next = _limiter.chain.then(run, run);
-  _limiter.chain = next.then(
-    () => undefined,
-    () => undefined
-  );
-  return next;
+    throw e;
+  }
 }
 
 /** OAuth2 client-credentials token, cached until shortly before it expires. */
@@ -326,59 +285,49 @@ function normalizeCycle(cycle, servicePlan) {
  * normalised and cached. Returns { cycles: [newest..oldest], fetchedAt, stale }.
  */
 export async function getUsage(cfg, serviceLineNumber) {
-  const key = `usage:${serviceLineNumber}`;
-  const hit = _usageCache.get(serviceLineNumber);
-  if (hit && Date.now() - hit.at < FRESH_MS) {
-    return { ...hit.payload, fetchedAt: hit.at, stale: false };
-  }
+  // Live every time, like the Starlink portal. singleFlight only merges calls
+  // that are genuinely simultaneous for the same service line.
+  const payload = await singleFlight(`usage:${serviceLineNumber}`, async () => {
+    const token = await getToken(cfg);
+    const url = `${String(cfg.api_base_url).replace(/\/$/, "")}/v2/data-usage/query?page=0`;
+    const data = await starlinkFetch(() =>
+      fetchJson(url, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+          Accept: "application/json",
+        },
+        body: JSON.stringify({
+          serviceLineNumbers: [serviceLineNumber],
+          previousBillingCycles: 2,
+          activeServiceLinesOnly: true,
+        }),
+        timeoutMs: 60000,
+      })
+    );
+    const content = unwrap(data, "data-usage");
+    const result = content?.results?.[0] ?? null;
+    const raw = result?.billingCycles ?? [];
+    // Cycles arrive OLDEST-first (the source picks index 2 for the current
+    // one); the UI wants newest first.
+    const cycles = raw.map((c) => normalizeCycle(c, result?.servicePlan ?? null)).reverse();
+    // `reason` explains an empty chart instead of leaving it silently blank.
+    const reason = !result
+      ? "Starlink returned no results for this service line. Check the number, and that the line is active."
+      : raw.length === 0
+        ? "Starlink returned no billing cycles for this service line yet."
+        : null;
+    log(`usage ${serviceLineNumber}: ${raw.length} cycle(s)${reason ? ` — ${reason}` : ""}`);
+    return { cycles, reason };
+  });
 
-  try {
-    const payload = await singleFlight(key, async () => {
-      const token = await getToken(cfg);
-      const url = `${String(cfg.api_base_url).replace(/\/$/, "")}/v2/data-usage/query?page=0`;
-      const data = await starlinkFetch(() =>
-        fetchJson(url, {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${token}`,
-            "Content-Type": "application/json",
-            Accept: "application/json",
-          },
-          body: JSON.stringify({
-            serviceLineNumbers: [serviceLineNumber],
-            previousBillingCycles: 2,
-            activeServiceLinesOnly: true,
-          }),
-          timeoutMs: 60000,
-        })
-      );
-      const content = unwrap(data, "data-usage");
-      // An empty result is NORMAL for a new or idle line, not an error.
-      const raw = content?.results?.[0]?.billingCycles ?? [];
-      // The API returns cycles oldest-first; newest first is what the UI wants.
-      const servicePlan = content?.results?.[0]?.servicePlan ?? null;
-      const cycles = raw.map((c) => normalizeCycle(c, servicePlan)).reverse();
-      return { cycles };
-    });
-
-    _usageCache.set(serviceLineNumber, { at: Date.now(), payload });
-    return { ...payload, fetchedAt: Date.now(), stale: false };
-  } catch (e) {
-    // Serve stale rather than showing the operator nothing.
-    if (hit && Date.now() - hit.at < STALE_MS) {
-      log(`serving stale usage for ${serviceLineNumber}: ${e.message}`);
-      return { ...hit.payload, fetchedAt: hit.at, stale: true };
-    }
-    throw e;
-  }
+  return { ...payload, fetchedAt: Date.now(), stale: false };
 }
 
-/** Kit metadata for the service line (nickname, plan, active). Cached 6h. */
+/** Kit metadata for the service line (nickname, plan, active). Fetched live. */
 export async function getServiceLine(cfg, serviceLineNumber) {
-  const hit = _lineCache.get(serviceLineNumber);
-  if (hit && Date.now() - hit.at < LINE_TTL_MS) return hit.payload;
-
-  const payload = await singleFlight(`line:${serviceLineNumber}`, async () => {
+  return singleFlight(`line:${serviceLineNumber}`, async () => {
     const token = await getToken(cfg);
     const base = String(cfg.api_base_url).replace(/\/$/, "");
     const url = `${base}/v2/service-lines/${encodeURIComponent(serviceLineNumber)}`;
@@ -397,17 +346,9 @@ export async function getServiceLine(cfg, serviceLineNumber) {
       productReferenceId: c?.productReferenceId || null,
     };
   });
-
-  _lineCache.set(serviceLineNumber, { at: Date.now(), payload });
-  return payload;
 }
 
-/** Debug view of the limiter/circuit state. */
+/** Small debug view, used only for diagnostics. */
 export function getStatus() {
-  return {
-    circuitOpenUntil: _circuit.openUntil || null,
-    cachedUsageLines: _usageCache.size,
-    cachedServiceLines: _lineCache.size,
-    tokenCached: !!_token,
-  };
+  return { tokenCached: !!_token, inFlight: _inflight.size };
 }
