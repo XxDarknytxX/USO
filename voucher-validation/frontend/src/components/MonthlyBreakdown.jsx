@@ -9,20 +9,19 @@
 // voucher_claims), never from Ruijie or Starlink, so changing month is cheap
 // and cannot contribute to any upstream rate limit.
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useMemo } from "react";
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
   PieChart, Pie, Cell,
 } from "recharts";
 import {
-  BarChart3, ChevronLeft, ChevronRight, RefreshCw, DollarSign, Ticket,
+  BarChart3, DollarSign, Ticket,
   Users, Wifi, AlertTriangle, Clock, MapPin,
 } from "lucide-react";
 
-import { useSite } from "../hooks/useSite";
-import { portalConfigApi } from "../services/api";
+import { monthLabel } from "../hooks/useMonthlyBreakdown";
 import {
-  Button, Panel, StatCard, EmptyState, Select, Badge,
+  Panel, StatCard, EmptyState, Badge,
   SkeletonKpis, SkeletonCard,
   CHART_COLORS, CHART_SERIES, ChartTooltip, useChartTheme,
   ChartStat, LegendRow, axisX, axisY, gridProps, BAR_RADIUS, BAR_MAX_SIZE, BAR_CATEGORY_GAP,
@@ -32,11 +31,6 @@ const money = (n) =>
   "$" + Number(n || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const num = (n) => Number(n || 0).toLocaleString();
 
-const monthLabel = (m) => {
-  if (!m) return "";
-  const [y, mo] = m.split("-").map(Number);
-  return new Date(y, mo - 1, 1).toLocaleString(undefined, { month: "long", year: "numeric" });
-};
 
 /** Event types worth naming; anything else is shown raw. */
 const OUTCOME_LABEL = {
@@ -57,38 +51,11 @@ const outcomeTone = (t) =>
     : /manual|skipped/.test(t) ? CHART_COLORS.amber
     : CHART_COLORS.slate;
 
-export default function MonthlyBreakdown({ groupId = null }) {
-  const { sites } = useSite();
+export default function MonthlyBreakdown({ state, groupId = null }) {
   const activeGroupId = groupId;
   const ct = useChartTheme();
-  const [month, setMonth] = useState("");
-  const [data, setData] = useState(null);
-  const [loading, setLoading] = useState(true);
+  const { month, months, data, loading } = state;
 
-  const load = useCallback(async (m) => {
-    setLoading(true);
-    try {
-      const params = {};
-      if (m) params.month = m;
-      if (activeGroupId) params.groupId = activeGroupId;
-      const res = await portalConfigApi.breakdown(params);
-      setData(res);
-      setMonth(res.month || "");
-    } catch {
-      setData(null);
-    } finally {
-      setLoading(false);
-    }
-  }, [activeGroupId]);
-
-  useEffect(() => { load(month || undefined); /* eslint-disable-next-line */ }, [activeGroupId]);
-
-  const months = data?.months || [];
-  const idx = months.findIndex((m) => m.month === month);
-  const step = (delta) => {
-    const next = months[idx + delta];
-    if (next) { setMonth(next.month); load(next.month); }
-  };
 
   const t = data?.totals || {};
   const daily = data?.daily || [];
@@ -107,40 +74,6 @@ export default function MonthlyBreakdown({ groupId = null }) {
 
   return (
     <div className="space-y-6">
-      {/* Month bar: the control sits with the numbers it governs. */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-        <div className="flex items-center gap-2.5">
-          <span className="h-8 w-8 rounded-lg bg-[var(--bg-surface)] border border-[var(--border-default)] flex items-center justify-center text-[var(--accent)]">
-            <BarChart3 size={15} />
-          </span>
-          <div>
-            <p className="text-sm font-semibold text-[var(--fg-primary)] leading-tight">Monthly breakdown</p>
-            <p className="text-[11.5px] text-[var(--fg-muted)]">{monthLabel(month) || "Select a month"}</p>
-          </div>
-        </div>
-        <div className="flex items-center gap-2">
-          <Button variant="ghost" size="sm" onClick={() => step(1)} disabled={idx < 0 || idx >= months.length - 1} aria-label="Earlier month">
-            <ChevronLeft size={15} />
-          </Button>
-          <Select
-            value={month}
-            onChange={(e) => { setMonth(e.target.value); load(e.target.value); }}
-            className="min-w-[190px]"
-          >
-            {months.length === 0 && <option value="">No sales yet</option>}
-            {months.map((m) => (
-              <option key={m.month} value={m.month}>
-                {monthLabel(m.month)} · {num(m.txns)} sales
-              </option>
-            ))}
-          </Select>
-          <Button variant="ghost" size="sm" onClick={() => step(-1)} disabled={idx <= 0} aria-label="Later month">
-            <ChevronRight size={15} />
-          </Button>
-          <Button variant="ghost" size="sm" iconLeft={<RefreshCw size={14} className={loading ? "animate-spin" : ""} />} onClick={() => load(month)} disabled={loading} />
-        </div>
-      </div>
-
       {loading && !data ? (
         <div className="space-y-6">
           <SkeletonKpis count={4} />

@@ -16,6 +16,8 @@ import { voucherApi, networkApi, portalConfigApi } from "../../services/api";
 import PlanBreakdown from "../../components/PlanBreakdown";
 import StarlinkPanel from "../../components/StarlinkPanel";
 import MonthlyBreakdown from "../../components/MonthlyBreakdown";
+import MonthPicker from "../../components/MonthPicker";
+import { useMonthlyBreakdown } from "../../hooks/useMonthlyBreakdown";
 import {
   PageHeader, Button, StatCard, Panel, Badge, EmptyState,
   SkeletonKpis, SkeletonCard,
@@ -42,6 +44,8 @@ const DEVICE_ICON = { gateway: RouterIcon, ap: Wifi, switch: Server, other: Cpu 
 
 export default function SiteDashboard({ groupId, site }) {
   const { setActiveSiteId } = useSite();
+  // One month drives every historical figure on this page.
+  const mb = useMonthlyBreakdown(groupId);
   const ct = useChartTheme();
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -133,6 +137,7 @@ export default function SiteDashboard({ groupId, site }) {
         icon={<Gauge size={20} />}
         actions={
           <>
+            <MonthPicker state={mb} />
             <Button variant="secondary" size="sm" iconLeft={<ArrowLeft size={14} />} onClick={() => setActiveSiteId(null)}>
               All villages
             </Button>
@@ -175,42 +180,45 @@ export default function SiteDashboard({ groupId, site }) {
             />
           </div>
 
-          {/* Voucher rail */}
+          {/* Voucher stock — current inventory, deliberately NOT month-scoped:
+              "how many are left to sell" is a now question, not a July one. */}
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
             <StatCard label="Vouchers" value={fmtNum(vTotal)} icon={<Ticket size={18} />} color="accent" sub={`${fmtNum(vUnused)} left to sell`} />
             <StatCard label="Sold" value={fmtNum(vSold)} icon={<Ticket size={18} />} color="violet" sub={vTotal ? `${Math.round((vSold / vTotal) * 100)}% of pool · ${fmtNum(vActive)} active` : "—"} />
             <StatCard label="Live now" value={fmtNum(live)} icon={<Users size={18} />} color="amber" />
-            <StatCard label="Data used" value={fmtBytes(vDataUsedMb * 1024 * 1024)} icon={<Activity size={18} />} color="cyan" sub="voucher data consumed" />
+            <StatCard label="Data used" value={fmtBytes(vDataUsedMb * 1024 * 1024)} icon={<Activity size={18} />} color="cyan" sub="all time, this village" />
           </div>
 
-          {/* Revenue rail */}
+          {/* Sales rail — scoped to the month chosen in the header. The
+              labels say which month so a figure can never be mistaken for
+              all-time, which is exactly what the old "total" card was. */}
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
             <StatCard
-              label="Revenue (total)"
-              value={fmtMoney(revenue?.total)}
+              label={`Revenue · ${mb.label || "month"}`}
+              value={fmtMoney(mb.totals.revenue)}
               icon={<DollarSign size={18} />}
               color="accent"
-              sub={`${fmtNum(revenue?.totalCount || 0)} sale${revenue?.totalCount === 1 ? "" : "s"}`}
+              sub={`${fmtNum(mb.totals.transactions || 0)} sale${mb.totals.transactions === 1 ? "" : "s"}`}
             />
             <StatCard
-              label="Sold this month"
-              value={fmtMoney(revenue?.month)}
+              label="Vouchers sold"
+              value={fmtNum(mb.totals.sold || 0)}
               icon={<TrendingUp size={18} />}
               color="emerald"
-              sub={`${fmtNum(revenue?.monthCount || 0)} this month`}
-            />
-            <StatCard
-              label="Sold today"
-              value={fmtMoney(revenue?.today)}
-              icon={<DollarSign size={18} />}
-              color="violet"
-              sub={`${fmtNum(revenue?.todayCount || 0)} today`}
+              sub={`${fmtNum(mb.totals.customers || 0)} customers`}
             />
             <StatCard
               label="Avg sale"
-              value={fmtMoney(revenue?.totalCount ? revenue.total / revenue.totalCount : 0)}
+              value={fmtMoney(mb.totals.avgSale)}
               icon={<Activity size={18} />}
-              color="cyan"
+              color="violet"
+            />
+            <StatCard
+              label="Got online"
+              value={`${mb.totals.connectedPct ?? 0}%`}
+              icon={<Wifi size={18} />}
+              color={(mb.totals.connectedPct ?? 0) >= 95 ? "emerald" : (mb.totals.connectedPct ?? 0) >= 80 ? "amber" : "rose"}
+              sub={`${fmtNum(mb.totals.connected || 0)} of ${fmtNum(mb.totals.transactions || 0)}`}
             />
           </div>
 
@@ -220,7 +228,7 @@ export default function SiteDashboard({ groupId, site }) {
 
           {/* Sales for a chosen month — replaces the old fixed 6-month
               revenue bar, which could only ever show one window. */}
-          <MonthlyBreakdown groupId={groupId} />
+          <MonthlyBreakdown state={mb} groupId={groupId} />
 
           {/* Trend */}
           <Panel title="Clients" subtitle="Last 24 hours" icon={<Activity size={15} />}>

@@ -46,6 +46,8 @@ import { api, voucherApi } from "../services/api";
 import { useSite } from "../hooks/useSite";
 import { useAuth } from "../hooks/useAuth";
 import MonthlyBreakdown from "../components/MonthlyBreakdown";
+import MonthPicker from "../components/MonthPicker";
+import { useMonthlyBreakdown } from "../hooks/useMonthlyBreakdown";
 import {
   Modal, Badge, EmptyState, Button,
   BAR_RADIUS, BAR_MAX_SIZE, BAR_CATEGORY_GAP,
@@ -87,6 +89,8 @@ export default function Dashboard() {
   const [voucherStats, setVoucherStats] = useState(null);
   const [syncLogs, setSyncLogs] = useState([]);
   const [revenue, setRevenue] = useState(null);
+  // One month drives every historical figure on this page.
+  const mb = useMonthlyBreakdown(null);
   const [manualAssist, setManualAssist] = useState(null);
   const [activeView, setActiveView] = useState("overview");
   const [selectedPackage, setSelectedPackage] = useState(null);
@@ -383,6 +387,8 @@ export default function Dashboard() {
           </div>
         </div>
 
+        <div className="flex items-center gap-3 flex-wrap justify-end">
+          <MonthPicker state={mb} compact />
         {/* Sync is an admin action (and hits Ruijie) — hidden for read-only viewers. */}
         {!isViewer && (
           <div className="flex items-center gap-3">
@@ -402,6 +408,8 @@ export default function Dashboard() {
               {syncing ? "Syncing…" : "Sync now"}
             </Button>
           </div>
+        )}
+        </div>
         )}
       </div>
 
@@ -456,36 +464,37 @@ export default function Dashboard() {
           })}
         </div>
 
-        {/* ----- Revenue + headline (scope-aware) ----- */}
+        {/* ----- Sales for the selected month (scope-aware) -----
+             Labelled with the month so a figure can never be misread as
+             all-time, which is what the old "total" card actually was. */}
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
           <MetricCard
-            label="Revenue (total)"
-            value={fmtMoney(scopedRevenue.total)}
+            label={`Revenue · ${mb.label || "month"}`}
+            value={fmtMoney(mb.totals.revenue)}
             icon={<DollarSign size={14} />}
-            sub={`${scopedRevenue.count.toLocaleString()} sale${scopedRevenue.count === 1 ? "" : "s"}`}
+            sub={`${Number(mb.totals.transactions || 0).toLocaleString()} sale${mb.totals.transactions === 1 ? "" : "s"}`}
             onClick={() => navigate("/portal-flows")}
           />
           <MetricCard
-            label="Sold this month"
-            value={fmtMoney(scopedRevenue.month)}
+            label="Vouchers sold"
+            value={Number(mb.totals.sold || 0).toLocaleString()}
             icon={<TrendingUp size={14} />}
-            sub={`${scopedRevenue.monthCount.toLocaleString()} this month`}
+            sub={`${Number(mb.totals.customers || 0).toLocaleString()} customers`}
             onClick={() => {
-              const d = new Date();
-              navigate(`/portal-flows?startDate=${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-01`);
+              if (mb.month) navigate(`/portal-flows?startDate=${mb.month}-01`);
             }}
+          />
+          <MetricCard
+            label="Avg sale"
+            value={fmtMoney(mb.totals.avgSale)}
+            icon={<Zap size={14} />}
+            sub={mb.totals.revenueAtRisk ? `${fmtMoney(mb.totals.revenueAtRisk)} at risk` : "all connected"}
           />
           <MetricCard
             label="Live users"
             value={scopedMetrics.liveUsers.toLocaleString()}
             icon={<Users size={14} />}
             sub="Currently connected"
-          />
-          <MetricCard
-            label="Active rate"
-            value={`${scopedMetrics.activeRate}%`}
-            icon={<Zap size={14} />}
-            sub={`${scopedMetrics.activeVouchers.toLocaleString()} active`}
           />
         </div>
 
@@ -567,7 +576,7 @@ export default function Dashboard() {
 
         {/* Sales for a chosen month. Replaces the fixed six-month revenue
             bar, which could only ever show one window and no detail. */}
-        <MonthlyBreakdown />
+        <MonthlyBreakdown state={mb} />
 
         {/* ----- Charts Row 1 ----- */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
