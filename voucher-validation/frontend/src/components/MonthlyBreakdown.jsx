@@ -1,6 +1,9 @@
-// src/pages/ReportsPage.jsx
-// Everything about one month, in one place: pick a month, see the totals and
-// the splits behind them. One backend call fills the whole page.
+// src/components/MonthlyBreakdown.jsx
+// Everything about one month, dropped into a dashboard: pick a month and every
+// figure below it re-scopes. One backend call fills the whole section.
+//
+// Lives on the dashboards rather than on a page of its own, so the month you
+// are looking at is chosen in the same place you read the numbers.
 //
 // Every figure here comes from the LOCAL database (portal_audit_logs +
 // voucher_claims), never from Ruijie or Starlink, so changing month is cheap
@@ -19,11 +22,11 @@ import {
 import { useSite } from "../hooks/useSite";
 import { portalConfigApi } from "../services/api";
 import {
-  PageHeader, Button, Panel, StatCard, EmptyState, Select, Badge,
+  Button, Panel, StatCard, EmptyState, Select, Badge,
   SkeletonKpis, SkeletonCard,
   CHART_COLORS, CHART_SERIES, ChartTooltip, useChartTheme,
   ChartStat, LegendRow, axisX, axisY, gridProps, BAR_RADIUS, BAR_MAX_SIZE, BAR_CATEGORY_GAP,
-} from "../components/ui";
+} from "./ui";
 
 const money = (n) =>
   "$" + Number(n || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -54,8 +57,9 @@ const outcomeTone = (t) =>
     : /manual|skipped/.test(t) ? CHART_COLORS.amber
     : CHART_COLORS.slate;
 
-export default function ReportsPage() {
-  const { activeGroupId, activeSiteId, sites } = useSite();
+export default function MonthlyBreakdown({ groupId = null }) {
+  const { sites } = useSite();
+  const activeGroupId = groupId;
   const ct = useChartTheme();
   const [month, setMonth] = useState("");
   const [data, setData] = useState(null);
@@ -100,53 +104,54 @@ export default function ReportsPage() {
     () => byHour.reduce((best, h) => (h.count > (best?.count ?? -1) ? h : best), null),
     [byHour]
   );
-  const scopeName = activeSiteId ? sites.find((s) => s.id === activeSiteId)?.name : null;
 
   return (
-    <div className="p-4 sm:p-6 lg:p-8 animate-fade-up">
-      <PageHeader
-        eyebrow="Reports"
-        title="Monthly breakdown"
-        subtitle={scopeName ? `${scopeName} — ${monthLabel(month)}` : `All villages — ${monthLabel(month)}`}
-        icon={<BarChart3 size={20} />}
-        actions={
-          <div className="flex items-center gap-2">
-            <Button variant="ghost" size="sm" onClick={() => step(1)} disabled={idx < 0 || idx >= months.length - 1} aria-label="Earlier month">
-              <ChevronLeft size={15} />
-            </Button>
-            <Select
-              value={month}
-              onChange={(e) => { setMonth(e.target.value); load(e.target.value); }}
-              className="min-w-[190px]"
-            >
-              {months.length === 0 && <option value="">No sales yet</option>}
-              {months.map((m) => (
-                <option key={m.month} value={m.month}>
-                  {monthLabel(m.month)} · {num(m.txns)} sales
-                </option>
-              ))}
-            </Select>
-            <Button variant="ghost" size="sm" onClick={() => step(-1)} disabled={idx <= 0} aria-label="Later month">
-              <ChevronRight size={15} />
-            </Button>
-            <Button variant="secondary" size="sm" iconLeft={<RefreshCw size={14} className={loading ? "animate-spin" : ""} />} onClick={() => load(month)} disabled={loading}>
-              Refresh
-            </Button>
+    <div className="space-y-6">
+      {/* Month bar: the control sits with the numbers it governs. */}
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+        <div className="flex items-center gap-2.5">
+          <span className="h-8 w-8 rounded-lg bg-[var(--bg-surface)] border border-[var(--border-default)] flex items-center justify-center text-[var(--accent)]">
+            <BarChart3 size={15} />
+          </span>
+          <div>
+            <p className="text-sm font-semibold text-[var(--fg-primary)] leading-tight">Monthly breakdown</p>
+            <p className="text-[11.5px] text-[var(--fg-muted)]">{monthLabel(month) || "Select a month"}</p>
           </div>
-        }
-      />
+        </div>
+        <div className="flex items-center gap-2">
+          <Button variant="ghost" size="sm" onClick={() => step(1)} disabled={idx < 0 || idx >= months.length - 1} aria-label="Earlier month">
+            <ChevronLeft size={15} />
+          </Button>
+          <Select
+            value={month}
+            onChange={(e) => { setMonth(e.target.value); load(e.target.value); }}
+            className="min-w-[190px]"
+          >
+            {months.length === 0 && <option value="">No sales yet</option>}
+            {months.map((m) => (
+              <option key={m.month} value={m.month}>
+                {monthLabel(m.month)} · {num(m.txns)} sales
+              </option>
+            ))}
+          </Select>
+          <Button variant="ghost" size="sm" onClick={() => step(-1)} disabled={idx <= 0} aria-label="Later month">
+            <ChevronRight size={15} />
+          </Button>
+          <Button variant="ghost" size="sm" iconLeft={<RefreshCw size={14} className={loading ? "animate-spin" : ""} />} onClick={() => load(month)} disabled={loading} />
+        </div>
+      </div>
 
       {loading && !data ? (
-        <div className="mt-6 space-y-6">
+        <div className="space-y-6">
           <SkeletonKpis count={4} />
           <SkeletonCard height="h-80" />
         </div>
       ) : months.length === 0 ? (
-        <div className="mt-6">
+        <div>
           <EmptyState icon={BarChart3} title="No sales recorded yet" description="Once a customer completes a purchase, the month appears here." />
         </div>
       ) : (
-        <div className="mt-6 space-y-6">
+        <div className="space-y-6">
           {/* Totals for the selected month */}
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
             <StatCard label="Revenue" value={money(t.revenue)} icon={<DollarSign size={18} />} color="accent" sub={`${num(t.transactions)} paid transactions`} />

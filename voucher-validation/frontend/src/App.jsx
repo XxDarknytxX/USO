@@ -19,7 +19,6 @@ const TransactionFlowPage = lazy(() => import("./pages/TransactionFlowPage"));
 const ManualAssistancePage = lazy(() => import("./pages/ManualAssistancePage"));
 const ProfilePage = lazy(() => import("./pages/ProfilePage"));
 const MpaisaMappingPage = lazy(() => import("./pages/MpaisaMappingPage"));
-const ReportsPage = lazy(() => import("./pages/ReportsPage"));
 
 function ProtectedRoute({ children }) {
   const token = localStorage.getItem("token");
@@ -58,7 +57,6 @@ export default function App() {
             <Route path="/dashboard" element={<DashboardRouter />} />
             {/* Profile: every signed-in user (incl. viewers) — not admin-gated. */}
             <Route path="/profile" element={<ProfilePage />} />
-            <Route path="/reports" element={<ReportsPage />} />
             <Route path="/mpaisa" element={<AdminRoute><MpaisaMappingPage /></AdminRoute>} />
             <Route path="/overview" element={<AdminRoute><OverviewPage /></AdminRoute>} />
             <Route path="/vouchers" element={<AdminRoute><VouchersPage /></AdminRoute>} />

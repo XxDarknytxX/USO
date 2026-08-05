@@ -9,7 +9,7 @@ import { NavLink, Outlet, useNavigate, useLocation } from "react-router-dom";
 import { useState, useEffect, useRef } from "react";
 import { Toaster } from "react-hot-toast";
 import {
-  LayoutDashboard, Gauge, Network, Ticket, History, RefreshCw, Globe, BarChart3,
+  LayoutDashboard, Gauge, Network, Ticket, History, RefreshCw, Globe,
   FileText, GitBranch, Users, Settings, Menu, X, ChevronLeft, ChevronRight,
   ChevronDown, LogOut, Shield, Eye, LifeBuoy, UserCircle, Wallet,
 } from "lucide-react";
@@ -33,7 +33,6 @@ const navSections = [
     items: [
       // viewerOk: the read-only viewer role sees ONLY the Dashboard tab.
       { to: "/dashboard", label: "Dashboard", Icon: LayoutDashboard, end: true, viewerOk: true },
-      { to: "/reports", label: "Reports", Icon: BarChart3 },
       { to: "/overview", label: "Overview", Icon: Gauge },
       { to: "/network", label: "Network", Icon: Network },
     ],

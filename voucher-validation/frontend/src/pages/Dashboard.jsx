@@ -45,6 +45,7 @@ import { scopePackages } from "../utils/scopePackages";
 import { api, voucherApi } from "../services/api";
 import { useSite } from "../hooks/useSite";
 import { useAuth } from "../hooks/useAuth";
+import MonthlyBreakdown from "../components/MonthlyBreakdown";
 import {
   Modal, Badge, EmptyState, Button,
   BAR_RADIUS, BAR_MAX_SIZE, BAR_CATEGORY_GAP,
@@ -564,53 +565,9 @@ export default function Dashboard() {
           );
         })()}
 
-        {/* ----- Revenue trend ----- */}
-        {revenueTrend.some((m) => m.revenue > 0) && (
-          <ChartCard
-            title="Revenue trend"
-            subtitle="Last 6 months · all villages"
-            icon={<DollarSign size={14} />}
-          >
-            <div className="h-[240px]">
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart
-                  data={revenueTrend}
-                  margin={{ top: 5, right: 5, bottom: 5, left: -4 }}
-                  barCategoryGap={BAR_CATEGORY_GAP}
-                >
-                  <CartesianGrid
-                    strokeDasharray="3 3"
-                    stroke="var(--border-subtle)"
-                    vertical={false}
-                  />
-                  <XAxis
-                    dataKey="label"
-                    tick={{ fontSize: 11, fill: "var(--text-quaternary)" }}
-                    tickLine={false}
-                    axisLine={false}
-                  />
-                  <YAxis
-                    tick={{ fontSize: 10, fill: "var(--text-quaternary)" }}
-                    tickLine={false}
-                    axisLine={false}
-                    width={52}
-                    tickFormatter={(v) =>
-                      "$" + Number(v).toLocaleString(undefined, { maximumFractionDigits: 0 })
-                    }
-                  />
-                  <Tooltip content={<RevenueTooltip />} cursor={{ fill: "var(--surface-hover)" }} />
-                  <Bar
-                    dataKey="revenue"
-                    name="Revenue"
-                    fill={getVar("--brand", "#e60000")}
-                    radius={BAR_RADIUS}
-                    maxBarSize={40}
-                  />
-                </BarChart>
-              </ResponsiveContainer>
-            </div>
-          </ChartCard>
-        )}
+        {/* Sales for a chosen month. Replaces the fixed six-month revenue
+            bar, which could only ever show one window and no detail. */}
+        <MonthlyBreakdown />
 
         {/* ----- Charts Row 1 ----- */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">

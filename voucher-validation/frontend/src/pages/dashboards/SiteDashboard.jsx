@@ -15,6 +15,7 @@ import { useSite } from "../../hooks/useSite";
 import { voucherApi, networkApi, portalConfigApi } from "../../services/api";
 import PlanBreakdown from "../../components/PlanBreakdown";
 import StarlinkPanel from "../../components/StarlinkPanel";
+import MonthlyBreakdown from "../../components/MonthlyBreakdown";
 import {
   PageHeader, Button, StatCard, Panel, Badge, EmptyState,
   SkeletonKpis, SkeletonCard,
@@ -217,28 +218,9 @@ export default function SiteDashboard({ groupId, site }) {
               nothing at all when this village has no Starlink configured. */}
           {site?.id && <StarlinkPanel projectId={site.id} />}
 
-          {/* Revenue trend */}
-          {hasRevenue && revTrend.some((m) => m.revenue > 0) && (
-            <Panel title="Revenue" subtitle="Last 6 months" icon={<DollarSign size={15} />}>
-              <ChartStat
-                value={fmtMoney(revTrend.reduce((a, m) => a + m.revenue, 0))}
-                unit="total"
-                caption={`${fmtNum(revTrend.reduce((a, m) => a + m.count, 0))} vouchers sold`}
-              />
-              <ResponsiveContainer width="100%" height={240}>
-                <BarChart data={revTrend} margin={{ top: 8, right: 8, left: -4, bottom: 0 }} barCategoryGap={BAR_CATEGORY_GAP}>
-                  <CartesianGrid {...gridProps(ct)} />
-                  <XAxis dataKey="label" {...axisX(ct)} />
-                  <YAxis
-                    {...axisY(ct, { width: 52 })}
-                    tickFormatter={(v) => "$" + Number(v).toLocaleString(undefined, { maximumFractionDigits: 0 })}
-                  />
-                  <Tooltip content={<RevenueTooltip />} cursor={{ fill: ct.cursor }} />
-                  <Bar dataKey="revenue" name="Revenue" fill={CHART_COLORS.accent} radius={BAR_RADIUS} isAnimationActive={false} maxBarSize={40} />
-                </BarChart>
-              </ResponsiveContainer>
-            </Panel>
-          )}
+          {/* Sales for a chosen month — replaces the old fixed 6-month
+              revenue bar, which could only ever show one window. */}
+          <MonthlyBreakdown groupId={groupId} />
 
           {/* Trend */}
           <Panel title="Clients" subtitle="Last 24 hours" icon={<Activity size={15} />}>
