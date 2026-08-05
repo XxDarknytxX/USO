@@ -305,8 +305,14 @@ export default function SettingsPage() {
         settingsApi.update("receipt_emails_enabled", receiptsEnabled ? "true" : "false", "boolean"),
         settingsApi.update("receipt_group_ids", gids, "string"),
       ]);
-      setOrigReceipts({ enabled: receiptsEnabled, groupIds: gids });
-      toast.success("Receipt settings saved");
+      // Re-read so what is shown is what the server actually stored, rather
+      // than an optimistic copy of the form.
+      await loadSettings();
+      toast.success(
+        receiptsEnabled
+          ? `Receipts on for ${gids.split(",").filter(Boolean).length} village(s)`
+          : "Receipts turned off"
+      );
     } catch (e) {
       toast.error(e?.message || "Failed to save receipt settings");
     } finally {
@@ -634,9 +640,29 @@ export default function SettingsPage() {
                   hint="On a successful purchase, email a receipt (voucher code, status link, shared-pool note) to the customer's email from the M-PAiSA mapping."
                 />
                 <div>
-                  <p className="text-sm font-medium text-[var(--fg-primary)]">Sites</p>
+                  <div className="flex items-center justify-between gap-3">
+                    <p className="text-sm font-medium text-[var(--fg-primary)]">Sites</p>
+                    <div className="flex items-center gap-2 text-[11.5px]">
+                      <button
+                        type="button"
+                        onClick={() => setReceiptGroupIds(sites.map((x) => x.ruijieGroupId).filter(Boolean).join(","))}
+                        className="text-[var(--accent)] hover:underline"
+                      >
+                        Select all
+                      </button>
+                      <span className="text-[var(--border-strong)]">|</span>
+                      <button
+                        type="button"
+                        onClick={() => setReceiptGroupIds("")}
+                        className="text-[var(--fg-muted)] hover:text-[var(--fg-secondary)]"
+                      >
+                        Clear
+                      </button>
+                    </div>
+                  </div>
                   <p className="text-[11.5px] text-[var(--fg-muted)] mt-0.5 mb-2">
-                    Only the selected villages send receipts. Start with USO_2.
+                    Only the selected villages send receipts. A village that is not ticked records a
+                    &ldquo;not selected&rdquo; note against the purchase instead of emailing.
                   </p>
                   <div className="rounded-lg border border-[var(--border-default)] divide-y divide-[var(--border-default)] max-h-[220px] overflow-y-auto scrollbar-none">
                     {sites.length === 0 ? (
@@ -676,9 +702,29 @@ export default function SettingsPage() {
                     )}
                   </div>
                 </div>
-                <div className="flex justify-end">
+                <div className="flex items-center justify-between gap-3 flex-wrap">
+                  {/* What the SERVER holds, not what the boxes show. The two
+                      differ until Save is pressed, and that gap is exactly how
+                      a village silently stops sending receipts. */}
+                  <p className="text-[11.5px] text-[var(--fg-muted)]">
+                    {receiptsDirty ? (
+                      <span className="text-[var(--accent)] font-medium">Unsaved changes</span>
+                    ) : (
+                      <>
+                        Saved:{" "}
+                        {origReceipts.enabled ? (
+                          <span className="text-[var(--fg-secondary)]">
+                            on for {normGroups(origReceipts.groupIds).split(",").filter(Boolean).length} village
+                            {normGroups(origReceipts.groupIds).split(",").filter(Boolean).length === 1 ? "" : "s"}
+                          </span>
+                        ) : (
+                          <span className="text-[var(--fg-secondary)]">off</span>
+                        )}
+                      </>
+                    )}
+                  </p>
                   <Button
-                    variant="secondary"
+                    variant={receiptsDirty ? "primary" : "secondary"}
                     onClick={saveReceipts}
                     loading={savingReceipts}
                     disabled={!receiptsDirty || savingReceipts}
