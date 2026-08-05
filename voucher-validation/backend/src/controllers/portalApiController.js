@@ -264,13 +264,19 @@ export function makePortalApiController(pool) {
         // the same number differently.
         const digits = String(phone || '').replace(/\D/g, '');
         if (!digits) return skip('no_phone', groupId);
-        const cands = new Set([digits]);
-        if (digits.length === 10 && digits.startsWith('679')) cands.add(digits.slice(3));
-        if (digits.length > 7) cands.add(digits.slice(-7)); // Fiji numbers are 7 digits
-        const list = [...cands];
+        // Normalise BOTH sides. The old version only widened the incoming
+        // number, and for a bare 7-digit callback (which is every Fiji mobile)
+        // both of its widening branches were dead — leaving a single exact
+        // match, so any stored row carrying a trunk 0 or a 679 was unreachable.
+        let core = digits.replace(/^0+/, '');
+        if (core.length > 7 && core.startsWith('679')) core = core.slice(3);
+        const last7 = core.length > 7 ? core.slice(-7) : core;
         const [mr] = await pool.query(
-          `SELECT email FROM mpaisa_mappings WHERE number IN (${list.map(() => '?').join(',')}) LIMIT 1`,
-          list
+          `SELECT email FROM mpaisa_mappings
+            WHERE number = ? OR number = ? OR RIGHT(number, 7) = ?
+            ORDER BY (number = ?) DESC
+            LIMIT 1`,
+          [digits, core, last7, core]
         );
         const email = mr[0]?.email || null;
         if (!email) return skip('no_mapping', groupId);

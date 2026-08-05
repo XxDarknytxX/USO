@@ -19,6 +19,15 @@ function parseLogtime(s) {
  */
 export function parseReport(text) {
   const rows = [];
+  // A row used to be dropped whenever its Number cell was not ALL digits. That
+  // correctly discarded the header and the "-----" underline, but it also threw
+  // away a real customer whose cell carried a space or a country code
+  // ("00679 2898851") — silently, with no way for an operator to notice.
+  //
+  // A parseable Logtime is what actually separates a data row from the file's
+  // furniture, so use that, normalise the number, and count only the rows that
+  // are genuinely unusable.
+  let skipped = 0;
   for (const raw of String(text || "").split(/\r?\n/)) {
     // Strip a BOM + any stray NULs (robust to imperfect UTF-16 decoding). KEEP
     // spaces — the Logtime cell contains one ("2026-06-11 16:43:59").
@@ -27,16 +36,22 @@ export function parseReport(text) {
     if (/^\(\d+\s+rows?\s+affected\)/i.test(line)) continue; // footer
     const cols = line.split("\t").map((c) => c.trim());
     const [logtime, number, email, emailStatus, accountStatus] = cols;
-    if (!number || !/^\d+$/.test(number)) continue; // skips header + dashes rows
+    const stamp = parseLogtime(logtime);
+    if (!stamp) continue; // header, dashes, anything without a real timestamp
+    // Canonicalise on the way in, exactly as a hand-added row is. This path
+    // used to store the cell verbatim, so a report carrying a country code
+    // produced rows the receipt lookup could never find.
+    const num = normalizeNumber(number);
+    if (!num) { skipped++; continue; } // a data row we genuinely cannot use
     rows.push({
-      number,
+      number: num,
       email: email || null,
       emailStatus: emailStatus || null,
       accountStatus: accountStatus || null,
-      logtime: parseLogtime(logtime),
+      logtime: stamp,
     });
   }
-  return rows;
+  return { rows, skipped };
 }
 
 /**
@@ -51,7 +66,11 @@ export function parseReport(text) {
  */
 export function normalizeNumber(input) {
   let n = String(input ?? "").replace(/\D/g, "");
-  if (n.length === 10 && n.startsWith("679")) n = n.slice(3); // +679 7771234
+  // A trunk 0 ("0 2898850") or an IDD 00 ("00679 2898850") both survived the
+  // old rule, which only fired on a string of exactly 10 digits. Either one
+  // stored a number the exact-match lookup could never find again.
+  n = n.replace(/^0+/, "");
+  if (n.length > 7 && n.startsWith("679")) n = n.slice(3); // +679 7771234
   return n;
 }
 
@@ -169,7 +188,7 @@ export function makeMpaisaController(pool) {
         return res.status(400).json({ error: "Missing report content" });
       }
 
-      const parsed = parseReport(content);
+      const { rows: parsed, skipped } = parseReport(content);
       if (!parsed.length) {
         return res.status(400).json({ error: "No valid rows found — expected a tab-separated Number/Email report." });
       }
@@ -208,7 +227,10 @@ export function makeMpaisaController(pool) {
       const updated = rows.length - inserted;
       const [[{ total }]] = await pool.query(`SELECT COUNT(*) AS total FROM mpaisa_mappings`);
 
-      res.json({ ok: true, parsedRows: parsed.length, uniqueNumbers: rows.length, inserted, updated, total });
+      // skippedRows is the one that matters when a customer "should" be mapped
+      // and isn't: it is the only signal that the file carried them and the
+      // parser threw them away.
+      res.json({ ok: true, parsedRows: parsed.length, skippedRows: skipped, uniqueNumbers: rows.length, inserted, updated, total });
     } catch (e) {
       console.error("[mpaisa] upload failed:", e.message);
       res.status(500).json({ error: e.message });

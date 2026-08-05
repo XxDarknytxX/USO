@@ -270,10 +270,19 @@ export default function MpaisaMappingPage() {
     try {
       const text = await readReportText(file);
       const res = await mpaisaApi.upload(text);
-      toast.success(
-        `Ingested ${res.uniqueNumbers} numbers — ${res.inserted} new, ${res.updated} updated · ${res.total} total`,
-        { id: tid, duration: 5000 }
-      );
+      const summary = `Ingested ${res.uniqueNumbers} numbers — ${res.inserted} new, ${res.updated} updated · ${res.total} total`;
+      // A skipped row is a customer the file carried and we could not use. It
+      // is the only warning that someone is missing from the mapping, so it
+      // gets its own toast rather than being buried in the success line.
+      if (res.skippedRows > 0) {
+        toast.success(summary, { id: tid, duration: 5000 });
+        toast.error(
+          `${res.skippedRows} row${res.skippedRows === 1 ? "" : "s"} skipped — the number could not be read, so those customers are not mapped.`,
+          { duration: 9000 }
+        );
+      } else {
+        toast.success(summary, { id: tid, duration: 5000 });
+      }
       if (page === 1) load();
       else setPage(1); // jump to first page → triggers reload
     } catch (err) {
