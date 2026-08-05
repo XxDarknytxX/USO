@@ -202,12 +202,16 @@ function normalizeCycle(cycle, servicePlan) {
   // data pool (routes/usage.js:336), falling back to the service plan's limit.
   let baseCap = 0;
   let topCap = 0;
+  let capSource = "none";
   for (const b of cycle?.dataPoolUsage?.[0]?.dataBlocks ?? []) {
     const amount = gb(b.totalGB ?? b.gbIncluded ?? b.amountGB);
-    if (b.dataBlockType === "RecurringPerBillingCycle") baseCap += amount;
+    if (b.dataBlockType === "RecurringPerBillingCycle") { baseCap += amount; capSource = "dataBlocks"; }
     else if (b.dataBlockType === "Overage" || b.dataBlockType === "OneTimePurchase") topCap += amount;
   }
-  if (baseCap === 0 && servicePlan?.usageLimitGB) baseCap = gb(servicePlan.usageLimitGB);
+  if (baseCap === 0 && servicePlan?.usageLimitGB) {
+    baseCap = gb(servicePlan.usageLimitGB);
+    capSource = "servicePlan.usageLimitGB";
+  }
 
   // Walk the real date range so gaps are zero-filled and labels are honest.
   const days = [];
@@ -267,6 +271,11 @@ function normalizeCycle(cycle, servicePlan) {
     startDate: start ? start.toISOString() : null,
     endDate: end ? end.toISOString() : null,
     days,
+    // Where the allowance figure came from. Both are Starlink's own numbers —
+    // nothing here invents a cap — but knowing which field answered is the
+    // difference between "your plan says 5 TB" and "this cycle's data block
+    // says 5 TB", so it is recorded rather than guessed at later.
+    capSource,
     totals: {
       baseUsed: +baseUsed.toFixed(2),
       baseCap: +baseCap.toFixed(2),
@@ -322,7 +331,12 @@ export async function getUsage(cfg, serviceLineNumber) {
       : raw.length === 0
         ? "Starlink returned no billing cycles for this service line yet."
         : null;
-    log(`usage ${serviceLineNumber}: ${raw.length} cycle(s)${reason ? ` — ${reason}` : ""}`);
+    const cur = cycles[0];
+    log(
+      `usage ${serviceLineNumber}: ${raw.length} cycle(s)` +
+        (cur ? `, allowance ${cur.totals.baseCap} GB from ${cur.capSource}` : "") +
+        (reason ? ` — ${reason}` : "")
+    );
     return { cycles, reason };
   });
 
