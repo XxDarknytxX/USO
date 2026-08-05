@@ -1337,7 +1337,13 @@ export function makeVoucherController(pool) {
         const clientId = b.clientId ? String(b.clientId).trim() : null;
         const accountNumber = b.accountNumber ? String(b.accountNumber).trim() : null;
 
-        const supplied = (b.clientSecret != null && String(b.clientSecret) !== '') ? String(b.clientSecret) : null;
+        // TRIM the secret. Every other field was trimmed but this one was not,
+        // so a value pasted with a trailing space or newline (routine when
+        // copying out of a terminal or a .env) was stored verbatim and the
+        // token exchange came back `invalid_client` with no clue why. OAuth
+        // secrets never carry meaningful surrounding whitespace.
+        const rawSecret = b.clientSecret == null ? '' : String(b.clientSecret).trim();
+        const supplied = rawSecret !== '' ? rawSecret : null;
         const [existing] = await pool.query('SELECT client_secret FROM starlink_settings WHERE id = 1');
         const clientSecret = supplied != null ? supplied : (existing[0]?.client_secret ?? null);
 

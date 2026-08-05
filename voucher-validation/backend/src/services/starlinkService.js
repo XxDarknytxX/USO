@@ -386,6 +386,20 @@ export async function testConnection(cfg, serviceLineNumber) {
   const steps = [];
   const push = (name, ok, detail) => steps.push({ name, ok, detail });
 
+  // Step 0: report the SHAPE of the stored credentials, never their values.
+  // `invalid_client` is almost always a secret that was pasted truncated or
+  // with stray whitespace, and a length is enough to spot that without ever
+  // echoing the secret back.
+  const idLen = String(cfg.client_id || "").length;
+  const secret = String(cfg.client_secret || "");
+  const ws = secret !== secret.trim();
+  push(
+    "Stored credentials",
+    !ws && idLen > 0 && secret.length > 0,
+    `Client ID ${idLen} chars, secret ${secret.length} chars` +
+      (ws ? " — the stored secret has leading/trailing whitespace, re-save it" : "")
+  );
+
   // Step 1: token exchange.
   _token = null;
   _tokenExpiresAt = 0;
@@ -394,7 +408,14 @@ export async function testConnection(cfg, serviceLineNumber) {
     token = await getToken(cfg);
     push("Authenticate", true, "Access token received");
   } catch (e) {
-    push("Authenticate", false, describeError(e));
+    const detail = describeError(e);
+    push(
+      "Authenticate",
+      false,
+      /invalid_client/i.test(detail)
+        ? `${detail} — Starlink rejected the client ID/secret pair. The ID above looks right if it is 36 characters; re-enter the client secret (it is write-only, so saving other fields never changes it).`
+        : detail
+    );
     return { ok: false, steps };
   }
 
