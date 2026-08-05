@@ -150,6 +150,21 @@ export default function SettingsPage() {
     }
   }
 
+  const [testingSl, setTestingSl] = useState(false);
+  const [slTest, setSlTest] = useState(null); // { ok, steps: [{name, ok, detail}] }
+
+  async function testStarlink() {
+    setTestingSl(true);
+    setSlTest(null);
+    try {
+      setSlTest(await settingsApi.testStarlink());
+    } catch (e) {
+      setSlTest({ ok: false, steps: [{ name: "Test", ok: false, detail: e?.message || "Request failed" }] });
+    } finally {
+      setTestingSl(false);
+    }
+  }
+
   async function saveStarlinkSite(id) {
     setSavingSite(id);
     try {
@@ -713,8 +728,30 @@ export default function SettingsPage() {
               <Button variant="primary" size="sm" onClick={saveStarlink} loading={savingSl} disabled={!slDirty || savingSl}>
                 Save credentials
               </Button>
+              <Button variant="secondary" size="sm" onClick={testStarlink} loading={testingSl} disabled={testingSl}>
+                Test connection
+              </Button>
               {!slDirty && origSl && <span className="text-[11.5px] text-[var(--fg-muted)]">No changes</span>}
             </div>
+
+            {slTest && (
+              <div className="rounded-lg border border-[var(--border-default)] divide-y divide-[var(--border-default)]">
+                {slTest.steps.map((st, i) => (
+                  <div key={i} className="px-3 py-2.5 flex items-start gap-2.5">
+                    <span
+                      className={
+                        "mt-[3px] h-2 w-2 rounded-full shrink-0 " +
+                        (st.ok ? "bg-emerald-500" : "bg-[var(--accent)]")
+                      }
+                    />
+                    <div className="min-w-0">
+                      <p className="text-[12.5px] font-medium text-[var(--fg-primary)]">{st.name}</p>
+                      <p className="text-[11.5px] text-[var(--fg-muted)] break-words">{st.detail}</p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
 
             {/* Per-village identifiers */}
             <div className="border-t border-[var(--border-default)] pt-4">

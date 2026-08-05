@@ -26,6 +26,8 @@ export function makeSettingsRouter(controller) {
   // keeps the stored one.
   router.get("/starlink", controller.getStarlinkSettings);
   router.put("/starlink", controller.updateStarlinkSettings);
+  // Diagnose the saved Starlink config: credentials, token, then a real query.
+  router.post("/starlink/test", controller.testStarlinkSettings);
 
   // PUT /api/settings/sync — atomically set the sync schedule (enabled + interval)
   router.put(

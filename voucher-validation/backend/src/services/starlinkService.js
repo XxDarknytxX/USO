@@ -356,3 +356,88 @@ export async function getServiceLine(cfg, serviceLineNumber) {
 export function getStatus() {
   return { tokenCached: !!_token, inFlight: _inflight.size };
 }
+
+/**
+ * A human-readable description of a failed Starlink call, safe to show an
+ * admin. Includes the HTTP status and whatever the API said, so a
+ * misconfiguration is diagnosable without reading server logs. Never contains
+ * the client secret or the bearer token — neither is echoed in a response body,
+ * and we only ever surface `status` + the parsed error payload.
+ */
+export function describeError(e) {
+  if (!e) return "Unknown error";
+  const parts = [];
+  if (e.status) parts.push(`HTTP ${e.status}`);
+  if (e.code === "invalid") return e.message; // already carries Starlink's errors
+  if (e.body != null) {
+    const b = typeof e.body === "string" ? e.body : JSON.stringify(e.body);
+    if (b && b !== "{}") parts.push(b.slice(0, 300));
+  }
+  if (!parts.length) parts.push(e.message || String(e));
+  return parts.join(" — ");
+}
+
+/**
+ * Exercises the saved configuration end to end and reports each step, so the
+ * admin can see exactly where it breaks: credentials, then the token exchange,
+ * then (optionally) a real data-usage call for one service line.
+ */
+export async function testConnection(cfg, serviceLineNumber) {
+  const steps = [];
+  const push = (name, ok, detail) => steps.push({ name, ok, detail });
+
+  // Step 1: token exchange.
+  _token = null;
+  _tokenExpiresAt = 0;
+  let token = null;
+  try {
+    token = await getToken(cfg);
+    push("Authenticate", true, "Access token received");
+  } catch (e) {
+    push("Authenticate", false, describeError(e));
+    return { ok: false, steps };
+  }
+
+  // Step 2: a real usage query, if a service line was supplied.
+  if (!serviceLineNumber) {
+    push("Data usage", false, "Add a service line number to a village to test a usage query");
+    return { ok: true, steps };
+  }
+
+  const url = `${String(cfg.api_base_url).replace(/\/+$/, "")}/v2/data-usage/query?page=0&limit=50`;
+  try {
+    const data = await starlinkFetch(() =>
+      fetchJson(url, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+          Accept: "application/json",
+        },
+        body: JSON.stringify({
+          serviceLineNumbers: [serviceLineNumber],
+          previousBillingCycles: 2,
+          activeServiceLinesOnly: true,
+        }),
+        timeoutMs: 60000,
+      })
+    );
+    const content = unwrap(data, "data-usage");
+    const result = content?.results?.[0] ?? null;
+    const cycles = result?.billingCycles?.length ?? 0;
+    if (!result) {
+      push(
+        "Data usage",
+        false,
+        `Authenticated fine, but Starlink returned no results for ${serviceLineNumber}. Check the number, and note that activeServiceLinesOnly excludes inactive lines.`
+      );
+    } else {
+      push("Data usage", true, `${cycles} billing cycle(s) returned for ${serviceLineNumber}`);
+    }
+  } catch (e) {
+    push("Data usage", false, describeError(e));
+    return { ok: false, steps };
+  }
+
+  return { ok: steps.every((s) => s.ok), steps };
+}

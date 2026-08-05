@@ -1359,6 +1359,51 @@ export function makeVoucherController(pool) {
       } catch (e) { console.error(e); return send.serverErr(res); }
     },
 
+    // POST /api/settings/starlink/test — exercise the saved config and report
+    // exactly which step fails. Optionally pass a serviceLineNumber to also run
+    // a real data-usage query.
+    testStarlinkSettings: async (req, res) => {
+      try {
+        const cfg = await starlinkService.loadConfig(pool);
+        if (!cfg) {
+          const [rows] = await pool.query('SELECT * FROM starlink_settings WHERE id = 1');
+          const r = rows[0] || {};
+          const missing = ['token_url', 'api_base_url', 'client_id', 'client_secret'].filter((k) => !r[k]);
+          return send.ok(res, {
+            ok: false,
+            steps: [{
+              name: 'Configuration',
+              ok: false,
+              detail: !r.enabled
+                ? 'Starlink is disabled. Turn on "Enable Starlink data" and save.'
+                : `Missing: ${missing.join(', ')}. Save the credentials first.`,
+            }],
+          });
+        }
+
+        // Default to any village that already has a service line, so the test
+        // exercises a real query without the admin having to type one.
+        let sl = String(req.body?.serviceLineNumber || '').trim();
+        if (!sl) {
+          const [p] = await pool.query(
+            `SELECT starlink_service_line_number FROM network_projects
+              WHERE starlink_service_line_number IS NOT NULL AND starlink_service_line_number <> ''
+              ORDER BY sort_order, name LIMIT 1`
+          );
+          sl = p[0]?.starlink_service_line_number || '';
+        }
+
+        const result = await starlinkService.testConnection(cfg, sl);
+        return send.ok(res, result);
+      } catch (e) {
+        console.error('[starlink] test failed:', e.message);
+        return send.ok(res, {
+          ok: false,
+          steps: [{ name: 'Test', ok: false, detail: starlinkService.describeError(e) }],
+        });
+      }
+    },
+
     updateSmtpSettings: async (req, res) => {
       try {
         const b = req.body || {};

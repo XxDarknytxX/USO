@@ -197,11 +197,15 @@ export function makeNetworkController(pool) {
         };
 
         if (usageRes.status !== "fulfilled") {
-          console.error("[network] Starlink usage failed:", usageRes.reason?.message);
+          const detail = starlink.describeError(usageRes.reason);
+          console.error("[network] Starlink usage failed:", detail);
           return send.ok(res, {
             configured: true,
             kit,
-            error: "Starlink data is temporarily unavailable",
+            error: "Starlink data unavailable",
+            // The real reason, so a misconfiguration is diagnosable from the
+            // dashboard instead of only from the server log.
+            reason: detail,
             days: [],
             cycles: [],
           });

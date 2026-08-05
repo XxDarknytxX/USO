@@ -107,6 +107,9 @@ export const settingsApi = {
   // blank on save to keep the stored one.
   getStarlink: () => api("/settings/starlink"),
   updateStarlink: (config) => api("/settings/starlink", { method: "PUT", body: config }),
+  // Diagnoses the saved config step by step: credentials, token, real query.
+  testStarlink: (serviceLineNumber) =>
+    api("/settings/starlink/test", { method: "POST", body: { serviceLineNumber } }),
 };
 
 // Portal Audit Log API helpers
