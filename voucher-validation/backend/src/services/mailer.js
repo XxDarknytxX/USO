@@ -33,6 +33,18 @@ const RED = "#e60000";
 const FONT = "Arial, Helvetica, sans-serif";
 const MONO = "'Courier New', Courier, monospace";
 
+// A diagonal shift within the Vodafone red hue: a lighter tint into a deeper
+// shade, hue held at 0 so it stays unmistakably brand red rather than drifting
+// orange or pink. Both stops are just lightness moves off #e60000.
+//
+// Outlook's Word engine ignores background-image entirely, so EVERY gradient
+// surface below must also carry the solid bgcolor attribute + background-color
+// underneath. Outlook then renders flat Vodafone red, which is the same result
+// as before this change; every other client gets the gradient painted on top.
+const RED_LIGHT = "#ff1a1a";
+const RED_DARK = "#b00000";
+const RED_GRADIENT = `linear-gradient(135deg, ${RED_LIGHT} 0%, ${RED} 55%, ${RED_DARK} 100%)`;
+
 // Corner rounding. IMPORTANT: a radius only clips the background of the SAME
 // element. Painting a background on a table AND on its td while rounding only
 // the table leaves the td's square fill covering the rounded corners, so every
@@ -119,7 +131,10 @@ function button({ href, label, width = 260 }) {
                 <tr>
                   <td align="center" style="font-family:${FONT};">
                     <!--[if mso]>
-                    <v:roundrect xmlns:v="urn:schemas-microsoft-com:vml" xmlns:w="urn:schemas-microsoft-com:office:word" href="${h}" style="height:50px;v-text-anchor:middle;width:${width}px;" arcsize="24%" strokecolor="${RED}" fillcolor="${RED}">
+                    <v:roundrect xmlns:v="urn:schemas-microsoft-com:vml" xmlns:w="urn:schemas-microsoft-com:office:word" href="${h}" style="height:50px;v-text-anchor:middle;width:${width}px;" arcsize="24%" strokecolor="${RED_DARK}" fillcolor="${RED}">
+                      <!-- VML has its own gradient fill, so the Outlook button
+                           gets one too even though CSS gradients are ignored. -->
+                      <v:fill type="gradient" color="${RED_LIGHT}" color2="${RED_DARK}" angle="180" />
                       <w:anchorlock/>
                       <center style="color:#ffffff;font-family:${FONT};font-size:16px;font-weight:bold;">${l}</center>
                     </v:roundrect>
@@ -127,7 +142,7 @@ function button({ href, label, width = 260 }) {
                     <!--[if !mso]><!-->
                     <table role="presentation" cellspacing="0" cellpadding="0" border="0" style="border-collapse:separate;mso-table-lspace:0pt;mso-table-rspace:0pt;">
                       <tr>
-                        <td align="center" bgcolor="${RED}" style="background-color:${RED};border-radius:${BLOCK_RADIUS};padding:15px 30px;font-family:${FONT};">
+                        <td align="center" bgcolor="${RED}" style="background-color:${RED};background-image:${RED_GRADIENT};border-radius:${BLOCK_RADIUS};padding:15px 30px;font-family:${FONT};">
                           <a href="${h}" style="display:block;color:#ffffff;font-family:${FONT};font-size:16px;font-weight:bold;line-height:20px;mso-line-height-rule:exactly;text-decoration:none;border:none;"><span style="color:#ffffff;text-decoration:none;">${l}</span></a>
                         </td>
                       </tr>
@@ -260,7 +275,7 @@ function shell({ preheader, title, subtitle, body }) {
             <td align="center" valign="top" bgcolor="#ffffff" style="background-color:#ffffff;padding:0 30px;font-family:${FONT};">
               <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="border-collapse:collapse;mso-table-lspace:0pt;mso-table-rspace:0pt;">
                 <tr>
-                  <td align="center" valign="top" bgcolor="${RED}" style="background-color:${RED};border-radius:${BLOCK_RADIUS};padding:26px 24px;text-align:center;font-family:${FONT};">
+                  <td align="center" valign="top" bgcolor="${RED}" style="background-color:${RED};background-image:${RED_GRADIENT};border-radius:${BLOCK_RADIUS};padding:26px 24px;text-align:center;font-family:${FONT};">
                     <h1 style="color:#ffffff;margin:0;font-family:${FONT};font-size:24px;font-weight:bold;line-height:30px;mso-line-height-rule:exactly;">
                       <!--[if mso]><span style="font-family:${FONT};font-size:22px;"><![endif]-->${esc(title)}<!--[if mso]></span><![endif]-->
                     </h1>
@@ -364,7 +379,7 @@ export function buildReceipt({ voucherCode, statusUrl, planName, dataAllowance, 
                    forced dark-mode inversion, near-white surfaces do not. -->
               <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="border-collapse:collapse;mso-table-lspace:0pt;mso-table-rspace:0pt;margin:0 0 26px 0;">
                 <tr>
-                  <td align="center" bgcolor="${RED}" style="background-color:${RED};border-radius:${BLOCK_RADIUS};padding:22px 20px;font-family:${FONT};">
+                  <td align="center" bgcolor="${RED}" style="background-color:${RED};background-image:${RED_GRADIENT};border-radius:${BLOCK_RADIUS};padding:22px 20px;font-family:${FONT};">
                     <p style="margin:0 0 8px 0;font-family:${FONT};font-size:12px;color:#ffffff;text-transform:uppercase;letter-spacing:1px;font-weight:bold;line-height:16px;mso-line-height-rule:exactly;">Your voucher code</p>
                     <p style="margin:0;font-family:${MONO};font-size:26px;font-weight:bold;letter-spacing:2px;color:#ffffff;line-height:34px;mso-line-height-rule:exactly;word-break:break-all;">${esc(code)}</p>
                   </td>
