@@ -610,6 +610,160 @@ export function makePortalConfigController(pool) {
       } catch (e) { console.error(e); return send.serverErr(res); }
     },
 
+    // GET /api/portal-config/breakdown?month=YYYY-MM&groupId=XXXX
+    //
+    // Everything about ONE month, in one call. Aggregated from
+    // portal_audit_logs (money + outcomes) joined to portal_plan_configs for
+    // plan/village identity, plus voucher_claims for units sold.
+    //
+    // Deliberately two-stage: the inner query picks the transaction_ids whose
+    // payment_success falls inside the window, then the outer one rolls up ALL
+    // rows of just those transactions. Filtering event_timestamp in the outer
+    // GROUP BY instead would drop the sibling rows that carry amount/plan_key,
+    // silently under-reporting revenue.
+    getBreakdown: async (req, res) => {
+      try {
+        const groupId = req.query.groupId ? String(req.query.groupId) : null;
+        const scope = req.scope || { isViewer: false };
+        const allowedGroups = scope.isViewer ? new Set((scope.groupIds || []).map(String)) : null;
+        // A viewer with no villages sees zeroes, never everything.
+        if (allowedGroups && allowedGroups.size === 0) {
+          return send.ok(res, { month: null, months: [], totals: {}, daily: [], byPlan: [], byVillage: [], byHour: [], outcomes: [] });
+        }
+
+        // Which months actually have sales — drives the picker so it can never
+        // offer a month that renders empty.
+        const [monthRows] = await pool.query(
+          `SELECT DATE_FORMAT(event_timestamp, '%Y-%m') AS month, COUNT(*) AS txns
+             FROM portal_audit_logs
+            WHERE event_type = 'payment_success' AND transaction_id IS NOT NULL
+            GROUP BY month ORDER BY month DESC`
+        );
+        const months = monthRows.map((r) => ({ month: r.month, txns: Number(r.txns) }));
+
+        const now = new Date();
+        const fallback = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+        const month = /^\d{4}-\d{2}$/.test(String(req.query.month || '')) ? String(req.query.month) : (months[0]?.month || fallback);
+        const [yy, mm] = month.split('-').map(Number);
+        const from = new Date(yy, mm - 1, 1);
+        const to = new Date(yy, mm, 1);
+
+        const [txns] = await pool.query(
+          `SELECT l.transaction_id,
+                  MAX(l.amount)        AS amount,
+                  MAX(CASE WHEN l.event_type='payment_success' THEN l.event_timestamp END) AS ts,
+                  MAX(l.plan_key)      AS plan_key,
+                  MAX(l.user_group_id) AS user_group_id,
+                  MAX(l.customer_phone) AS customer_phone,
+                  MAX(l.event_type='voucher_claimed')             AS has_voucher,
+                  MAX(l.event_type='auth_success')                AS has_auth,
+                  MAX(l.event_type='manual_assistance_created')   AS has_manual
+             FROM portal_audit_logs l
+             JOIN (SELECT DISTINCT transaction_id
+                     FROM portal_audit_logs
+                    WHERE event_type='payment_success' AND transaction_id IS NOT NULL
+                      AND event_timestamp >= ? AND event_timestamp < ?) w
+               ON w.transaction_id = l.transaction_id
+            GROUP BY l.transaction_id`,
+          [from, to]
+        );
+
+        // Same plan_key/user_group_id -> village resolution the dashboard uses,
+        // so these numbers agree with it instead of quietly diverging.
+        const [plans] = await pool.query(
+          `SELECT plan_key, name, group_id, user_group_id FROM portal_plan_configs`
+        );
+        const byPlanKey = {}, byUserGroup = {}, planName = {};
+        for (const p of plans) {
+          if (p.plan_key) { byPlanKey[p.plan_key] = p.group_id || null; planName[p.plan_key] = p.name || p.plan_key; }
+          if (p.user_group_id) byUserGroup[String(p.user_group_id)] = p.group_id || null;
+        }
+        const resolveGroup = (t) => byPlanKey[t.plan_key] ?? byUserGroup[String(t.user_group_id)] ?? null;
+
+        const [projects] = await pool.query(`SELECT name, ruijie_group_id FROM network_projects`);
+        const villageName = Object.fromEntries(projects.filter((p) => p.ruijie_group_id).map((p) => [String(p.ruijie_group_id), p.name]));
+
+        const days = new Date(yy, mm, 0).getDate();
+        const daily = Array.from({ length: days }, (_, i) => ({ d: String(i + 1), revenue: 0, count: 0 }));
+        const byHour = Array.from({ length: 24 }, (_, h) => ({ h: String(h).padStart(2, '0'), count: 0, revenue: 0 }));
+        const planAgg = {}, villageAgg = {};
+        const phones = new Set();
+        let revenue = 0, count = 0, connected = 0, manual = 0, noVoucher = 0, atRisk = 0;
+
+        for (const t of txns) {
+          const grp = resolveGroup(t);
+          if (groupId && String(grp) !== String(groupId)) continue;
+          if (allowedGroups && !allowedGroups.has(String(grp))) continue;
+          const amt = Number(t.amount) || 0;
+          if (!(amt > 0)) continue;
+          const ts = t.ts ? new Date(t.ts) : null;
+          revenue += amt; count++;
+          if (t.customer_phone) phones.add(String(t.customer_phone));
+          if (Number(t.has_auth)) connected++; else atRisk += amt;
+          if (Number(t.has_manual)) manual++;
+          if (!Number(t.has_voucher)) noVoucher++;
+          if (ts) {
+            const di = ts.getDate() - 1;
+            if (daily[di]) { daily[di].revenue += amt; daily[di].count++; }
+            const hi = ts.getHours();
+            byHour[hi].count++; byHour[hi].revenue += amt;
+          }
+          const pk = t.plan_key || 'unknown';
+          const pn = planName[pk] || pk;
+          if (!planAgg[pn]) planAgg[pn] = { name: pn, revenue: 0, count: 0 };
+          planAgg[pn].revenue += amt; planAgg[pn].count++;
+          const vk = grp == null ? 'unassigned' : String(grp);
+          if (!villageAgg[vk]) villageAgg[vk] = { groupId: grp, name: villageName[vk] || (grp ? `Group ${grp}` : 'Unassigned'), revenue: 0, count: 0 };
+          villageAgg[vk].revenue += amt; villageAgg[vk].count++;
+        }
+
+        // What happened across the whole window, money or not — the failure
+        // types are as interesting as the successes.
+        const [events] = await pool.query(
+          `SELECT event_type, COUNT(*) AS c FROM portal_audit_logs
+            WHERE event_timestamp >= ? AND event_timestamp < ?
+            GROUP BY event_type ORDER BY c DESC`,
+          [from, to]
+        );
+
+        // Units sold, straight from the claim ledger (one row per purchase).
+        const [claims] = await pool.query(
+          `SELECT pc.name AS plan, COUNT(*) AS sold
+             FROM voucher_claims vc
+             JOIN portal_plan_configs pc ON pc.id = vc.plan_config_id
+            WHERE vc.claimed_at >= ? AND vc.claimed_at < ?
+              AND vc.status IN ('claimed','used','manually_assigned')
+              ${groupId ? 'AND pc.group_id = ?' : ''}
+            GROUP BY pc.name ORDER BY sold DESC`,
+          groupId ? [from, to, groupId] : [from, to]
+        );
+
+        const round = (n) => Math.round(n * 100) / 100;
+        return send.ok(res, {
+          month,
+          months,
+          totals: {
+            revenue: round(revenue),
+            transactions: count,
+            customers: phones.size,
+            avgSale: count ? round(revenue / count) : 0,
+            connected,
+            connectedPct: count ? Math.round((connected / count) * 100) : 0,
+            manualCases: manual,
+            paidNoVoucher: noVoucher,
+            revenueAtRisk: round(atRisk),
+            sold: claims.reduce((a, c) => a + Number(c.sold), 0),
+          },
+          daily: daily.map((d) => ({ ...d, revenue: round(d.revenue) })),
+          byHour,
+          byPlan: Object.values(planAgg).sort((a, b) => b.revenue - a.revenue).map((p) => ({ ...p, revenue: round(p.revenue) })),
+          byVillage: Object.values(villageAgg).sort((a, b) => b.revenue - a.revenue).map((v) => ({ ...v, revenue: round(v.revenue) })),
+          outcomes: events.map((e) => ({ type: e.event_type, count: Number(e.c) })),
+          soldByPlan: claims.map((c) => ({ name: c.plan, sold: Number(c.sold) })),
+        });
+      } catch (e) { console.error('[breakdown]', e); return send.serverErr(res); }
+    },
+
     // GET /api/portal-config/manual-assistance?status=open|resolved|all
     // A "manual assistance" case = a transaction that has a
     // manual_assistance_created audit event (paid but Ruijie auth failed). It's

@@ -30,6 +30,8 @@ export function makePortalConfigRouter(controller, attachScope) {
   // Sales revenue aggregation (total / month / today / per-village + trend).
   // Viewer-reachable (dashboard) — the controller clamps to req.scope.
   router.get("/revenue", controller.getRevenue);
+  // Everything about one month: totals, daily/hourly series, plan + village splits.
+  router.get("/breakdown", controller.getBreakdown);
 
   // Manual assistance cases (paid but auth failed) — not for viewers (incl. the
   // live resolve write, which was previously any-authenticated).

@@ -134,6 +134,11 @@ export const portalConfigApi = {
   create: (body) => api("/portal-config/plans", { method: "POST", body }),
   update: (id, body) => api(`/portal-config/plans/${id}`, { method: "PUT", body }),
   remove: (id) => api(`/portal-config/plans/${id}`, { method: "DELETE" }),
+  // Everything about one month in a single call (totals + all series).
+  breakdown: (params = {}) => {
+    const qs = new URLSearchParams(params).toString();
+    return api(`/portal-config/breakdown${qs ? `?${qs}` : ""}`);
+  },
   revenue: (params = {}) => {
     const qs = new URLSearchParams(params).toString();
     return api(`/portal-config/revenue${qs ? `?${qs}` : ""}`);
