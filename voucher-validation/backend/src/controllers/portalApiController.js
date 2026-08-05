@@ -202,32 +202,60 @@ export function makePortalApiController(pool) {
         const allowed = String(s.receipt_group_ids || '7847952')
           .split(',').map((x) => x.trim()).filter(Boolean);
 
-        // Resolve this site's Ruijie group id: from the portal host, else the voucher.
+        // Resolve which village this purchase belongs to.
+        //
+        // The VOUCHER decides, not the host. This used to read the host first,
+        // which is wrong on any unpinned instance: site1.vodafonefiji.cloud
+        // serves every village (sites.json groupId: null), so a Vunisei purchase
+        // made through it resolved to the site1 project and was judged against
+        // THAT village's receipt setting — silently skipping receipts for every
+        // purchase routed through the shared host. The voucher was claimed for
+        // one specific village's plan; that is the ground truth. Host is only a
+        // last resort, for a code we cannot find at all.
         const hostNorm = String(host || '').split(':')[0].trim().toLowerCase();
         let groupId = null;
-        if (hostNorm) {
+
+        const [vr] = await pool.query('SELECT group_id FROM vouchers WHERE voucher_code = ? LIMIT 1', [voucherCode]);
+        groupId = vr[0]?.group_id || null;
+
+        // Voucher row gone (archived by a sync) — fall back to the plan the
+        // claim was made against, which also carries the village.
+        if (!groupId && transactionId) {
+          const [cr] = await pool.query(
+            `SELECT pc.group_id FROM voucher_claims vc
+               JOIN portal_plan_configs pc ON pc.id = vc.plan_config_id
+              WHERE vc.transaction_id = ? LIMIT 1`,
+            [transactionId]
+          );
+          groupId = cr[0]?.group_id || null;
+        }
+
+        if (!groupId && hostNorm) {
           const [pr] = await pool.query(
             'SELECT ruijie_group_id FROM network_projects WHERE LOWER(hostname) = ? LIMIT 1', [hostNorm]
           );
           groupId = pr[0]?.ruijie_group_id || null;
         }
-        if (!groupId) {
-          const [vr] = await pool.query('SELECT group_id FROM vouchers WHERE voucher_code = ? LIMIT 1', [voucherCode]);
-          groupId = vr[0]?.group_id || null;
-        }
+
         if (!groupId || !allowed.includes(String(groupId))) {
           // Say WHICH village was resolved and what the allow-list holds — the
           // usual causes are an unsaved settings change, or a host/voucher that
           // does not map to a village at all (groupId null).
+          //
+          // The reason on the wire must MATCH the reason logged. It used to
+          // always say 'site_not_enabled', so the portal's own log claimed a
+          // village was unticked even when the truth was that no village could
+          // be worked out at all — two different faults, one misleading label.
+          const reason = groupId ? 'site_not_enabled' : 'site_unresolved';
           logEmailEvent(pool, {
             eventType: 'receipt_email_skipped', status: 'skipped',
-            reason: groupId ? 'site_not_enabled' : 'site_unresolved',
+            reason,
             message: groupId
               ? `Receipt not sent: village ${groupId} is not selected for receipts (enabled: ${allowed.join(', ') || 'none'})`
               : `Receipt not sent: could not work out which village this purchase belongs to (host "${hostNorm || 'none'}", voucher ${voucherCode})`,
             groupId, ...base,
           });
-          return send.ok(res, { sent: false, reason: 'site_not_enabled', groupId: groupId || null });
+          return send.ok(res, { sent: false, reason, groupId: groupId || null });
         }
 
         // Customer email from the M-PAiSA mapping. Match the phone tolerantly:
