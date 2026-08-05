@@ -218,34 +218,37 @@ function dayKey(d) {
  * numbers. This walks the cycle's ACTUAL start->end range instead, and labels
  * each point with a real date.
  */
-function normalizeCycle(cycle) {
+function normalizeCycle(cycle, servicePlan) {
   const start = cycle?.startDate ? new Date(cycle.startDate) : null;
   const end = cycle?.endDate ? new Date(cycle.endDate) : null;
 
-  // Index whatever daily rows the API gave us by date.
+  // Daily rows live on the CYCLE (routes/usage.js:396 reads
+  // targetCycle.dailyDataUsage). The dataPoolUsage fallback is defensive only.
+  const rawDaily = cycle?.dailyDataUsage?.length
+    ? cycle.dailyDataUsage
+    : (cycle?.dataPoolUsage ?? []).flatMap((p) => p?.dailyDataUsage ?? []);
+
   const byDay = new Map();
-  for (const pool of cycle?.dataPoolUsage ?? []) {
-    for (const row of pool?.dailyDataUsage ?? []) {
-      const k = row?.date ? dayKey(row.date) : null;
-      if (!k) continue;
-      const prev = byDay.get(k) || { priority: 0, standard: 0 };
-      byDay.set(k, {
-        priority: prev.priority + gb(row.priorityGB ?? row.priorityGb),
-        standard: prev.standard + gb(row.standardGB ?? row.standardGb ?? row.optInPriorityGB),
-      });
-    }
+  for (const row of rawDaily) {
+    const k = row?.date ? dayKey(row.date) : null;
+    if (!k) continue;
+    const prev = byDay.get(k) || { priority: 0, standard: 0 };
+    byDay.set(k, {
+      priority: prev.priority + gb(row.priorityGB ?? row.priorityGb),
+      standard: prev.standard + gb(row.standardGB ?? row.standardGb),
+    });
   }
 
-  // Caps, used to split priority usage into "included" vs "top-up".
+  // Caps split priority usage into "included" vs "top-up". Read from the FIRST
+  // data pool (routes/usage.js:336), falling back to the service plan's limit.
   let baseCap = 0;
   let topCap = 0;
-  for (const pool of cycle?.dataPoolUsage ?? []) {
-    for (const b of pool?.dataBlocks ?? []) {
-      const amount = gb(b.totalGB ?? b.gbIncluded ?? b.amountGB);
-      if (b.dataBlockType === "RecurringPerBillingCycle") baseCap += amount;
-      else if (b.dataBlockType === "Overage" || b.dataBlockType === "OneTimePurchase") topCap += amount;
-    }
+  for (const b of cycle?.dataPoolUsage?.[0]?.dataBlocks ?? []) {
+    const amount = gb(b.totalGB ?? b.gbIncluded ?? b.amountGB);
+    if (b.dataBlockType === "RecurringPerBillingCycle") baseCap += amount;
+    else if (b.dataBlockType === "Overage" || b.dataBlockType === "OneTimePurchase") topCap += amount;
   }
+  if (baseCap === 0 && servicePlan?.usageLimitGB) baseCap = gb(servicePlan.usageLimitGB);
 
   // Walk the real date range so gaps are zero-filled and labels are honest.
   const days = [];
@@ -255,18 +258,25 @@ function normalizeCycle(cycle) {
   let topUsed = 0;
   let standardUsed = 0;
 
-  const cursor = start ? new Date(start) : null;
-  const keys = cursor
-    ? (() => {
-        const out = [];
-        const last = end || start;
-        for (let d = new Date(cursor); d <= last; d.setUTCDate(d.getUTCDate() + 1)) {
-          out.push(dayKey(d));
-          if (out.length > 400) break; // guard against a bad date range
-        }
-        return out;
-      })()
-    : [...byDay.keys()].sort();
+  // The source emits a FULL MONTH (routes/usage.js:408, `for day = 1..
+  // daysInMonth`) so the chart always shows a complete month rather than only
+  // the days that happened to report. We keep that, but walk the cycle's real
+  // start->end range instead of the start month's calendar: a Starlink cycle is
+  // a full month anyway, and this also places usage correctly when a cycle
+  // straddles two months (which the source's day-of-month indexing gets wrong).
+  const keys = (() => {
+    if (!start) return [...byDay.keys()].sort();
+    // If the API omitted endDate, fall back to a month from the start.
+    const last = end || new Date(Date.UTC(
+      start.getUTCFullYear(), start.getUTCMonth() + 1, start.getUTCDate()
+    ));
+    const out = [];
+    for (let d = new Date(start); d <= last; d.setUTCDate(d.getUTCDate() + 1)) {
+      out.push(dayKey(d));
+      if (out.length > 400) break; // guard against a bad date range
+    }
+    return out;
+  })();
 
   for (const k of keys) {
     const row = byDay.get(k) || { priority: 0, standard: 0 };
@@ -286,7 +296,7 @@ function normalizeCycle(cycle) {
     topUsed += topup;
     standardUsed += row.standard;
     days.push({
-      d: k.slice(5), // MM-DD keeps the axis readable
+      d: String(Number(k.slice(8, 10))), // day-of-month, like the source's axis
       date: k,
       base: +base.toFixed(3),
       topup: +topup.toFixed(3),
@@ -346,7 +356,8 @@ export async function getUsage(cfg, serviceLineNumber) {
       // An empty result is NORMAL for a new or idle line, not an error.
       const raw = content?.results?.[0]?.billingCycles ?? [];
       // The API returns cycles oldest-first; newest first is what the UI wants.
-      const cycles = raw.map(normalizeCycle).reverse();
+      const servicePlan = content?.results?.[0]?.servicePlan ?? null;
+      const cycles = raw.map((c) => normalizeCycle(c, servicePlan)).reverse();
       return { cycles };
     });
 

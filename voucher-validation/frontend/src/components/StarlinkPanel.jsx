@@ -18,7 +18,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import {
-  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell,
+  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
 } from "recharts";
 import { Satellite, RefreshCw, Info } from "lucide-react";
 
@@ -115,9 +115,10 @@ export default function StarlinkPanel({ projectId }) {
   const t = data?.totals;
   const cycleCount = Math.max(1, data?.cycleCount || 1);
 
-  // Round only the top of each stack. Recharts applies a Bar's radius to every
-  // cell, so the cap goes on whichever series is topmost for that day.
-  const topKeyFor = (d) => (d.standard > 0 ? "standard" : d.topup > 0 ? "topup" : "base");
+  // The source sets chart.js `borderRadius: 4` on EVERY dataset, which rounds
+  // all four corners of each stacked segment — the pill look. Recharts needs the
+  // radius on the Bar itself to do the same.
+  const BAR_RADIUS = [4, 4, 4, 4];
 
   return (
     <Panel
@@ -206,14 +207,16 @@ export default function StarlinkPanel({ projectId }) {
                 cursor={{ fill: ct.cursor }}
               />
               {SERIES.map((s) => (
-                <Bar key={s.key} dataKey={s.key} name={s.name} stackId="a" fill={s.color} isAnimationActive={false}>
-                  {days.map((d, i) => (
-                    <Cell
-                      key={i}
-                      radius={topKeyFor(d) === s.key ? [4, 4, 0, 0] : 0}
-                    />
-                  ))}
-                </Bar>
+                <Bar
+                  key={s.key}
+                  dataKey={s.key}
+                  name={s.name}
+                  stackId="a"
+                  fill={s.color}
+                  radius={BAR_RADIUS}
+                  maxBarSize={22}
+                  isAnimationActive={false}
+                />
               ))}
             </BarChart>
           </ResponsiveContainer>
