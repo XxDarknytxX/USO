@@ -170,10 +170,12 @@ export function makePortalApiController(pool) {
         amount: amount ?? null,
         transactionId: transactionId || null,
       };
-      // Per-customer skip (no phone / no mapping / no SMTP): worth logging so the
-      // Portal Logs page shows who did NOT get a receipt and why. Configuration
-      // skips (feature off, site not enabled) are NOT logged — they are expected
-      // filtering, not a delivery failure, and would swamp the log.
+      // EVERY outcome is logged, including the configuration skips. They were
+      // originally left out as "expected filtering", but that made an absent
+      // receipt undiagnosable: a disabled feature, a village not on the list,
+      // and the USO portal never calling at all produced exactly the same
+      // thing — nothing. One row per purchase is proportional, not noise, and
+      // it is the only way to tell those three cases apart from Portal Logs.
       const skip = (reason, groupId = null) => {
         logEmailEvent(pool, {
           eventType: 'receipt_email_skipped', status: 'skipped', reason,
@@ -191,6 +193,10 @@ export function makePortalApiController(pool) {
         );
         const s = Object.fromEntries(srows.map((r) => [r.setting_key, r.setting_value]));
         if (String(s.receipt_emails_enabled || '').toLowerCase() !== 'true') {
+          logEmailEvent(pool, {
+            eventType: 'receipt_email_skipped', status: 'skipped', reason: 'disabled',
+            message: 'Receipt not sent: purchase receipts are turned off in Settings', ...base,
+          });
           return send.ok(res, { sent: false, reason: 'disabled' });
         }
         const allowed = String(s.receipt_group_ids || '7847952')
@@ -210,6 +216,17 @@ export function makePortalApiController(pool) {
           groupId = vr[0]?.group_id || null;
         }
         if (!groupId || !allowed.includes(String(groupId))) {
+          // Say WHICH village was resolved and what the allow-list holds — the
+          // usual causes are an unsaved settings change, or a host/voucher that
+          // does not map to a village at all (groupId null).
+          logEmailEvent(pool, {
+            eventType: 'receipt_email_skipped', status: 'skipped',
+            reason: groupId ? 'site_not_enabled' : 'site_unresolved',
+            message: groupId
+              ? `Receipt not sent: village ${groupId} is not selected for receipts (enabled: ${allowed.join(', ') || 'none'})`
+              : `Receipt not sent: could not work out which village this purchase belongs to (host "${hostNorm || 'none'}", voucher ${voucherCode})`,
+            groupId, ...base,
+          });
           return send.ok(res, { sent: false, reason: 'site_not_enabled', groupId: groupId || null });
         }
 
