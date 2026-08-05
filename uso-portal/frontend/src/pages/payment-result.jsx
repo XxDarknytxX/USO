@@ -10,6 +10,8 @@ import {
   FaArrowLeft,
   FaHeadset,
   FaWifi,
+  FaTicketAlt,
+  FaEnvelope,
 } from 'react-icons/fa';
 
 export default function PaymentResult() {
@@ -17,6 +19,9 @@ export default function PaymentResult() {
   const [txn, setTxn] = useState(null);
   const [assist, setAssist] = useState(null);
   const [loading, setLoading] = useState(true);
+  // Surfaced so a customer whose device did NOT auto-connect still leaves this
+  // page holding the code they paid for.
+  const [code, setCode] = useState(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -98,6 +103,7 @@ export default function PaymentResult() {
         const authSuccess = callbackData?.autoAuth?.success || (t.auth_success);
         const voucherCode = callbackData?.autoAuth?.voucherCode || t.voucher_code;
         const logonUrl = callbackData?.autoAuth?.logonUrl || t.auth_logon_url;
+        if (voucherCode) setCode(voucherCode);
 
         if (voucherCode && authSuccess) {
           try { localStorage.setItem('uso_voucher_code', voucherCode); } catch (e) { /* */ }
@@ -246,6 +252,30 @@ export default function PaymentResult() {
             </div>
           )}
         </div>
+
+        {/* ── Voucher code ───────────────────
+             Shown whenever a voucher was claimed, including when activation
+             failed: that is exactly when the customer needs to enter it by
+             hand, and this page is otherwise the last place they see it. */}
+        {code && (
+          <div className="bg-card border border-edge rounded-2xl p-5 mb-4">
+            <div className="flex items-center gap-2 mb-3">
+              <FaTicketAlt className="text-vf text-xs" />
+              <h3 className="text-xs font-semibold text-ink-4 uppercase tracking-wider">Your voucher code</h3>
+            </div>
+            <div className="font-mono text-xl sm:text-2xl font-bold text-ink tracking-[0.12em] text-center break-all bg-white/[0.04] border border-edge rounded-xl py-3 px-2 mb-3">
+              {code}
+            </div>
+            <p className="text-xs text-ink-4 leading-relaxed">
+              Keep this code. If you are not connected automatically, reconnect to the Wi-Fi, then
+              <span className="text-ink-3 font-medium"> scroll to the bottom of the portal page</span> and enter it to get online.
+            </p>
+            <p className="flex items-start gap-2 mt-2.5 text-[11.5px] text-ink-5 leading-relaxed">
+              <FaEnvelope className="text-[10px] mt-[3px] shrink-0" />
+              <span>If your M-PAiSA number has an email registered, a copy has been emailed to you.</span>
+            </p>
+          </div>
+        )}
 
         {/* ── Transaction details ────────────── */}
         {txn && (

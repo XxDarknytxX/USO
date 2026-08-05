@@ -9,6 +9,10 @@ import {
   FaTimesCircle,
   FaArrowDown,
   FaArrowUp,
+  FaTicketAlt,
+  FaRegCopy,
+  FaCheck,
+  FaEnvelope,
 } from 'react-icons/fa';
 
 const REFRESH_INTERVAL = 30000;
@@ -110,6 +114,8 @@ export default function VoucherStatus() {
   const [refreshing, setRefreshing] = useState(false);
   const [lastUpdated, setLastUpdated] = useState(null);
   const [now, setNow] = useState(() => Date.now());
+  const [copyState, setCopyState] = useState('idle'); // idle | copied | selected
+  const codeRef = useRef(null);
 
   // Use a ref for "has data" check to avoid dependency cycle
   const dataRef = useRef(data);
@@ -170,6 +176,52 @@ export default function VoucherStatus() {
   // reconnect to the Wi-Fi (which re-triggers the captive cycle).
 
   const statusUrl = `${window.location.origin}/status/${voucherCode}`;
+
+  // Copy the voucher code. navigator.clipboard needs a secure context and the
+  // captive portal is reached over plain http on some gateways, so this tries
+  // the clipboard API, then a hidden textarea + execCommand. If BOTH fail the
+  // code is selected instead, so the customer can copy with their own gesture:
+  // a click that appears to do nothing is worse than no button at all.
+  const copyCode = async (code) => {
+    const ok = await (async () => {
+      try {
+        if (navigator.clipboard && window.isSecureContext) {
+          await navigator.clipboard.writeText(code);
+          return true;
+        }
+      } catch { /* fall through */ }
+      try {
+        const ta = document.createElement('textarea');
+        ta.value = code;
+        ta.setAttribute('readonly', '');
+        ta.style.position = 'fixed';
+        ta.style.opacity = '0';
+        document.body.appendChild(ta);
+        ta.select();
+        const done = document.execCommand('copy');
+        document.body.removeChild(ta);
+        return done;
+      } catch { return false; }
+    })();
+
+    if (ok) {
+      setCopyState('copied');
+      setTimeout(() => setCopyState('idle'), 2000);
+      return;
+    }
+    try {
+      const el = codeRef.current;
+      if (el) {
+        const range = document.createRange();
+        range.selectNodeContents(el);
+        const sel = window.getSelection();
+        sel.removeAllRanges();
+        sel.addRange(range);
+      }
+    } catch { /* selection is best-effort too */ }
+    setCopyState('selected');
+    setTimeout(() => setCopyState('idle'), 3000);
+  };
 
   /* ── Loading ── */
   if (loading) {
@@ -274,6 +326,54 @@ export default function VoucherStatus() {
 
       {/* ═══════ MAIN CONTENT ═══════ */}
       <main className="flex-1 w-full max-w-6xl mx-auto px-5 sm:px-8 pb-8">
+
+        {/* ── Voucher code — shown prominently so the customer can re-enter it
+             manually if the device drops off and does not auto-reconnect. The
+             Plan Details card below carries the same value, but only as a small
+             metadata chip that reads as an ID rather than something to type. ── */}
+        <div className="relative overflow-hidden bg-card/80 backdrop-blur-sm border border-edge rounded-3xl p-6 sm:p-7 mb-5 sm:mb-6 animate-enter" style={{ animationDelay: '40ms' }}>
+          <div className="absolute inset-0 bg-gradient-to-br from-vf/[0.08] via-transparent to-transparent pointer-events-none" />
+          <div className="absolute top-0 left-0 right-0 h-[2px] bg-gradient-to-r from-transparent via-vf/40 to-transparent" />
+
+          <div className="relative flex flex-col sm:flex-row sm:items-center gap-5 sm:gap-8">
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center gap-2 mb-2">
+                <FaTicketAlt className="text-[11px] text-vf" />
+                <h2 className="text-xs font-semibold text-ink-4 uppercase tracking-wider">Your voucher code</h2>
+              </div>
+
+              <div className="flex items-center gap-3 flex-wrap">
+                <span ref={codeRef} className="font-mono text-2xl sm:text-3xl font-bold text-ink tracking-[0.12em] break-all select-all">
+                  {data.voucherCode || voucherCode}
+                </span>
+                <button
+                  onClick={() => copyCode(data.voucherCode || voucherCode)}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium
+                             text-ink-3 bg-white/[0.04] border border-edge hover:border-edge-hover
+                             hover:bg-white/[0.06] transition-all shrink-0"
+                  aria-label="Copy voucher code"
+                >
+                  {copyState === 'copied'
+                    ? <FaCheck className="text-[10px] text-emerald-400" />
+                    : <FaRegCopy className="text-[10px]" />}
+                  {copyState === 'copied' ? 'Copied' : copyState === 'selected' ? 'Selected' : 'Copy'}
+                </button>
+              </div>
+            </div>
+
+            <div className="sm:max-w-[300px] sm:border-l sm:border-edge sm:pl-8">
+              <p className="text-xs sm:text-[12.5px] text-ink-4 leading-relaxed">
+                If you get disconnected, reconnect to the Wi-Fi, then
+                <span className="text-ink-3 font-medium"> scroll to the bottom of the portal page</span> and
+                enter this code to get back online. It works on any number of devices, all sharing the same data.
+              </p>
+              <p className="flex items-start gap-2 mt-3 text-[11.5px] text-ink-5 leading-relaxed">
+                <FaEnvelope className="text-[10px] mt-[3px] shrink-0" />
+                <span>If your M-PAiSA number has an email registered, a copy of this code has been emailed to you.</span>
+              </p>
+            </div>
+          </div>
+        </div>
 
         {/* ── Row 1: Usage — single container, Data + Time side by side ── */}
         <div className="relative overflow-hidden bg-card/80 backdrop-blur-sm border border-edge rounded-3xl p-6 sm:p-8 animate-enter" style={{ animationDelay: '80ms' }}>
