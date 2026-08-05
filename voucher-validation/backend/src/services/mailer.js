@@ -14,11 +14,13 @@
 //     will not inherit it from <body>.
 //   * Fixed width="600" plus max-width:600px. The attribute is what Outlook
 //     obeys; the CSS is what lets other clients shrink on mobile.
-//   * Buttons are VML <v:roundrect> behind an [if mso] conditional with a plain
-//     <a> behind [if !mso]. Outlook ignores padding on <a>, so without the VML
-//     the button collapses to a bare text link.
-//   * border-radius / box-shadow degrade to square corners in Outlook. That is
-//     accepted (same as Starlink) rather than worked around.
+//   * NO paired [if mso] / [if !mso] blocks that both contain the same visible
+//     text. Clients exist that strip the comment markers but keep the contents
+//     (new Outlook, Outlook.com), and they then render BOTH copies. Buttons are
+//     therefore a single padded <td> with a bgcolor, which Outlook renders as a
+//     real filled button because it honours cell padding and cell backgrounds.
+//   * border-radius / box-shadow / gradients degrade to square, flat colour in
+//     Outlook. That is accepted (same as Starlink) rather than worked around.
 //   * Every message ships a plain-text alternative.
 
 import nodemailer from "nodemailer";
@@ -120,34 +122,34 @@ function esc(s) {
 /* ------------------------------------------------------------------ blocks */
 
 /**
- * A call-to-action button. The [if mso] branch draws a VML rounded rectangle
- * (Outlook cannot pad an <a>); every other client gets the real anchor.
- * `width` must be a px number wide enough for the label in 16px bold Arial.
+ * A call-to-action button, built from ONE cell that works in every client.
+ *
+ * The obvious approach is a VML <v:roundrect> behind [if mso] paired with an
+ * HTML button behind [if !mso]. Do not reintroduce it: the label then exists
+ * TWICE in the source, and any client that strips conditional-comment markers
+ * while keeping their contents renders both, so the recipient sees the VML's
+ * text and the real button stacked. New Outlook and Outlook.com do exactly
+ * this, and it was reported from a live send.
+ *
+ * A padded <td> with a bgcolor is a genuine filled button in Outlook too:
+ * the Word engine honours cell padding and cell backgrounds. Only the rounded
+ * corners and the gradient are lost there, which is the same degradation the
+ * rest of this file already accepts. One label in the source, one button on
+ * screen, no conditional comments involved.
  */
-function button({ href, label, width = 260 }) {
+function button({ href, label }) {
   const h = esc(href);
   const l = esc(label);
   return `<table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="border-collapse:collapse;mso-table-lspace:0pt;mso-table-rspace:0pt;margin:28px 0;">
                 <tr>
                   <td align="center" style="font-family:${FONT};">
-                    <!--[if mso]>
-                    <v:roundrect xmlns:v="urn:schemas-microsoft-com:vml" xmlns:w="urn:schemas-microsoft-com:office:word" href="${h}" style="height:50px;v-text-anchor:middle;width:${width}px;" arcsize="24%" strokecolor="${RED_DARK}" fillcolor="${RED}">
-                      <!-- VML has its own gradient fill, so the Outlook button
-                           gets one too even though CSS gradients are ignored. -->
-                      <v:fill type="gradient" color="${RED_LIGHT}" color2="${RED_DARK}" angle="180" />
-                      <w:anchorlock/>
-                      <center style="color:#ffffff;font-family:${FONT};font-size:16px;font-weight:bold;">${l}</center>
-                    </v:roundrect>
-                    <![endif]-->
-                    <!--[if !mso]><!-->
-                    <table role="presentation" cellspacing="0" cellpadding="0" border="0" style="border-collapse:separate;mso-table-lspace:0pt;mso-table-rspace:0pt;">
+                    <table role="presentation" cellspacing="0" cellpadding="0" border="0" align="center" style="border-collapse:separate;mso-table-lspace:0pt;mso-table-rspace:0pt;">
                       <tr>
                         <td align="center" bgcolor="${RED}" style="background-color:${RED};background-image:${RED_GRADIENT};border-radius:${BLOCK_RADIUS};padding:15px 30px;font-family:${FONT};">
-                          <a href="${h}" style="display:block;color:#ffffff;font-family:${FONT};font-size:16px;font-weight:bold;line-height:20px;mso-line-height-rule:exactly;text-decoration:none;border:none;"><span style="color:#ffffff;text-decoration:none;">${l}</span></a>
+                          <a href="${h}" style="display:inline-block;color:#ffffff;font-family:${FONT};font-size:16px;font-weight:bold;line-height:20px;mso-line-height-rule:exactly;text-decoration:none;border:none;"><span style="color:#ffffff;text-decoration:none;">${l}</span></a>
                         </td>
                       </tr>
                     </table>
-                    <!--<![endif]-->
                   </td>
                 </tr>
               </table>`;
@@ -187,6 +189,23 @@ function linkFallback(url) {
  * The logo sits on WHITE, not on the red band: the asset is the red speechmark,
  * so it would be invisible against red. Keeping the red band underneath means
  * the mail still reads as Vodafone even when a client blocks images entirely.
+ *
+ * Keep HTML comments inside the template SHORT and structural. Everything in
+ * here is shipped to the recipient and is visible in "view source", so rationale
+ * belongs in JS comments like this one, which do not.
+ *
+ * Two things are deliberately ABSENT, both removed after a live send rendered
+ * the CTA twice (see button() for the full story):
+ *   * No [if mso] CSS block. It only ever caught elements declaring no font of
+ *     their own, and every text element here sets font-family, mso-table-lspace
+ *     and an explicit px line-height inline, so it bought nothing, while a
+ *     marker-stripping client could spill the CSS into the body as text.
+ *   * No [if mso] ghost table around the card. The card's width="600" attribute
+ *     is already what Outlook obeys, so the ghost was redundant; revealed, it
+ *     becomes a hard 600px table that forces sideways scrolling on a phone.
+ *
+ * The card's width is pinned three ways: the width attribute (what Outlook
+ * obeys), max-width (lets other clients shrink), and align=center.
  */
 function shell({ preheader, title, subtitle, body }) {
   // alt="" on purpose: the cell immediately to the right carries live
@@ -203,11 +222,11 @@ function shell({ preheader, title, subtitle, body }) {
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta http-equiv="X-UA-Compatible" content="IE=edge">
   <meta name="x-apple-disable-message-reformatting">
-  <!-- Stop iOS Mail auto-linking (and blue-underlining) the voucher code and URL. -->
+  
   <meta name="format-detection" content="telephone=no,date=no,address=no,email=no,url=no">
   <meta name="color-scheme" content="light only">
   <meta name="supported-color-schemes" content="light only">
-  <!-- Pin 1 CSS px to 1 device px on scaled Windows displays (Outlook 2013+). -->
+  <!-- Outlook DPI lock -->
   <!--[if mso]>
   <noscript>
     <xml>
@@ -217,42 +236,19 @@ function shell({ preheader, title, subtitle, body }) {
     </xml>
   </noscript>
   <![endif]-->
-  <!-- Outlook-only safety net, gated behind [if mso] so no other client parses
-       it (Gmail strips style blocks outright). These rules are deliberately not
-       forced: a forced author rule outranks inline styles, which would repaint
-       the monospace voucher code in Arial and make 0/O and 1/l ambiguous in the
-       one string the customer has to retype. Unforced, inline styles win and
-       this only catches elements that declare no font of their own. -->
-  <!--[if mso]>
-  <style type="text/css">
-    table, td, div, p, a, h1, h2, h3, span { font-family: Arial, Helvetica, sans-serif; }
-    table, td { mso-table-lspace: 0pt; mso-table-rspace: 0pt; }
-    body, table, td, div, p, a, h1, h2, h3 { mso-line-height-rule: exactly; }
-  </style>
-  <![endif]-->
   <title>${esc(title)}</title>
 </head>
 <body style="margin:0;padding:0;font-family:${FONT};background-color:#f8f9fa;-webkit-text-size-adjust:100%;-ms-text-size-adjust:100%;">
-  <!-- Preheader: the grey preview line in the inbox list, hidden in the body.
-       The trailing entities stop clients pulling real body copy into the snippet. -->
+  <!-- Preheader (inbox snippet) -->
   <div style="display:none;max-height:0;max-width:0;overflow:hidden;mso-hide:all;opacity:0;color:#f8f9fa;font-size:1px;line-height:1px;">${esc(preheader || "")}&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;</div>
   <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" bgcolor="#f8f9fa" style="border-collapse:collapse;mso-table-lspace:0pt;mso-table-rspace:0pt;margin:0;padding:0;background-color:#f8f9fa;">
     <tr>
       <td align="center" valign="top" style="padding:32px 16px;-webkit-text-size-adjust:100%;-ms-text-size-adjust:100%;">
 
-        <!-- Ghost table: a hard 600px anchor for the Word engine. -->
-        <!--[if mso]>
-        <table role="presentation" width="600" cellspacing="0" cellpadding="0" border="0" align="center" style="border-collapse:collapse;mso-table-lspace:0pt;mso-table-rspace:0pt;width:600px;">
-          <tr><td>
-        <![endif]-->
-
-        <!-- Main Container. Width is pinned three ways: the attribute (all Outlook
-             honours), max-width (lets other clients shrink), and align=center. -->
+        <!-- Card -->
         <table role="presentation" width="600" cellspacing="0" cellpadding="0" border="0" align="center" bgcolor="#ffffff" style="border-collapse:collapse;mso-table-lspace:0pt;mso-table-rspace:0pt;width:100%;max-width:600px;background-color:#ffffff;border-radius:${CARD_RADIUS};overflow:hidden;">
 
-          <!-- Masthead: Vodafone speechmark on white (the asset is the red mark).
-               The card's own overflow:hidden does not reliably clip cells, so the
-               first and last rows round their own outer corners. -->
+          <!-- Masthead -->
           <tr>
             <td align="left" valign="middle" bgcolor="#ffffff" style="background-color:#ffffff;border-radius:${CARD_RADIUS} ${CARD_RADIUS} 0 0;padding:26px 30px 20px 30px;font-family:${FONT};">
               <table role="presentation" cellspacing="0" cellpadding="0" border="0" style="border-collapse:collapse;mso-table-lspace:0pt;mso-table-rspace:0pt;">
@@ -267,10 +263,7 @@ function shell({ preheader, title, subtitle, body }) {
             </td>
           </tr>
 
-          <!-- Title band: an inset rounded red block, so it reads as a matching
-               pair with the voucher block below rather than a full-bleed stripe
-               with square ends. Live text on a coloured cell, so it renders even
-               with images blocked and the mail still reads as Vodafone. -->
+          <!-- Title band -->
           <tr>
             <td align="center" valign="top" bgcolor="#ffffff" style="background-color:#ffffff;padding:0 30px;font-family:${FONT};">
               <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="border-collapse:collapse;mso-table-lspace:0pt;mso-table-rspace:0pt;">
@@ -310,11 +303,6 @@ function shell({ preheader, title, subtitle, body }) {
           </tr>
 
         </table>
-
-        <!--[if mso]>
-          </td></tr>
-        </table>
-        <![endif]-->
 
       </td>
     </tr>
@@ -374,9 +362,7 @@ export function buildReceipt({ voucherCode, statusUrl, planName, dataAllowance, 
                 Thank you. Your payment has been received and your <strong>Wi-Fi plan is ready to use</strong>.
               </p>
 
-              <!-- Voucher code. A solid Vodafone-red fill with white type, not a
-                   pale tint: saturated colours survive the Gmail Android app's
-                   forced dark-mode inversion, near-white surfaces do not. -->
+              <!-- Voucher code -->
               <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="border-collapse:collapse;mso-table-lspace:0pt;mso-table-rspace:0pt;margin:0 0 26px 0;">
                 <tr>
                   <td align="center" bgcolor="${RED}" style="background-color:${RED};background-image:${RED_GRADIENT};border-radius:${BLOCK_RADIUS};padding:22px 20px;font-family:${FONT};">
@@ -416,7 +402,7 @@ export function buildReceipt({ voucherCode, statusUrl, planName, dataAllowance, 
 
               ${
                 statusUrl
-                  ? button({ href: statusUrl, label: "Check my connection", width: 250 }) + linkFallback(statusUrl)
+                  ? button({ href: statusUrl, label: "Check my connection" }) + linkFallback(statusUrl)
                   : ""
               }
 
