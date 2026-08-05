@@ -2,10 +2,10 @@
 // System information + read-only app settings.
 
 import { useEffect, useState } from "react";
-import { Settings, Server, Eye, EyeOff, MapPin, Check, Globe2, RefreshCw, Mail } from "lucide-react";
+import { Settings, Server, Eye, EyeOff, MapPin, Check, Globe2, RefreshCw, Mail, Satellite } from "lucide-react";
 import toast from "react-hot-toast";
 
-import { settingsApi } from "../services/api";
+import { settingsApi, networkApi } from "../services/api";
 import { useSite } from "../hooks/useSite";
 import { Button, Panel, Badge, PageHeader, Toggle, Select, Field, Input } from "../components/ui";
 
@@ -88,9 +88,90 @@ export default function SettingsPage() {
     ? INTERVAL_OPTIONS
     : [{ v: syncInterval, label: `Every ${syncInterval} minutes` }, ...INTERVAL_OPTIONS];
 
+  // Starlink: shared API credentials + the per-village service line / device id.
+  const [sl, setSl] = useState({ enabled: false, tokenUrl: "", apiBaseUrl: "", clientId: "", accountNumber: "" });
+  const [slSecret, setSlSecret] = useState(""); // write-only; blank = keep stored
+  const [slHasSecret, setSlHasSecret] = useState(false);
+  const [origSl, setOrigSl] = useState(null);
+  const [savingSl, setSavingSl] = useState(false);
+  const [slSites, setSlSites] = useState({});   // projectId -> { serviceLine, deviceId }
+  const [savingSite, setSavingSite] = useState(null);
+  const setSlField = (k, v) => setSl((p) => ({ ...p, [k]: v }));
+  const slDirty = origSl != null && (JSON.stringify(sl) !== JSON.stringify(origSl) || slSecret.trim() !== "");
+
+  async function loadStarlink() {
+    try {
+      const { starlink } = await settingsApi.getStarlink();
+      const val = {
+        enabled: !!starlink.enabled,
+        tokenUrl: starlink.tokenUrl || "",
+        apiBaseUrl: starlink.apiBaseUrl || "",
+        clientId: starlink.clientId || "",
+        accountNumber: starlink.accountNumber || "",
+      };
+      setSl(val);
+      setOrigSl(val);
+      setSlHasSecret(!!starlink.hasClientSecret);
+      setSlSecret("");
+    } catch {
+      setOrigSl((prev) => prev ?? { enabled: false, tokenUrl: "", apiBaseUrl: "", clientId: "", accountNumber: "" });
+    }
+  }
+
+  // The per-village identifiers live on the village record, so they come from
+  // the projects list rather than the settings table.
+  async function loadStarlinkSites() {
+    try {
+      const { projects = [] } = await networkApi.projects();
+      const map = {};
+      for (const p of projects) {
+        map[p.id] = {
+          serviceLine: p.starlinkServiceLineNumber || "",
+          deviceId: p.starlinkDeviceId || "",
+        };
+      }
+      setSlSites(map);
+    } catch { /* the panel just shows empty inputs */ }
+  }
+
+  async function saveStarlink() {
+    setSavingSl(true);
+    try {
+      const body = { ...sl };
+      if (slSecret.trim() !== "") body.clientSecret = slSecret; // omit → keep stored
+      await settingsApi.updateStarlink(body);
+      toast.success("Starlink settings saved");
+      setSlSecret("");
+      await loadStarlink();
+    } catch (e) {
+      toast.error(e?.message || "Failed to save Starlink settings");
+    } finally {
+      setSavingSl(false);
+    }
+  }
+
+  async function saveStarlinkSite(id) {
+    setSavingSite(id);
+    try {
+      const row = slSites[id] || {};
+      await networkApi.updateProject(id, {
+        starlinkServiceLineNumber: row.serviceLine || "",
+        starlinkDeviceId: row.deviceId || "",
+      });
+      toast.success("Village Starlink details saved");
+      await loadStarlinkSites();
+    } catch (e) {
+      toast.error(e?.message || "Failed to save");
+    } finally {
+      setSavingSite(null);
+    }
+  }
+
   useEffect(() => {
     loadSettings();
     loadSmtp();
+    loadStarlink();
+    loadStarlinkSites();
   }, []);
 
   async function loadSettings() {
@@ -584,6 +665,110 @@ export default function SettingsPage() {
               {allVisible ? `All ${sites.length} villages` : `${visibleSites.length} of ${sites.length} villages`} in the All Villages scope.
             </div>
           )}
+        </Panel>
+
+        {/* Starlink: one set of API credentials for the whole account, plus the
+            per-village identifiers that drive each village's usage graph. */}
+        <Panel
+          title="Starlink"
+          subtitle="API credentials for the account, and the service line for each village."
+          icon={<Satellite size={15} />}
+        >
+          <div className="space-y-4">
+            <Toggle
+              checked={sl.enabled}
+              onChange={(v) => setSlField("enabled", v)}
+              label="Enable Starlink data"
+              hint={sl.enabled ? "Village dashboards show usage for any village with a service line." : "Starlink cards are hidden everywhere."}
+            />
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <Field label="Token URL" hint="OAuth2 client-credentials endpoint.">
+                <Input value={sl.tokenUrl} onChange={(e) => setSlField("tokenUrl", e.target.value)} placeholder="https://www.starlink.com/api/auth/connect/token" mono />
+              </Field>
+              <Field label="API base URL">
+                <Input value={sl.apiBaseUrl} onChange={(e) => setSlField("apiBaseUrl", e.target.value)} placeholder="https://web-api.starlink.com/enterprise" mono />
+              </Field>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <Field label="Client ID">
+                <Input value={sl.clientId} onChange={(e) => setSlField("clientId", e.target.value)} placeholder="Starlink client id" mono />
+              </Field>
+              <Field
+                label="Client secret"
+                hint={slHasSecret ? "A secret is stored. Leave blank to keep it." : "Stored encrypted at rest; never sent back to the browser."}
+              >
+                <Input
+                  type="password"
+                  value={slSecret}
+                  onChange={(e) => setSlSecret(e.target.value)}
+                  placeholder={slHasSecret ? "•••••••••• (unchanged)" : "Starlink client secret"}
+                  autoComplete="new-password"
+                />
+              </Field>
+            </div>
+
+            <div className="flex items-center gap-3">
+              <Button variant="primary" size="sm" onClick={saveStarlink} loading={savingSl} disabled={!slDirty || savingSl}>
+                Save credentials
+              </Button>
+              {!slDirty && origSl && <span className="text-[11.5px] text-[var(--fg-muted)]">No changes</span>}
+            </div>
+
+            {/* Per-village identifiers */}
+            <div className="border-t border-[var(--border-default)] pt-4">
+              <p className="text-[12.5px] font-medium text-[var(--fg-secondary)]">Villages</p>
+              <p className="text-[11.5px] text-[var(--fg-muted)] mt-0.5 mb-3">
+                The service line number is what draws the usage graph. Leave it blank to hide the Starlink card for that village. The device ID is the kit's user-terminal id and is shown as information only.
+              </p>
+
+              <div className="rounded-lg border border-[var(--border-default)] divide-y divide-[var(--border-default)] max-h-[320px] overflow-y-auto scrollbar-none">
+                {sites.length === 0 ? (
+                  <div className="px-3 py-3 text-[12.5px] text-[var(--fg-muted)]">
+                    No villages yet — add them under Network.
+                  </div>
+                ) : (
+                  sites.map((s) => {
+                    const row = slSites[s.id] || { serviceLine: "", deviceId: "" };
+                    const setRow = (k, v) =>
+                      setSlSites((prev) => ({ ...prev, [s.id]: { ...(prev[s.id] || {}), [k]: v } }));
+                    return (
+                      <div key={s.id} className="px-3 py-3 flex flex-col sm:flex-row sm:items-end gap-2.5">
+                        <div className="sm:w-40 min-w-0">
+                          <p className="text-[12.5px] font-medium text-[var(--fg-primary)] truncate">{s.name}</p>
+                          {s.hostname && <p className="text-[10.5px] font-mono text-[var(--fg-muted)] truncate">{s.hostname}</p>}
+                        </div>
+                        <Input
+                          className="flex-1"
+                          value={row.serviceLine}
+                          onChange={(e) => setRow("serviceLine", e.target.value)}
+                          placeholder="Service line number"
+                          mono
+                        />
+                        <Input
+                          className="flex-1"
+                          value={row.deviceId}
+                          onChange={(e) => setRow("deviceId", e.target.value)}
+                          placeholder="Device ID (optional)"
+                          mono
+                        />
+                        <Button
+                          variant="secondary"
+                          size="sm"
+                          onClick={() => saveStarlinkSite(s.id)}
+                          loading={savingSite === s.id}
+                          disabled={savingSite === s.id}
+                        >
+                          Save
+                        </Button>
+                      </div>
+                    );
+                  })
+                )}
+              </div>
+            </div>
+          </div>
         </Panel>
         </div>
       </div>

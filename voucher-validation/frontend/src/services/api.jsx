@@ -101,6 +101,12 @@ export const settingsApi = {
   updateSmtp: (config) => api("/settings/smtp", { method: "PUT", body: config }),
   testSmtp: (to, template = "connection") =>
     api("/settings/smtp/test", { method: "POST", body: { to, template } }),
+
+  // Starlink API credentials, shared across every village. getStarlink never
+  // returns the client secret, only hasClientSecret; leave the secret field
+  // blank on save to keep the stored one.
+  getStarlink: () => api("/settings/starlink"),
+  updateStarlink: (config) => api("/settings/starlink", { method: "PUT", body: config }),
 };
 
 // Portal Audit Log API helpers
@@ -155,6 +161,9 @@ export const networkApi = {
   // Plain call = cached snapshot (no Ruijie). { refresh: true } = live fetch,
   // only ever triggered by an explicit Refresh click.
   health: (id, { refresh } = {}) => api(`/network/projects/${id}/health${refresh ? "?refresh=1" : ""}`),
+  // Starlink data usage for one village. One backend call covers three billing
+  // cycles, so switching cycle never costs another Starlink request.
+  starlink: (id, { cycle = "A" } = {}) => api(`/network/projects/${id}/starlink?cycle=${cycle}`),
 };
 
 // User management API helpers

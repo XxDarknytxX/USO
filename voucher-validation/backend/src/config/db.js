@@ -228,6 +228,22 @@ export async function getPool() {
       updated_by INT NULL,
       updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
+
+    // Starlink API credentials. ONE account covers every village, so this is a
+    // single row like smtp_settings. Deliberately NOT in app_settings: that
+    // table is returned wholesale by GET /api/settings, which would ship the
+    // client secret to the browser.
+    `CREATE TABLE IF NOT EXISTS starlink_settings (
+      id INT NOT NULL PRIMARY KEY,
+      enabled BOOLEAN NOT NULL DEFAULT 0,
+      token_url VARCHAR(512) NULL,
+      api_base_url VARCHAR(512) NULL,
+      client_id VARCHAR(255) NULL,
+      client_secret VARCHAR(512) NULL,
+      account_number VARCHAR(64) NULL,
+      updated_by INT NULL,
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
   ];
 
   for (const sql of tableCreations) {
@@ -273,6 +289,19 @@ export async function getPool() {
 
   // M-PAiSA mappings: mark where each row came from. Existing rows all predate
   // manual entry, so the 'import' default is correct for them.
+  // Per-village Starlink identifiers. The service line number is the only one
+  // the data-usage API needs; the device id is the user-terminal id, shown as
+  // kit info only. Both nullable: a village with no service line simply has no
+  // Starlink card on its dashboard.
+  const starlinkMigrations = [
+    `ALTER TABLE network_projects ADD COLUMN starlink_service_line_number VARCHAR(64) NULL AFTER ruijie_tenant_id`,
+    `ALTER TABLE network_projects ADD COLUMN starlink_device_id VARCHAR(100) NULL AFTER starlink_service_line_number`,
+  ];
+  for (const sql of starlinkMigrations) {
+    try { await pool.query(sql); console.log(`Migration OK: ${sql.slice(0, 60)}...`); }
+    catch (e) { if (e.code !== 'ER_DUP_FIELDNAME') { /* ignore */ } }
+  }
+
   const mpaisaMigrations = [
     `ALTER TABLE mpaisa_mappings ADD COLUMN source VARCHAR(16) NOT NULL DEFAULT 'import' AFTER source_logtime`,
   ];

@@ -5,6 +5,7 @@
 import RuijieService from "../services/ruijieService.js";
 import { fetchProjectHealth } from "../services/networkHealth.js";
 import { getHealthSnapshot, setHealthSnapshot } from "../services/networkHealthStore.js";
+import * as starlink from "../services/starlinkService.js";
 
 const send = {
   ok: (res, data = {}) => res.json(data),
@@ -20,6 +21,11 @@ const mapProject = (r) => ({
   hostname: r.hostname,
   ruijieGroupId: r.ruijie_group_id,
   ruijieTenantId: r.ruijie_tenant_id,
+  // Starlink identifiers, not secrets: the service line number drives the usage
+  // graph, the device id is user-terminal kit info. Viewers only ever see
+  // projects inside their own scope.
+  starlinkServiceLineNumber: r.starlink_service_line_number || null,
+  starlinkDeviceId: r.starlink_device_id || null,
   isActive: !!r.is_active,
   sortOrder: r.sort_order,
   createdAt: r.created_at,
@@ -104,15 +110,23 @@ export function makeNetworkController(pool) {
           hostname: "hostname",
           ruijie_group_id: "ruijieGroupId",
           ruijie_tenant_id: "ruijieTenantId",
+          starlink_service_line_number: "starlinkServiceLineNumber",
+          starlink_device_id: "starlinkDeviceId",
           is_active: "isActive",
           sort_order: "sortOrder",
         };
+        // Columns where an empty string means "unset this", not "store ''" —
+        // clearing a village's service line must actually disable its card.
+        const nullable = new Set(["starlink_service_line_number", "starlink_device_id"]);
         const set = [];
         const vals = [];
         for (const [col, key] of Object.entries(fields)) {
           if (req.body[key] !== undefined) {
             set.push(`${col} = ?`);
-            vals.push(col === "is_active" ? (req.body[key] ? 1 : 0) : req.body[key]);
+            let v = req.body[key];
+            if (col === "is_active") v = v ? 1 : 0;
+            else if (nullable.has(col)) v = String(v ?? "").trim() || null;
+            vals.push(v);
           }
         }
         if (set.length === 0) return send.ok(res, { success: true, message: "No changes" });
@@ -137,6 +151,83 @@ export function makeNetworkController(pool) {
       } catch (e) {
         console.error(e);
         return send.serverErr(res);
+      }
+    },
+
+    // GET /api/network/projects/:id/starlink?cycle=A|B|C
+    // Chart-ready data usage for one village's Starlink service line.
+    //
+    // Always HTTP 200. An unconfigured village and a temporarily unreachable
+    // Starlink API are both NORMAL states here, not errors: the dashboard
+    // simply hides the card or shows an empty chart. Returning 500 would make a
+    // Starlink outage look like a broken admin portal.
+    getProjectStarlink: async (req, res) => {
+      try {
+        const [rows] = await pool.query("SELECT * FROM network_projects WHERE id = ?", [req.params.id]);
+        const project = rows[0];
+        if (!project) return send.notFound(res, "Project not found");
+
+        const scope = req.scope || { isViewer: false };
+        if (scope.isViewer && !(scope.projectIds || []).includes(Number(project.id))) {
+          return send.notFound(res, "Project not found");
+        }
+
+        const serviceLine = project.starlink_service_line_number;
+        const cfg = await starlink.loadConfig(pool);
+        if (!cfg || !serviceLine) return send.ok(res, { configured: false });
+
+        const cycleKey = ["A", "B", "C"].includes(req.query.cycle) ? req.query.cycle : "A";
+        const cycleIndex = { A: 0, B: 1, C: 2 }[cycleKey];
+
+        // Both are cached and single-flighted, so a warm dashboard makes zero
+        // outbound calls. allSettled: kit metadata failing must not lose usage.
+        const [usageRes, lineRes] = await Promise.allSettled([
+          starlink.getUsage(cfg, serviceLine),
+          starlink.getServiceLine(cfg, serviceLine),
+        ]);
+
+        const line = lineRes.status === "fulfilled" ? lineRes.value : null;
+        const kit = {
+          serviceLineNumber: serviceLine,
+          deviceId: project.starlink_device_id || null,
+          nickname: line?.nickname || null,
+          active: line?.active ?? null,
+          startDate: line?.startDate || null,
+          productReferenceId: line?.productReferenceId || null,
+        };
+
+        if (usageRes.status !== "fulfilled") {
+          console.error("[network] Starlink usage failed:", usageRes.reason?.message);
+          return send.ok(res, {
+            configured: true,
+            kit,
+            error: "Starlink data is temporarily unavailable",
+            days: [],
+            cycles: [],
+          });
+        }
+
+        const { cycles = [], fetchedAt, stale } = usageRes.value;
+        const cycle = cycles[cycleIndex] || null;
+        return send.ok(res, {
+          configured: true,
+          kit,
+          cycleKey,
+          cycleCount: cycles.length,
+          cycle: cycle ? { startDate: cycle.startDate, endDate: cycle.endDate } : null,
+          days: cycle?.days || [],
+          totals: cycle?.totals || null,
+          fetchedAt,
+          stale: !!stale,
+        });
+      } catch (e) {
+        console.error("[network] Starlink endpoint error:", e.message);
+        return send.ok(res, {
+          configured: true,
+          error: "Starlink data is temporarily unavailable",
+          days: [],
+          cycles: [],
+        });
       }
     },
 

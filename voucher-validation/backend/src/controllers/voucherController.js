@@ -3,6 +3,7 @@ import { validationResult } from "express-validator";
 import crypto from "crypto";
 import { loadSmtpTransport, renderTemplate } from "../services/mailer.js";
 import { logEmailEvent } from "../services/emailLog.js";
+import * as starlinkService from "../services/starlinkService.js";
 import RuijieService from "../services/ruijieService.js";
 import { parseVoucherExcelBuffer } from "../services/excelVoucherParser.js";
 import { effectiveGroupIds } from "../middleware/auth.js";
@@ -1300,6 +1301,64 @@ export function makeVoucherController(pool) {
     // PUT /api/settings/smtp — upsert the single config row. A blank/omitted
     // password keeps the stored one (so admins never have to retype it). The
     // password is persisted server-side only.
+    // GET /api/settings/starlink — the shared Starlink API credentials.
+    // The client secret NEVER leaves the server; only whether one is stored.
+    getStarlinkSettings: async (_req, res) => {
+      try {
+        const [rows] = await pool.query('SELECT * FROM starlink_settings WHERE id = 1');
+        const r = rows[0] || {};
+        return send.ok(res, {
+          starlink: {
+            enabled: !!r.enabled,
+            tokenUrl: r.token_url || '',
+            apiBaseUrl: r.api_base_url || '',
+            clientId: r.client_id || '',
+            accountNumber: r.account_number || '',
+            hasClientSecret: !!r.client_secret,
+            updatedAt: r.updated_at || null,
+          },
+        });
+      } catch (e) { console.error(e); return send.serverErr(res); }
+    },
+
+    // PUT /api/settings/starlink — a blank clientSecret keeps the stored one,
+    // so the UI never has to round-trip the secret to save an unrelated field.
+    updateStarlinkSettings: async (req, res) => {
+      try {
+        const b = req.body || {};
+        const enabled = b.enabled ? 1 : 0;
+        const tokenUrl = b.tokenUrl ? String(b.tokenUrl).trim() : null;
+        const apiBaseUrl = b.apiBaseUrl ? String(b.apiBaseUrl).trim() : null;
+        for (const [label, v] of [['Token URL', tokenUrl], ['API base URL', apiBaseUrl]]) {
+          if (v && !/^https:\/\//i.test(v)) {
+            return send.bad(res, `${label} must start with https://`);
+          }
+        }
+        const clientId = b.clientId ? String(b.clientId).trim() : null;
+        const accountNumber = b.accountNumber ? String(b.accountNumber).trim() : null;
+
+        const supplied = (b.clientSecret != null && String(b.clientSecret) !== '') ? String(b.clientSecret) : null;
+        const [existing] = await pool.query('SELECT client_secret FROM starlink_settings WHERE id = 1');
+        const clientSecret = supplied != null ? supplied : (existing[0]?.client_secret ?? null);
+
+        await pool.query(
+          `INSERT INTO starlink_settings (id, enabled, token_url, api_base_url, client_id, client_secret, account_number, updated_by)
+           VALUES (1, ?, ?, ?, ?, ?, ?, ?)
+           ON DUPLICATE KEY UPDATE
+             enabled = VALUES(enabled), token_url = VALUES(token_url), api_base_url = VALUES(api_base_url),
+             client_id = VALUES(client_id), client_secret = VALUES(client_secret),
+             account_number = VALUES(account_number), updated_by = VALUES(updated_by),
+             updated_at = CURRENT_TIMESTAMP`,
+          [enabled, tokenUrl, apiBaseUrl, clientId, clientSecret, accountNumber, req.user?.id ?? null]
+        );
+
+        // Drop the cached credentials + token so new settings take effect
+        // without restarting the backend.
+        starlinkService.invalidateConfig();
+        return send.ok(res, { success: true });
+      } catch (e) { console.error(e); return send.serverErr(res); }
+    },
+
     updateSmtpSettings: async (req, res) => {
       try {
         const b = req.body || {};

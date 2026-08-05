@@ -44,6 +44,13 @@ export function makeNetworkRouter(controller, attachScope) {
     controller.deleteProject
   );
 
+  // Per-village Starlink data usage (cached; see services/starlinkService.js)
+  router.get(
+    "/projects/:id/starlink",
+    [param("id").isInt().withMessage("id must be an integer")],
+    controller.getProjectStarlink
+  );
+
   // Per-project device health + topology
   router.get(
     "/projects/:id/health",

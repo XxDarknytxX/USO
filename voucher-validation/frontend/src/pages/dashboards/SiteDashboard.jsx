@@ -14,6 +14,7 @@ import {
 import { useSite } from "../../hooks/useSite";
 import { voucherApi, networkApi, portalConfigApi } from "../../services/api";
 import PlanBreakdown from "../../components/PlanBreakdown";
+import StarlinkPanel from "../../components/StarlinkPanel";
 import {
   PageHeader, Button, StatCard, Panel, Badge, EmptyState,
   SkeletonKpis, SkeletonCard,
@@ -210,6 +211,10 @@ export default function SiteDashboard({ groupId, site }) {
               color="cyan"
             />
           </div>
+
+          {/* Starlink kit + data usage. Self-fetching and self-hiding: renders
+              nothing at all when this village has no Starlink configured. */}
+          {site?.id && <StarlinkPanel projectId={site.id} />}
 
           {/* Revenue trend */}
           {hasRevenue && revTrend.some((m) => m.revenue > 0) && (
