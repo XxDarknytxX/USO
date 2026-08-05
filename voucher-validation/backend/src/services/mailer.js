@@ -33,6 +33,15 @@ const RED = "#e60000";
 const FONT = "Arial, Helvetica, sans-serif";
 const MONO = "'Courier New', Courier, monospace";
 
+// Corner rounding. IMPORTANT: a radius only clips the background of the SAME
+// element. Painting a background on a table AND on its td while rounding only
+// the table leaves the td's square fill covering the rounded corners, so every
+// coloured block below puts its background and its radius on one element.
+// Outlook's Word engine ignores border-radius entirely and renders square
+// corners; that is accepted degradation, not a bug.
+const CARD_RADIUS = "14px";
+const BLOCK_RADIUS = "12px";
+
 // The Vodafone speechmark, embedded inline (cid:) so it renders without the
 // recipient's client having to fetch a remote image, and so it survives Gmail's
 // image proxy and Outlook's remote-content blocking. Read once at startup.
@@ -110,7 +119,7 @@ function button({ href, label, width = 260 }) {
                 <tr>
                   <td align="center" style="font-family:${FONT};">
                     <!--[if mso]>
-                    <v:roundrect xmlns:v="urn:schemas-microsoft-com:vml" xmlns:w="urn:schemas-microsoft-com:office:word" href="${h}" style="height:50px;v-text-anchor:middle;width:${width}px;" arcsize="16%" strokecolor="${RED}" fillcolor="${RED}">
+                    <v:roundrect xmlns:v="urn:schemas-microsoft-com:vml" xmlns:w="urn:schemas-microsoft-com:office:word" href="${h}" style="height:50px;v-text-anchor:middle;width:${width}px;" arcsize="24%" strokecolor="${RED}" fillcolor="${RED}">
                       <w:anchorlock/>
                       <center style="color:#ffffff;font-family:${FONT};font-size:16px;font-weight:bold;">${l}</center>
                     </v:roundrect>
@@ -118,7 +127,7 @@ function button({ href, label, width = 260 }) {
                     <!--[if !mso]><!-->
                     <table role="presentation" cellspacing="0" cellpadding="0" border="0" style="border-collapse:separate;mso-table-lspace:0pt;mso-table-rspace:0pt;">
                       <tr>
-                        <td align="center" bgcolor="${RED}" style="background-color:${RED};border-radius:8px;padding:15px 30px;font-family:${FONT};">
+                        <td align="center" bgcolor="${RED}" style="background-color:${RED};border-radius:${BLOCK_RADIUS};padding:15px 30px;font-family:${FONT};">
                           <a href="${h}" style="display:block;color:#ffffff;font-family:${FONT};font-size:16px;font-weight:bold;line-height:20px;mso-line-height-rule:exactly;text-decoration:none;border:none;"><span style="color:#ffffff;text-decoration:none;">${l}</span></a>
                         </td>
                       </tr>
@@ -131,9 +140,9 @@ function button({ href, label, width = 260 }) {
 
 /** A tinted panel with a red rule down its left edge (the Starlink notice box). */
 function callout({ heading, html, bg = "#f8f9fa" }) {
-  return `<table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" bgcolor="${bg}" style="border-collapse:collapse;mso-table-lspace:0pt;mso-table-rspace:0pt;margin:28px 0;background-color:${bg};border-radius:8px;">
+  return `<table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="border-collapse:collapse;mso-table-lspace:0pt;mso-table-rspace:0pt;margin:28px 0;">
                 <tr>
-                  <td align="left" valign="top" style="padding:22px 24px;border-left:4px solid ${RED};font-family:${FONT};">
+                  <td align="left" valign="top" bgcolor="${bg}" style="background-color:${bg};border-radius:${BLOCK_RADIUS};padding:22px 24px;border-left:4px solid ${RED};font-family:${FONT};">
                     ${heading ? `<h3 style="color:#333333;margin:0 0 10px 0;font-family:${FONT};font-size:16px;font-weight:bold;line-height:21px;mso-line-height-rule:exactly;">${esc(heading)}</h3>` : ""}
                     ${html}
                   </td>
@@ -147,9 +156,9 @@ function linkFallback(url) {
   return `<p style="color:#666666;font-family:${FONT};font-size:14px;line-height:21px;mso-line-height-rule:exactly;margin:24px 0 12px 0;">
                 If the button does not work, copy and paste this link into your browser:
               </p>
-              <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" bgcolor="#f8f9fa" style="border-collapse:collapse;mso-table-lspace:0pt;mso-table-rspace:0pt;margin:0 0 8px 0;background-color:#f8f9fa;border:1px solid #e9ecef;border-radius:6px;">
+              <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="border-collapse:collapse;mso-table-lspace:0pt;mso-table-rspace:0pt;margin:0 0 8px 0;">
                 <tr>
-                  <td align="left" style="padding:14px 16px;font-family:${MONO};font-size:12px;line-height:18px;mso-line-height-rule:exactly;word-break:break-all;">
+                  <td align="left" bgcolor="#f8f9fa" style="background-color:#f8f9fa;border:1px solid #e9ecef;border-radius:${BLOCK_RADIUS};padding:14px 16px;font-family:${MONO};font-size:12px;line-height:18px;mso-line-height-rule:exactly;word-break:break-all;">
                     <a href="${u}" style="color:${RED};text-decoration:none;font-family:${MONO};font-size:12px;"><span style="color:${RED};">${u}</span></a>
                   </td>
                 </tr>
@@ -224,11 +233,13 @@ function shell({ preheader, title, subtitle, body }) {
 
         <!-- Main Container. Width is pinned three ways: the attribute (all Outlook
              honours), max-width (lets other clients shrink), and align=center. -->
-        <table role="presentation" width="600" cellspacing="0" cellpadding="0" border="0" align="center" bgcolor="#ffffff" style="border-collapse:collapse;mso-table-lspace:0pt;mso-table-rspace:0pt;width:100%;max-width:600px;background-color:#ffffff;border-radius:10px;overflow:hidden;">
+        <table role="presentation" width="600" cellspacing="0" cellpadding="0" border="0" align="center" bgcolor="#ffffff" style="border-collapse:collapse;mso-table-lspace:0pt;mso-table-rspace:0pt;width:100%;max-width:600px;background-color:#ffffff;border-radius:${CARD_RADIUS};overflow:hidden;">
 
-          <!-- Masthead: Vodafone speechmark on white (the asset is the red mark) -->
+          <!-- Masthead: Vodafone speechmark on white (the asset is the red mark).
+               The card's own overflow:hidden does not reliably clip cells, so the
+               first and last rows round their own outer corners. -->
           <tr>
-            <td align="left" valign="middle" bgcolor="#ffffff" style="background-color:#ffffff;padding:26px 30px 20px 30px;font-family:${FONT};">
+            <td align="left" valign="middle" bgcolor="#ffffff" style="background-color:#ffffff;border-radius:${CARD_RADIUS} ${CARD_RADIUS} 0 0;padding:26px 30px 20px 30px;font-family:${FONT};">
               <table role="presentation" cellspacing="0" cellpadding="0" border="0" style="border-collapse:collapse;mso-table-lspace:0pt;mso-table-rspace:0pt;">
                 <tr>
                   ${masthead ? `<td valign="middle" style="padding-right:12px;">${masthead}</td>` : ""}
@@ -241,33 +252,41 @@ function shell({ preheader, title, subtitle, body }) {
             </td>
           </tr>
 
-          <!-- Title band. Live text on a coloured cell, so it renders even with
-               images blocked: the mail still reads as Vodafone. -->
+          <!-- Title band: an inset rounded red block, so it reads as a matching
+               pair with the voucher block below rather than a full-bleed stripe
+               with square ends. Live text on a coloured cell, so it renders even
+               with images blocked and the mail still reads as Vodafone. -->
           <tr>
-            <td align="center" valign="top" bgcolor="${RED}" style="background-color:${RED};padding:26px 30px;text-align:center;font-family:${FONT};">
-              <h1 style="color:#ffffff;margin:0;font-family:${FONT};font-size:24px;font-weight:bold;line-height:30px;mso-line-height-rule:exactly;">
-                <!--[if mso]><span style="font-family:${FONT};font-size:22px;"><![endif]-->${esc(title)}<!--[if mso]></span><![endif]-->
-              </h1>
-              ${
-                subtitle
-                  ? `<p style="color:#ffffff;margin:10px 0 0 0;font-family:${FONT};font-size:14px;line-height:20px;mso-line-height-rule:exactly;">
-                <!--[if mso]><span style="font-family:${FONT};font-size:13px;"><![endif]-->${esc(subtitle)}<!--[if mso]></span><![endif]-->
-              </p>`
-                  : ""
-              }
+            <td align="center" valign="top" bgcolor="#ffffff" style="background-color:#ffffff;padding:0 30px;font-family:${FONT};">
+              <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="border-collapse:collapse;mso-table-lspace:0pt;mso-table-rspace:0pt;">
+                <tr>
+                  <td align="center" valign="top" bgcolor="${RED}" style="background-color:${RED};border-radius:${BLOCK_RADIUS};padding:26px 24px;text-align:center;font-family:${FONT};">
+                    <h1 style="color:#ffffff;margin:0;font-family:${FONT};font-size:24px;font-weight:bold;line-height:30px;mso-line-height-rule:exactly;">
+                      <!--[if mso]><span style="font-family:${FONT};font-size:22px;"><![endif]-->${esc(title)}<!--[if mso]></span><![endif]-->
+                    </h1>
+                    ${
+                      subtitle
+                        ? `<p style="color:#ffffff;margin:10px 0 0 0;font-family:${FONT};font-size:14px;line-height:20px;mso-line-height-rule:exactly;">
+                      <!--[if mso]><span style="font-family:${FONT};font-size:13px;"><![endif]-->${esc(subtitle)}<!--[if mso]></span><![endif]-->
+                    </p>`
+                        : ""
+                    }
+                  </td>
+                </tr>
+              </table>
             </td>
           </tr>
 
           <!-- Content -->
           <tr>
-            <td align="left" valign="top" bgcolor="#ffffff" style="background-color:#ffffff;padding:36px 30px 30px 30px;font-family:${FONT};">
+            <td align="left" valign="top" bgcolor="#ffffff" style="background-color:#ffffff;padding:30px 30px 30px 30px;font-family:${FONT};">
               ${body}
             </td>
           </tr>
 
           <!-- Footer -->
           <tr>
-            <td align="center" valign="top" bgcolor="#f8f9fa" style="background-color:#f8f9fa;padding:24px 30px;text-align:center;border-top:1px solid #eeeeee;font-family:${FONT};">
+            <td align="center" valign="top" bgcolor="#f8f9fa" style="background-color:#f8f9fa;border-radius:0 0 ${CARD_RADIUS} ${CARD_RADIUS};padding:24px 30px;text-align:center;border-top:1px solid #eeeeee;font-family:${FONT};">
               <p style="color:#666666;font-family:${FONT};font-size:12px;line-height:19px;mso-line-height-rule:exactly;margin:0;">
                 Vodafone Fiji | Universal Service Obligation (USO)<br>
                 This is an automated message, please do not reply to this email.
@@ -343,9 +362,9 @@ export function buildReceipt({ voucherCode, statusUrl, planName, dataAllowance, 
               <!-- Voucher code. A solid Vodafone-red fill with white type, not a
                    pale tint: saturated colours survive the Gmail Android app's
                    forced dark-mode inversion, near-white surfaces do not. -->
-              <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" bgcolor="${RED}" style="border-collapse:collapse;mso-table-lspace:0pt;mso-table-rspace:0pt;margin:0 0 26px 0;background-color:${RED};border-radius:8px;">
+              <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="border-collapse:collapse;mso-table-lspace:0pt;mso-table-rspace:0pt;margin:0 0 26px 0;">
                 <tr>
-                  <td align="center" style="padding:22px 20px;background-color:${RED};font-family:${FONT};">
+                  <td align="center" bgcolor="${RED}" style="background-color:${RED};border-radius:${BLOCK_RADIUS};padding:22px 20px;font-family:${FONT};">
                     <p style="margin:0 0 8px 0;font-family:${FONT};font-size:12px;color:#ffffff;text-transform:uppercase;letter-spacing:1px;font-weight:bold;line-height:16px;mso-line-height-rule:exactly;">Your voucher code</p>
                     <p style="margin:0;font-family:${MONO};font-size:26px;font-weight:bold;letter-spacing:2px;color:#ffffff;line-height:34px;mso-line-height-rule:exactly;word-break:break-all;">${esc(code)}</p>
                   </td>
