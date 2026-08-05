@@ -1348,7 +1348,7 @@ export function makeVoucherController(pool) {
         if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(to)) return send.bad(res, 'Enter a valid recipient email address.');
 
         const smtp = await loadSmtpTransport(pool);
-        if (!smtp) return send.bad(res, 'Save SMTP settings first — no host is configured.');
+        if (!smtp) return send.bad(res, 'Save SMTP settings first, no host is configured.');
 
         // Send the actual template (with sample data) so it can be reviewed in a
         // real inbox. Unknown ids fall back to the plain connection test.

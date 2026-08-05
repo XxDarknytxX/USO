@@ -3,6 +3,23 @@
 // for the encryption->transport mapping so the "send test" and the purchase
 // receipt behave identically, and one place for the email templates so the
 // Settings page can send a real template to any address for design review.
+//
+// TEMPLATE CONVENTIONS (ported from the Starlink Portal production build, which
+// is verified against Outlook desktop and Gmail). HTML email is not the web:
+//   * Nested <table role="presentation"> for ALL layout. Outlook for Windows
+//     renders with the Word engine, which ignores div-based layout, flex, and
+//     max-width, and drops margins on block elements.
+//   * Inline styles only. Gmail strips <style> blocks, so nothing may depend on
+//     a stylesheet; font-family is repeated on every text cell because Outlook
+//     will not inherit it from <body>.
+//   * Fixed width="600" plus max-width:600px. The attribute is what Outlook
+//     obeys; the CSS is what lets other clients shrink on mobile.
+//   * Buttons are VML <v:roundrect> behind an [if mso] conditional with a plain
+//     <a> behind [if !mso]. Outlook ignores padding on <a>, so without the VML
+//     the button collapses to a bare text link.
+//   * border-radius / box-shadow degrade to square corners in Outlook. That is
+//     accepted (same as Starlink) rather than worked around.
+//   * Every message ships a plain-text alternative.
 
 import nodemailer from "nodemailer";
 import { readFileSync } from "fs";
@@ -11,8 +28,14 @@ import { dirname, join } from "path";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
+// Brand + layout constants, kept in one place so all templates stay identical.
+const RED = "#e60000";
+const FONT = "Arial, Helvetica, sans-serif";
+const MONO = "'Courier New', Courier, monospace";
+
 // The Vodafone speechmark, embedded inline (cid:) so it renders without the
-// recipient's client having to fetch a remote image. Read once at startup.
+// recipient's client having to fetch a remote image, and so it survives Gmail's
+// image proxy and Outlook's remote-content blocking. Read once at startup.
 let _logoBuf = null;
 try {
   _logoBuf = readFileSync(join(__dirname, "..", "assets", "vodafone-logo.png"));
@@ -29,6 +52,9 @@ export function logoAttachment() {
     content: _logoBuf,
     cid: LOGO_CID,
     contentType: "image/png",
+    // Declared explicitly (nodemailer would infer it) so the Gmail app does not
+    // also surface the logo as a downloadable attachment chip on a receipt.
+    contentDisposition: "inline",
   };
 }
 
@@ -64,28 +90,200 @@ function esc(s) {
   );
 }
 
-// Shared chrome so every template looks like one branded family. The logo sits
-// on a white header above a thin Vodafone-red rule; a muted footer closes it.
-function shell({ preheader, body }) {
-  const logo = _logoBuf
-    ? `<img src="cid:${LOGO_CID}" width="132" alt="Vodafone" style="display:block;border:0;height:auto;max-width:132px" />`
-    : `<div style="font-size:20px;font-weight:800;color:#E60000;letter-spacing:.01em">Vodafone Fiji</div>`;
-  return `<!DOCTYPE html>
-<div style="margin:0;padding:0;background:#f4f5f7">
-  ${preheader ? `<div style="display:none;max-height:0;overflow:hidden;opacity:0;color:#f4f5f7;font-size:1px;line-height:1px">${esc(preheader)}</div>` : ""}
-  <div style="font-family:'Segoe UI',Roboto,Helvetica,Arial,sans-serif;background:#f4f5f7;padding:28px 16px">
-    <div style="max-width:560px;margin:0 auto;background:#ffffff;border-radius:16px;overflow:hidden;border:1px solid #e7e9ee">
-      <div style="padding:24px 32px 16px">${logo}</div>
-      <div style="height:3px;background:#E60000"></div>
-      <div style="padding:28px 32px 8px">${body}</div>
-      <div style="padding:20px 32px 26px;border-top:1px solid #eef0f3;margin-top:24px;color:#98a0ab;font-size:12px;line-height:1.6">
-        Vodafone Fiji, Universal Service Obligation (USO).<br />
-        This is an automated message, please do not reply to this email.
-      </div>
-    </div>
-  </div>
-</div>`;
+/* ------------------------------------------------------------------ blocks */
+
+/**
+ * A call-to-action button. The [if mso] branch draws a VML rounded rectangle
+ * (Outlook cannot pad an <a>); every other client gets the real anchor.
+ * `width` must be a px number wide enough for the label in 16px bold Arial.
+ */
+function button({ href, label, width = 260 }) {
+  const h = esc(href);
+  const l = esc(label);
+  return `<table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="border-collapse:collapse;mso-table-lspace:0pt;mso-table-rspace:0pt;margin:28px 0;">
+                <tr>
+                  <td align="center" style="font-family:${FONT};">
+                    <!--[if mso]>
+                    <v:roundrect xmlns:v="urn:schemas-microsoft-com:vml" xmlns:w="urn:schemas-microsoft-com:office:word" href="${h}" style="height:50px;v-text-anchor:middle;width:${width}px;" arcsize="16%" strokecolor="${RED}" fillcolor="${RED}">
+                      <w:anchorlock/>
+                      <center style="color:#ffffff;font-family:${FONT};font-size:16px;font-weight:bold;">${l}</center>
+                    </v:roundrect>
+                    <![endif]-->
+                    <!--[if !mso]><!-->
+                    <table role="presentation" cellspacing="0" cellpadding="0" border="0" style="border-collapse:separate;mso-table-lspace:0pt;mso-table-rspace:0pt;">
+                      <tr>
+                        <td align="center" bgcolor="${RED}" style="background-color:${RED};border-radius:8px;padding:15px 30px;font-family:${FONT};">
+                          <a href="${h}" style="display:block;color:#ffffff;font-family:${FONT};font-size:16px;font-weight:bold;line-height:20px;mso-line-height-rule:exactly;text-decoration:none;border:none;"><span style="color:#ffffff;text-decoration:none;">${l}</span></a>
+                        </td>
+                      </tr>
+                    </table>
+                    <!--<![endif]-->
+                  </td>
+                </tr>
+              </table>`;
 }
+
+/** A tinted panel with a red rule down its left edge (the Starlink notice box). */
+function callout({ heading, html, bg = "#f8f9fa" }) {
+  return `<table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" bgcolor="${bg}" style="border-collapse:collapse;mso-table-lspace:0pt;mso-table-rspace:0pt;margin:28px 0;background-color:${bg};border-radius:8px;">
+                <tr>
+                  <td align="left" valign="top" style="padding:22px 24px;border-left:4px solid ${RED};font-family:${FONT};">
+                    ${heading ? `<h3 style="color:#333333;margin:0 0 10px 0;font-family:${FONT};font-size:16px;font-weight:bold;line-height:21px;mso-line-height-rule:exactly;">${esc(heading)}</h3>` : ""}
+                    ${html}
+                  </td>
+                </tr>
+              </table>`;
+}
+
+/** The "if the button does not work" raw-URL box. */
+function linkFallback(url) {
+  const u = esc(url);
+  return `<p style="color:#666666;font-family:${FONT};font-size:14px;line-height:21px;mso-line-height-rule:exactly;margin:24px 0 12px 0;">
+                If the button does not work, copy and paste this link into your browser:
+              </p>
+              <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" bgcolor="#f8f9fa" style="border-collapse:collapse;mso-table-lspace:0pt;mso-table-rspace:0pt;margin:0 0 8px 0;background-color:#f8f9fa;border:1px solid #e9ecef;border-radius:6px;">
+                <tr>
+                  <td align="left" style="padding:14px 16px;font-family:${MONO};font-size:12px;line-height:18px;mso-line-height-rule:exactly;word-break:break-all;">
+                    <a href="${u}" style="color:${RED};text-decoration:none;font-family:${MONO};font-size:12px;"><span style="color:${RED};">${u}</span></a>
+                  </td>
+                </tr>
+              </table>`;
+}
+
+/**
+ * The shared document chrome: Outlook-safe head, a white masthead carrying the
+ * Vodafone speechmark, the red title band, the caller's content, and a footer.
+ *
+ * The logo sits on WHITE, not on the red band: the asset is the red speechmark,
+ * so it would be invisible against red. Keeping the red band underneath means
+ * the mail still reads as Vodafone even when a client blocks images entirely.
+ */
+function shell({ preheader, title, subtitle, body }) {
+  // alt="" on purpose: the cell immediately to the right carries live
+  // "Vodafone Fiji" text, so the mark is decorative. Screen readers skip the
+  // duplicate, and a blocked image leaves a clean 44px gap instead of a red
+  // letter fragment clipped to the image box.
+  const masthead = _logoBuf
+    ? `<img src="cid:${LOGO_CID}" width="44" height="44" border="0" alt="" style="display:block;width:44px;height:44px;border:0;outline:none;text-decoration:none;-ms-interpolation-mode:bicubic;" />`
+    : "";
+  return `<!DOCTYPE html>
+<html lang="en" xmlns="http://www.w3.org/1999/xhtml" xmlns:v="urn:schemas-microsoft-com:vml" xmlns:o="urn:schemas-microsoft-com:office:office">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge">
+  <meta name="x-apple-disable-message-reformatting">
+  <!-- Stop iOS Mail auto-linking (and blue-underlining) the voucher code and URL. -->
+  <meta name="format-detection" content="telephone=no,date=no,address=no,email=no,url=no">
+  <meta name="color-scheme" content="light only">
+  <meta name="supported-color-schemes" content="light only">
+  <!-- Pin 1 CSS px to 1 device px on scaled Windows displays (Outlook 2013+). -->
+  <!--[if mso]>
+  <noscript>
+    <xml>
+      <o:OfficeDocumentSettings>
+        <o:PixelsPerInch>96</o:PixelsPerInch>
+      </o:OfficeDocumentSettings>
+    </xml>
+  </noscript>
+  <![endif]-->
+  <!-- Outlook-only safety net, gated behind [if mso] so no other client parses
+       it (Gmail strips style blocks outright). These rules are deliberately not
+       forced: a forced author rule outranks inline styles, which would repaint
+       the monospace voucher code in Arial and make 0/O and 1/l ambiguous in the
+       one string the customer has to retype. Unforced, inline styles win and
+       this only catches elements that declare no font of their own. -->
+  <!--[if mso]>
+  <style type="text/css">
+    table, td, div, p, a, h1, h2, h3, span { font-family: Arial, Helvetica, sans-serif; }
+    table, td { mso-table-lspace: 0pt; mso-table-rspace: 0pt; }
+    body, table, td, div, p, a, h1, h2, h3 { mso-line-height-rule: exactly; }
+  </style>
+  <![endif]-->
+  <title>${esc(title)}</title>
+</head>
+<body style="margin:0;padding:0;font-family:${FONT};background-color:#f8f9fa;-webkit-text-size-adjust:100%;-ms-text-size-adjust:100%;">
+  <!-- Preheader: the grey preview line in the inbox list, hidden in the body.
+       The trailing entities stop clients pulling real body copy into the snippet. -->
+  <div style="display:none;max-height:0;max-width:0;overflow:hidden;mso-hide:all;opacity:0;color:#f8f9fa;font-size:1px;line-height:1px;">${esc(preheader || "")}&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;</div>
+  <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" bgcolor="#f8f9fa" style="border-collapse:collapse;mso-table-lspace:0pt;mso-table-rspace:0pt;margin:0;padding:0;background-color:#f8f9fa;">
+    <tr>
+      <td align="center" valign="top" style="padding:32px 16px;-webkit-text-size-adjust:100%;-ms-text-size-adjust:100%;">
+
+        <!-- Ghost table: a hard 600px anchor for the Word engine. -->
+        <!--[if mso]>
+        <table role="presentation" width="600" cellspacing="0" cellpadding="0" border="0" align="center" style="border-collapse:collapse;mso-table-lspace:0pt;mso-table-rspace:0pt;width:600px;">
+          <tr><td>
+        <![endif]-->
+
+        <!-- Main Container. Width is pinned three ways: the attribute (all Outlook
+             honours), max-width (lets other clients shrink), and align=center. -->
+        <table role="presentation" width="600" cellspacing="0" cellpadding="0" border="0" align="center" bgcolor="#ffffff" style="border-collapse:collapse;mso-table-lspace:0pt;mso-table-rspace:0pt;width:100%;max-width:600px;background-color:#ffffff;border-radius:10px;overflow:hidden;">
+
+          <!-- Masthead: Vodafone speechmark on white (the asset is the red mark) -->
+          <tr>
+            <td align="left" valign="middle" bgcolor="#ffffff" style="background-color:#ffffff;padding:26px 30px 20px 30px;font-family:${FONT};">
+              <table role="presentation" cellspacing="0" cellpadding="0" border="0" style="border-collapse:collapse;mso-table-lspace:0pt;mso-table-rspace:0pt;">
+                <tr>
+                  ${masthead ? `<td valign="middle" style="padding-right:12px;">${masthead}</td>` : ""}
+                  <td valign="middle" style="font-family:${FONT};font-size:15px;font-weight:bold;color:#333333;line-height:20px;mso-line-height-rule:exactly;">
+                    Vodafone Fiji<br>
+                    <span style="font-family:${FONT};font-size:12px;font-weight:normal;color:#777777;">Universal Service Obligation</span>
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+
+          <!-- Title band. Live text on a coloured cell, so it renders even with
+               images blocked: the mail still reads as Vodafone. -->
+          <tr>
+            <td align="center" valign="top" bgcolor="${RED}" style="background-color:${RED};padding:26px 30px;text-align:center;font-family:${FONT};">
+              <h1 style="color:#ffffff;margin:0;font-family:${FONT};font-size:24px;font-weight:bold;line-height:30px;mso-line-height-rule:exactly;">
+                <!--[if mso]><span style="font-family:${FONT};font-size:22px;"><![endif]-->${esc(title)}<!--[if mso]></span><![endif]-->
+              </h1>
+              ${
+                subtitle
+                  ? `<p style="color:#ffffff;margin:10px 0 0 0;font-family:${FONT};font-size:14px;line-height:20px;mso-line-height-rule:exactly;">
+                <!--[if mso]><span style="font-family:${FONT};font-size:13px;"><![endif]-->${esc(subtitle)}<!--[if mso]></span><![endif]-->
+              </p>`
+                  : ""
+              }
+            </td>
+          </tr>
+
+          <!-- Content -->
+          <tr>
+            <td align="left" valign="top" bgcolor="#ffffff" style="background-color:#ffffff;padding:36px 30px 30px 30px;font-family:${FONT};">
+              ${body}
+            </td>
+          </tr>
+
+          <!-- Footer -->
+          <tr>
+            <td align="center" valign="top" bgcolor="#f8f9fa" style="background-color:#f8f9fa;padding:24px 30px;text-align:center;border-top:1px solid #eeeeee;font-family:${FONT};">
+              <p style="color:#666666;font-family:${FONT};font-size:12px;line-height:19px;mso-line-height-rule:exactly;margin:0;">
+                Vodafone Fiji | Universal Service Obligation (USO)<br>
+                This is an automated message, please do not reply to this email.
+              </p>
+            </td>
+          </tr>
+
+        </table>
+
+        <!--[if mso]>
+          </td></tr>
+        </table>
+        <![endif]-->
+
+      </td>
+    </tr>
+  </table>
+</body>
+</html>`;
+}
+
+/* --------------------------------------------------------------- templates */
 
 /**
  * The purchase-receipt email: successful transaction plus the voucher code, how
@@ -94,6 +292,9 @@ function shell({ preheader, body }) {
  * Returns { subject, text, html, attachments } so the caller just spreads it.
  */
 export function buildReceipt({ voucherCode, statusUrl, planName, dataAllowance, amount } = {}) {
+  // Guard the raw interpolations below: an absent code must not print the
+  // string "undefined" into the text part or the inbox preview line.
+  const code = voucherCode == null ? "" : String(voucherCode);
   const amt =
     amount != null && !Number.isNaN(Number(amount)) ? `FJD ${Number(amount).toFixed(2)}` : null;
   const planLine = planName ? `${planName}${dataAllowance ? `, ${dataAllowance}` : ""}` : null;
@@ -101,68 +302,110 @@ export function buildReceipt({ voucherCode, statusUrl, planName, dataAllowance, 
   const subject = "Your Vodafone Fiji Wi-Fi voucher (payment successful)";
 
   const text = [
-    "Payment successful.",
+    "PAYMENT SUCCESSFUL",
     "",
     "Thank you. Your payment has been received and your Wi-Fi plan is ready to use.",
     "",
-    `Voucher code: ${voucherCode}`,
+    `Voucher code: ${code}`,
     planLine ? `Plan: ${planLine}` : null,
     amt ? `Amount paid: ${amt}` : null,
     "",
-    "How to get online",
-    "If your device did not connect automatically, open the Wi-Fi portal and enter the",
-    "voucher code above to get online.",
-    statusUrl ? `Check your connection or reconnect here: ${statusUrl}` : null,
+    "HOW TO GET ONLINE",
+    "If your device did not connect automatically, open the Wi-Fi portal and enter",
+    "the voucher code above to get online.",
+    statusUrl ? "" : null,
+    statusUrl ? `Check your connection or reconnect here:\n${statusUrl}` : null,
     "",
-    "Please note: this voucher code can be shared across any number of devices.",
-    "Every device that uses it draws from the same shared data pool.",
+    "PLEASE NOTE",
+    "This voucher code can be shared across any number of devices. Every device",
+    "that uses it draws from the same shared data pool.",
     "",
-    "Vodafone Fiji, Universal Service Obligation (USO).",
+    "Need help? Please contact our support team.",
+    "",
+    "Vodafone Fiji | Universal Service Obligation (USO)",
+    "This is an automated message, please do not reply to this email.",
   ]
     .filter((l) => l !== null)
     .join("\n");
 
-  const body = `
-    <p style="margin:0 0 4px;font-size:12px;letter-spacing:.09em;text-transform:uppercase;color:#E60000;font-weight:700">Payment confirmation</p>
-    <h1 style="margin:0 0 8px;font-size:22px;line-height:1.25;color:#1a1d21;font-weight:700">Payment successful</h1>
-    <p style="margin:0 0 22px;color:#5a6472;font-size:14px;line-height:1.6">Thank you. Your payment has been received and your Wi-Fi plan is ready to use.</p>
+  const body = `<p style="color:#333333;font-family:${FONT};font-size:16px;line-height:24px;mso-line-height-rule:exactly;margin:0 0 20px 0;">
+                Thank you. Your payment has been received and your <strong>Wi-Fi plan is ready to use</strong>.
+              </p>
 
-    <div style="background:#fbf4f4;border:1px solid #f1dada;border-radius:12px;padding:18px;text-align:center;margin-bottom:22px">
-      <p style="margin:0 0 8px;font-size:11px;color:#8a929d;text-transform:uppercase;letter-spacing:.09em;font-weight:600">Your voucher code</p>
-      <p style="margin:0;font-size:27px;font-weight:800;letter-spacing:.06em;color:#E60000;font-family:'Courier New',monospace">${esc(voucherCode)}</p>
-    </div>
+              <!-- Voucher code. A solid Vodafone-red fill with white type, not a
+                   pale tint: saturated colours survive the Gmail Android app's
+                   forced dark-mode inversion, near-white surfaces do not. -->
+              <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" bgcolor="${RED}" style="border-collapse:collapse;mso-table-lspace:0pt;mso-table-rspace:0pt;margin:0 0 26px 0;background-color:${RED};border-radius:8px;">
+                <tr>
+                  <td align="center" style="padding:22px 20px;background-color:${RED};font-family:${FONT};">
+                    <p style="margin:0 0 8px 0;font-family:${FONT};font-size:12px;color:#ffffff;text-transform:uppercase;letter-spacing:1px;font-weight:bold;line-height:16px;mso-line-height-rule:exactly;">Your voucher code</p>
+                    <p style="margin:0;font-family:${MONO};font-size:26px;font-weight:bold;letter-spacing:2px;color:#ffffff;line-height:34px;mso-line-height-rule:exactly;word-break:break-all;">${esc(code)}</p>
+                  </td>
+                </tr>
+              </table>
 
-    ${
-      planLine || amt
-        ? `<table role="presentation" style="width:100%;font-size:14px;color:#3a424e;margin:0 0 24px;border-collapse:collapse">
-            ${planLine ? `<tr><td style="padding:7px 0;color:#8a929d;border-bottom:1px solid #f0f2f5">Plan</td><td style="padding:7px 0;text-align:right;font-weight:600;border-bottom:1px solid #f0f2f5">${esc(planLine)}</td></tr>` : ""}
-            ${amt ? `<tr><td style="padding:7px 0;color:#8a929d">Amount paid</td><td style="padding:7px 0;text-align:right;font-weight:600">${esc(amt)}</td></tr>` : ""}
-           </table>`
-        : ""
-    }
+              ${
+                planLine || amt
+                  ? `<table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="border-collapse:collapse;mso-table-lspace:0pt;mso-table-rspace:0pt;margin:0 0 28px 0;">
+                ${
+                  planLine
+                    ? `<tr>
+                  <td style="padding:9px 0;font-family:${FONT};font-size:14px;color:#888888;border-bottom:1px solid #f0f2f5;">Plan</td>
+                  <td align="right" style="padding:9px 0;font-family:${FONT};font-size:14px;color:#333333;font-weight:bold;border-bottom:1px solid #f0f2f5;">${esc(planLine)}</td>
+                </tr>`
+                    : ""
+                }
+                ${
+                  amt
+                    ? `<tr>
+                  <td style="padding:9px 0;font-family:${FONT};font-size:14px;color:#888888;">Amount paid</td>
+                  <td align="right" style="padding:9px 0;font-family:${FONT};font-size:14px;color:#333333;font-weight:bold;">${esc(amt)}</td>
+                </tr>`
+                    : ""
+                }
+              </table>`
+                  : ""
+              }
 
-    <h2 style="margin:0 0 8px;font-size:15px;color:#1a1d21;font-weight:700">How to get online</h2>
-    <p style="margin:0 0 16px;color:#3a424e;font-size:14px;line-height:1.6">
-      If your device did not connect automatically, open the Wi-Fi portal and enter the voucher code above to get online.
-    </p>
+              <h2 style="color:#333333;margin:0 0 10px 0;font-family:${FONT};font-size:18px;font-weight:bold;line-height:24px;mso-line-height-rule:exactly;">How to get online</h2>
+              <p style="color:#666666;font-family:${FONT};font-size:15px;line-height:24px;mso-line-height-rule:exactly;margin:0 0 8px 0;">
+                If your device did not connect automatically, open the Wi-Fi portal and enter the voucher code above to get online.
+              </p>
 
-    ${
-      statusUrl
-        ? `<div style="margin:0 0 12px">
-             <a href="${esc(statusUrl)}" style="display:inline-block;background:#E60000;color:#ffffff;text-decoration:none;font-weight:700;font-size:14px;padding:12px 24px;border-radius:10px">Check connection or reconnect</a>
-           </div>
-           <p style="margin:0 0 22px;font-size:12px;color:#98a0ab;word-break:break-all">${esc(statusUrl)}</p>`
-        : ""
-    }
+              ${
+                statusUrl
+                  ? button({ href: statusUrl, label: "Check my connection", width: 250 }) + linkFallback(statusUrl)
+                  : ""
+              }
 
-    <div style="background:#f6f8fa;border:1px solid #eef0f3;border-radius:12px;padding:14px 16px;color:#4a5462;font-size:13px;line-height:1.6">
-      <strong style="color:#1a1d21">Please note:</strong> this voucher code can be shared across any number of devices. Every device that uses it draws from the same shared data pool.
-    </div>`;
+              ${callout({
+                heading: "Please note",
+                html: `<p style="color:#666666;font-family:${FONT};font-size:14px;line-height:22px;mso-line-height-rule:exactly;margin:0;">
+                      This voucher code can be shared across <strong>any number of devices</strong>. Every device that uses it draws from the same shared data pool.
+                    </p>`,
+              })}
+
+              <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="border-collapse:collapse;mso-table-lspace:0pt;mso-table-rspace:0pt;margin:32px 0 0 0;">
+                <tr>
+                  <td align="left" style="padding-top:22px;border-top:1px solid #eeeeee;font-family:Arial, Helvetica, sans-serif;">
+                    <p style="color:#999999;font-family:${FONT};font-size:12px;line-height:19px;mso-line-height-rule:exactly;margin:0;">
+                      <strong>Need help?</strong><br>
+                      If you have any questions or need assistance, please contact our support team.<br>
+                      Keep this email; your voucher code is your proof of purchase.
+                    </p>
+                  </td>
+                </tr>
+              </table>`;
 
   return {
     subject,
     text,
-    html: shell({ preheader: `Voucher ${voucherCode}, payment successful`, body }),
+    html: shell({
+      preheader: code ? `Voucher ${code}, payment successful` : "Payment successful",
+      title: "Payment successful",
+      subtitle: "Your Wi-Fi voucher is ready to use",
+      body,
+    }),
     attachments: [logoAttachment()].filter(Boolean),
   };
 }
@@ -173,19 +416,38 @@ export function buildReceipt({ voucherCode, statusUrl, planName, dataAllowance, 
  */
 export function buildConnectionTest() {
   const subject = "Vodafone Fiji Voucher Manager, SMTP test";
-  const text =
-    "This is a test email from the Voucher Validation admin portal. " +
-    "If you received it, your SMTP settings are working correctly.";
-  const body = `
-    <p style="margin:0 0 4px;font-size:12px;letter-spacing:.09em;text-transform:uppercase;color:#E60000;font-weight:700">Settings test</p>
-    <h1 style="margin:0 0 8px;font-size:22px;line-height:1.25;color:#1a1d21;font-weight:700">SMTP settings are working</h1>
-    <p style="margin:0 0 8px;color:#5a6472;font-size:14px;line-height:1.6">
-      This is a test email from the Voucher Validation admin portal. If you received it, outgoing mail is configured correctly.
-    </p>`;
+  const text = [
+    "SMTP SETTINGS ARE WORKING",
+    "",
+    "This is a test email from the Voucher Validation admin portal.",
+    "If you received it, outgoing mail is configured correctly.",
+    "",
+    "Vodafone Fiji | Universal Service Obligation (USO)",
+    "This is an automated message, please do not reply to this email.",
+  ].join("\n");
+
+  const body = `<p style="color:#333333;font-family:${FONT};font-size:16px;line-height:24px;mso-line-height-rule:exactly;margin:0 0 20px 0;">
+                This is a test email from the <strong>Voucher Validation</strong> admin portal.
+              </p>
+              <p style="color:#666666;font-family:${FONT};font-size:15px;line-height:24px;mso-line-height-rule:exactly;margin:0;">
+                If you received it, outgoing mail is configured correctly and the portal can send receipts and notifications.
+              </p>
+              ${callout({
+                heading: "What was tested",
+                html: `<p style="color:#666666;font-family:${FONT};font-size:14px;line-height:22px;mso-line-height-rule:exactly;margin:0;">
+                      The saved SMTP host, port, encryption and credentials were used to deliver this message. No customer email was affected.
+                    </p>`,
+              })}`;
+
   return {
     subject,
     text,
-    html: shell({ preheader: "SMTP test from the Voucher Validation admin portal", body }),
+    html: shell({
+      preheader: "SMTP test from the Voucher Validation admin portal",
+      title: "SMTP settings are working",
+      subtitle: "Test message from the Voucher Validation portal",
+      body,
+    }),
     attachments: [logoAttachment()].filter(Boolean),
   };
 }
