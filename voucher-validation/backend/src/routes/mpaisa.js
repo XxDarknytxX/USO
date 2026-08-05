@@ -13,5 +13,11 @@ export function makeMpaisaRouter(controller) {
   router.post("/upload", controller.upload);
   router.get("/", controller.list);
 
+  // Manual entry: add one mapping, or edit an existing one (the number itself
+  // is editable, so :number is the row being changed, not necessarily the new
+  // value). Both are admin-only via the router-level guard above.
+  router.post("/", controller.create);
+  router.put("/:number", controller.update);
+
   return router;
 }

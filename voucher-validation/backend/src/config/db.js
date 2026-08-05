@@ -191,6 +191,10 @@ export async function getPool() {
       email_status VARCHAR(32) NULL,
       account_status VARCHAR(32) NULL,
       source_logtime DATETIME NULL,
+      -- 'import' (came from an uploaded M-PAiSA report) or 'manual' (typed in by
+      -- an admin). This table drives who receives a purchase receipt, so it must
+      -- be possible to tell a hand-entered address from an official one.
+      source VARCHAR(16) NOT NULL DEFAULT 'import',
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
       updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
       INDEX idx_email (email),
@@ -263,6 +267,16 @@ export async function getPool() {
     `ALTER TABLE smtp_settings ADD COLUMN encryption VARCHAR(16) NOT NULL DEFAULT 'starttls' AFTER secure`,
   ];
   for (const sql of smtpMigrations) {
+    try { await pool.query(sql); console.log(`Migration OK: ${sql.slice(0, 60)}...`); }
+    catch (e) { if (e.code !== 'ER_DUP_FIELDNAME') { /* ignore */ } }
+  }
+
+  // M-PAiSA mappings: mark where each row came from. Existing rows all predate
+  // manual entry, so the 'import' default is correct for them.
+  const mpaisaMigrations = [
+    `ALTER TABLE mpaisa_mappings ADD COLUMN source VARCHAR(16) NOT NULL DEFAULT 'import' AFTER source_logtime`,
+  ];
+  for (const sql of mpaisaMigrations) {
     try { await pool.query(sql); console.log(`Migration OK: ${sql.slice(0, 60)}...`); }
     catch (e) { if (e.code !== 'ER_DUP_FIELDNAME') { /* ignore */ } }
   }

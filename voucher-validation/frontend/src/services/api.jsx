@@ -177,4 +177,9 @@ export const mpaisaApi = {
     return api(`/mpaisa${qs ? `?${qs}` : ""}`);
   },
   upload: (content) => api("/mpaisa/upload", { method: "POST", body: { content } }),
+  create: (row) => api("/mpaisa", { method: "POST", body: row }),
+  // `original` is the number of the row being edited; `row.number` may differ
+  // (the number is the primary key and is itself editable).
+  update: (original, row) =>
+    api(`/mpaisa/${encodeURIComponent(original)}`, { method: "PUT", body: row }),
 };

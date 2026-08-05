@@ -1,14 +1,19 @@
 // src/pages/MpaisaMappingPage.jsx
 // M-PAiSA number → email mapping. Admins upload the periodic customer report
 // (a UTF-16 tab-separated SQL export); it upserts by number (updates existing,
-// adds new) and lists the current mapping. First cut: ingest + view.
+// adds new) and lists the current mapping. Rows can also be added and edited by
+// hand — those are tagged 'manual' until a report re-imports the same number.
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Wallet, Upload, Search, RefreshCw, Mail, Hash } from "lucide-react";
+import {
+  Wallet, Upload, Search, RefreshCw, Mail, Hash, Plus, Pencil, UserPlus,
+} from "lucide-react";
 import toast from "react-hot-toast";
 
 import { mpaisaApi } from "../services/api";
-import { PageHeader, Panel, Button } from "../components/ui";
+import {
+  PageHeader, Panel, Button, IconButton, Modal, Field, Input, Select, Badge,
+} from "../components/ui";
 import Pagination from "../components/shared/Pagination";
 
 const PAGE_SIZE = 25;
@@ -64,6 +69,158 @@ function StatusPill({ value }) {
   );
 }
 
+const STATUS_OPTIONS = ["", "ACTIVE", "INACTIVE", "PENDING", "SUSPENDED"];
+
+/**
+ * The status columns are free-form text copied verbatim from the report, so a
+ * row can hold a value outside the canonical list (real exports have contained
+ * "ACTIVE," with a trailing comma). A native <select> given an unlisted value
+ * falls back to its first option, which would show "Not set" next to a table
+ * cell showing the real value, and a save would then silently overwrite it.
+ * Keeping the current value as an option makes the dropdown truthful.
+ */
+function statusOptions(current) {
+  const c = String(current ?? "").trim();
+  return c && !STATUS_OPTIONS.includes(c) ? [...STATUS_OPTIONS, c] : STATUS_OPTIONS;
+}
+
+/**
+ * Mirror of the server's normalizeNumber (mpaisaController.js). Used only to
+ * preview the stored value, so the admin can see the country code being dropped
+ * instead of it happening silently. The server normalises again regardless.
+ */
+function normalizeNumber(input) {
+  let n = String(input ?? "").replace(/\D/g, "");
+  if (n.length === 10 && n.startsWith("679")) n = n.slice(3);
+  return n;
+}
+
+/**
+ * Add / edit one mapping. `row` null = add. The number is the primary key and is
+ * editable, so the original is kept separately to address the row server-side.
+ */
+function MappingModal({ row, onClose, onSaved }) {
+  const isEdit = !!row;
+  const [form, setForm] = useState({
+    number: row?.number || "",
+    email: row?.email || "",
+    emailStatus: row?.email_status || "",
+    accountStatus: row?.account_status || "",
+  });
+  const [saving, setSaving] = useState(false);
+  const setField = (k, v) => setForm((f) => ({ ...f, [k]: v }));
+  const normalized = normalizeNumber(form.number);
+
+  async function handleSubmit(e) {
+    e.preventDefault();
+    setSaving(true);
+    try {
+      if (isEdit) await mpaisaApi.update(row.number, form);
+      else await mpaisaApi.create(form);
+      toast.success(isEdit ? "Mapping updated" : "Mapping added");
+      onSaved();
+      onClose();
+    } catch (err) {
+      // Surfaces the server's own message (duplicate number, invalid email, …).
+      toast.error(err?.message || "Could not save the mapping", { duration: 6000 });
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <Modal open onClose={onClose} width="md">
+      <Modal.Header
+        eyebrow={isEdit ? "Edit mapping" : "New mapping"}
+        title={isEdit ? "Edit this mapping" : "Add a mapping by hand"}
+        subtitle={
+          isEdit
+            ? "Re-uploading a report that contains this number will overwrite these values."
+            : "Use this for a customer who is not in the latest M-PAiSA report yet."
+        }
+        icon={isEdit ? Pencil : UserPlus}
+        onClose={onClose}
+      />
+
+      <form onSubmit={handleSubmit}>
+        <Modal.Body>
+          <div className="flex flex-col gap-5">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <Field
+                label="Phone number"
+                required
+                htmlFor="m-number"
+                hint="Digits only. A 679 country code is dropped so it matches the report format."
+              >
+                <Input
+                  id="m-number"
+                  value={form.number}
+                  onChange={(e) => setField("number", e.target.value)}
+                  placeholder="7654321"
+                  required
+                  mono
+                  autoFocus
+                />
+                {normalized && normalized !== form.number.trim() && (
+                  <p className="mt-1.5 text-[11.5px] text-[var(--fg-muted)]">
+                    Saved as <span className="font-mono text-[var(--fg-secondary)]">{normalized}</span>
+                  </p>
+                )}
+              </Field>
+
+              <Field label="Email" htmlFor="m-email" hint="Where the receipt is sent.">
+                <Input
+                  id="m-email"
+                  type="email"
+                  value={form.email}
+                  onChange={(e) => setField("email", e.target.value)}
+                  placeholder="customer@example.com"
+                  autoComplete="off"
+                />
+              </Field>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <Field label="Email status" htmlFor="m-estatus">
+                <Select
+                  id="m-estatus"
+                  value={form.emailStatus}
+                  onChange={(e) => setField("emailStatus", e.target.value)}
+                >
+                  {statusOptions(form.emailStatus).map((s) => (
+                    <option key={s || "none"} value={s}>{s || "Not set"}</option>
+                  ))}
+                </Select>
+              </Field>
+
+              <Field label="Account status" htmlFor="m-astatus">
+                <Select
+                  id="m-astatus"
+                  value={form.accountStatus}
+                  onChange={(e) => setField("accountStatus", e.target.value)}
+                >
+                  {statusOptions(form.accountStatus).map((s) => (
+                    <option key={s || "none"} value={s}>{s || "Not set"}</option>
+                  ))}
+                </Select>
+              </Field>
+            </div>
+          </div>
+        </Modal.Body>
+
+        <Modal.Footer>
+          <Button type="button" variant="ghost" onClick={onClose} disabled={saving}>
+            Cancel
+          </Button>
+          <Button type="submit" variant="primary" loading={saving} disabled={!form.number.trim()}>
+            {isEdit ? "Save changes" : "Add mapping"}
+          </Button>
+        </Modal.Footer>
+      </form>
+    </Modal>
+  );
+}
+
 export default function MpaisaMappingPage() {
   const [rows, setRows] = useState([]);
   const [total, setTotal] = useState(0);
@@ -73,6 +230,8 @@ export default function MpaisaMappingPage() {
   const [debounced, setDebounced] = useState("");
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
+  // null = closed; { row: null } = add; { row } = edit that row.
+  const [editing, setEditing] = useState(null);
   const fileRef = useRef(null);
 
   // Debounce the search box, resetting to page 1 when the query changes.
@@ -150,13 +309,21 @@ export default function MpaisaMappingPage() {
               Refresh
             </Button>
             <Button
-              variant="primary"
+              variant="secondary"
               size="sm"
               onClick={() => fileRef.current?.click()}
               iconLeft={<Upload size={14} />}
               loading={uploading}
             >
               Upload report
+            </Button>
+            <Button
+              variant="primary"
+              size="sm"
+              onClick={() => setEditing({ row: null })}
+              iconLeft={<Plus size={14} />}
+            >
+              Add mapping
             </Button>
           </>
         }
@@ -188,18 +355,22 @@ export default function MpaisaMappingPage() {
                   <th className="px-5 py-3 font-medium">Email</th>
                   <th className="px-5 py-3 font-medium">Email status</th>
                   <th className="px-5 py-3 font-medium">Account status</th>
+                  <th className="px-5 py-3 font-medium">Source</th>
                   <th className="px-5 py-3 font-medium whitespace-nowrap">Updated</th>
+                  <th className="px-5 py-3 font-medium w-px" />
                 </tr>
               </thead>
               <tbody>
                 {loading ? (
                   <tr>
-                    <td colSpan={5} className="px-5 py-10 text-center text-[var(--fg-muted)]">Loading…</td>
+                    <td colSpan={7} className="px-5 py-10 text-center text-[var(--fg-muted)]">Loading…</td>
                   </tr>
                 ) : rows.length === 0 ? (
                   <tr>
-                    <td colSpan={5} className="px-5 py-12 text-center text-[var(--fg-muted)]">
-                      {debounced ? "No matches." : "No mappings yet — upload the M-PAiSA report to get started."}
+                    <td colSpan={7} className="px-5 py-12 text-center text-[var(--fg-muted)]">
+                      {debounced
+                        ? "No matches."
+                        : "No mappings yet — upload the M-PAiSA report, or add one by hand."}
                     </td>
                   </tr>
                 ) : (
@@ -214,7 +385,22 @@ export default function MpaisaMappingPage() {
                       </td>
                       <td className="px-5 py-3"><StatusPill value={r.email_status} /></td>
                       <td className="px-5 py-3"><StatusPill value={r.account_status} /></td>
+                      <td className="px-5 py-3">
+                        <Badge tone={r.source === "manual" ? "warning" : "neutral"}>
+                          {r.source === "manual" ? "Manual" : "Import"}
+                        </Badge>
+                      </td>
                       <td className="px-5 py-3 text-[var(--fg-muted)] whitespace-nowrap">{relTime(r.updated_at)}</td>
+                      <td className="px-5 py-3 text-right">
+                        <IconButton
+                          size="sm"
+                          onClick={() => setEditing({ row: r })}
+                          title={`Edit ${r.number}`}
+                          aria-label={`Edit ${r.number}`}
+                        >
+                          <Pencil size={14} />
+                        </IconButton>
+                      </td>
                     </tr>
                   ))
                 )}
@@ -224,6 +410,14 @@ export default function MpaisaMappingPage() {
           <Pagination page={page} totalPages={totalPages} total={total} onPageChange={setPage} />
         </Panel>
       </div>
+
+      {editing && (
+        <MappingModal
+          row={editing.row}
+          onClose={() => setEditing(null)}
+          onSaved={load}
+        />
+      )}
     </div>
   );
 }
