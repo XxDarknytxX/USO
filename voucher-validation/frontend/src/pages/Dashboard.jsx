@@ -45,7 +45,10 @@ import { scopePackages } from "../utils/scopePackages";
 import { api, voucherApi } from "../services/api";
 import { useSite } from "../hooks/useSite";
 import { useAuth } from "../hooks/useAuth";
-import { Modal, Badge, EmptyState, Button } from "../components/ui";
+import {
+  Modal, Badge, EmptyState, Button,
+  BAR_RADIUS, BAR_MAX_SIZE, BAR_CATEGORY_GAP,
+} from "../components/ui";
 
 // Categorize package by time_period (minutes)
 function classifyPackage(timePeriodMinutes) {
@@ -573,6 +576,7 @@ export default function Dashboard() {
                 <BarChart
                   data={revenueTrend}
                   margin={{ top: 5, right: 5, bottom: 5, left: -4 }}
+                  barCategoryGap={BAR_CATEGORY_GAP}
                 >
                   <CartesianGrid
                     strokeDasharray="3 3"
@@ -599,8 +603,8 @@ export default function Dashboard() {
                     dataKey="revenue"
                     name="Revenue"
                     fill={getVar("--brand", "#e60000")}
-                    radius={[4, 4, 0, 0]}
-                    maxBarSize={52}
+                    radius={BAR_RADIUS}
+                    maxBarSize={40}
                   />
                 </BarChart>
               </ResponsiveContainer>
@@ -763,15 +767,15 @@ export default function Dashboard() {
                     dataKey="allocated"
                     name="Allocated"
                     fill={getVar("--color-ink-400", "#9aa1ab")}
-                    radius={[3, 3, 0, 0]}
-                    maxBarSize={46}
+                    radius={BAR_RADIUS}
+                    maxBarSize={34}
                   />
                   <Bar
                     dataKey="consumed"
                     name="Consumed"
                     fill={getVar("--brand", "#e60000")}
-                    radius={[3, 3, 0, 0]}
-                    maxBarSize={46}
+                    radius={BAR_RADIUS}
+                    maxBarSize={34}
                   />
                 </BarChart>
               </ResponsiveContainer>

@@ -33,4 +33,14 @@ export {
   useChartTheme,
   ChartTooltip,
   ChartGradient,
+  // Shared chart furniture so every chart reads as one system.
+  BAR_RADIUS,
+  BAR_MAX_SIZE,
+  BAR_CATEGORY_GAP,
+  axisX,
+  axisY,
+  gridProps,
+  ChartStat,
+  LegendRow,
+  LegendRows,
 } from "./chart";

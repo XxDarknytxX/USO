@@ -96,3 +96,108 @@ export function ChartGradient({ id, color, from = 0.35, to = 0 }) {
     </linearGradient>
   );
 }
+
+/* ────────────────────────────────────────────────────────────────────────────
+ * Shared chart furniture.
+ *
+ * Extracted from the Starlink usage panel, which reads as the most modern chart
+ * in the app, so every other chart can inherit the same language instead of
+ * each one inventing its own axes, radii and legends:
+ *   • no axis lines, horizontal grid only, small muted ticks
+ *   • bars rounded on all corners and capped in width, with generous gaps
+ *   • the number stated large above the chart, not buried in the plot
+ *   • the legend written as readable rows under the chart, not chart chrome
+ * ──────────────────────────────────────────────────────────────────────────── */
+
+/** Bars: rounded every corner (reads as a pill), never wider than this. */
+export const BAR_RADIUS = [4, 4, 4, 4];
+export const BAR_MAX_SIZE = 22;
+export const BAR_CATEGORY_GAP = "22%";
+
+/** Spread onto <XAxis>. Chartjunk off; the labels do the work. */
+export function axisX(ct, extra = {}) {
+  return {
+    tickLine: false,
+    axisLine: false,
+    tick: { fill: ct.axis, fontSize: ct.tickFontSize },
+    minTickGap: 14,
+    ...extra,
+  };
+}
+
+/** Spread onto <YAxis>. `unit` renders as a small rotated axis label. */
+export function axisY(ct, { unit, width = 44, ...extra } = {}) {
+  return {
+    tickLine: false,
+    axisLine: false,
+    width,
+    tick: { fill: ct.axis, fontSize: ct.tickFontSize },
+    ...(unit
+      ? {
+          label: {
+            value: unit,
+            angle: -90,
+            position: "insideLeft",
+            offset: 16,
+            style: { fill: ct.axis, fontSize: 11 },
+          },
+        }
+      : {}),
+    ...extra,
+  };
+}
+
+/** Spread onto <CartesianGrid>: horizontal rules only. */
+export function gridProps(ct) {
+  return { strokeDasharray: "3 3", vertical: false, stroke: ct.grid };
+}
+
+/**
+ * The headline figure for a chart panel: the number said plainly and large,
+ * with its unit and an optional caption underneath.
+ */
+export function ChartStat({ value, unit, caption, right }) {
+  return (
+    <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-3 mb-5">
+      <div className="min-w-0">
+        <p className="flex items-baseline gap-2">
+          <span className="text-3xl sm:text-4xl font-semibold text-[var(--fg-primary)] tabular-nums">
+            {value}
+          </span>
+          {unit && <span className="text-sm font-medium text-[var(--accent)]">{unit}</span>}
+        </p>
+        {caption && <p className="text-[11.5px] text-[var(--fg-muted)] mt-1">{caption}</p>}
+      </div>
+      {right}
+    </div>
+  );
+}
+
+/**
+ * A legend row: colour dot, label, an optional share meter, and the value.
+ * Replaces recharts' built-in legend, which is small, unlabelled and cramped.
+ */
+export function LegendRow({ color, label, value, total }) {
+  const pct = total > 0 ? Math.min(100, (Number(value) / total) * 100) : null;
+  return (
+    <div className="flex items-center gap-3">
+      <span className="h-2.5 w-2.5 rounded-full shrink-0" style={{ background: color }} />
+      <span className="text-[12.5px] text-[var(--fg-secondary)] flex-1 min-w-0 truncate">{label}</span>
+      {pct != null && (
+        <span className="hidden sm:block w-24 h-1.5 rounded-full bg-[var(--bg-surface)] overflow-hidden shrink-0">
+          <span className="block h-full rounded-full" style={{ width: `${pct}%`, background: color }} />
+        </span>
+      )}
+      <span className="text-[12.5px] font-semibold text-[var(--fg-primary)] tabular-nums shrink-0">
+        {value}
+      </span>
+    </div>
+  );
+}
+
+/** Wraps LegendRow set with the divider the panels use above them. */
+export function LegendRows({ children }) {
+  return (
+    <div className="mt-5 pt-4 border-t border-[var(--border-default)] space-y-2.5">{children}</div>
+  );
+}

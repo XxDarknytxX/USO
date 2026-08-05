@@ -19,6 +19,7 @@ import {
   PageHeader, Button, StatCard, Panel, Badge, EmptyState,
   SkeletonKpis, SkeletonCard,
   CHART_COLORS, ChartTooltip, ChartGradient, useChartTheme,
+  ChartStat, LegendRow, axisX, axisY, gridProps, BAR_RADIUS, BAR_MAX_SIZE, BAR_CATEGORY_GAP,
 } from "../../components/ui";
 
 const fmtBytes = (b) => {
@@ -218,40 +219,49 @@ export default function SiteDashboard({ groupId, site }) {
 
           {/* Revenue trend */}
           {hasRevenue && revTrend.some((m) => m.revenue > 0) && (
-            <Panel title="Revenue — last 6 months" icon={<DollarSign size={15} />}>
-              <ResponsiveContainer width="100%" height={220}>
-                <BarChart data={revTrend} margin={{ top: 8, right: 8, left: -4, bottom: 0 }}>
-                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke={ct.grid} />
-                  <XAxis dataKey="label" tickLine={false} axisLine={false} tick={{ fill: ct.axis, fontSize: 11 }} />
+            <Panel title="Revenue" subtitle="Last 6 months" icon={<DollarSign size={15} />}>
+              <ChartStat
+                value={fmtMoney(revTrend.reduce((a, m) => a + m.revenue, 0))}
+                unit="total"
+                caption={`${fmtNum(revTrend.reduce((a, m) => a + m.count, 0))} vouchers sold`}
+              />
+              <ResponsiveContainer width="100%" height={240}>
+                <BarChart data={revTrend} margin={{ top: 8, right: 8, left: -4, bottom: 0 }} barCategoryGap={BAR_CATEGORY_GAP}>
+                  <CartesianGrid {...gridProps(ct)} />
+                  <XAxis dataKey="label" {...axisX(ct)} />
                   <YAxis
-                    tickLine={false}
-                    axisLine={false}
-                    tick={{ fill: ct.axis, fontSize: 11 }}
-                    width={52}
+                    {...axisY(ct, { width: 52 })}
                     tickFormatter={(v) => "$" + Number(v).toLocaleString(undefined, { maximumFractionDigits: 0 })}
                   />
                   <Tooltip content={<RevenueTooltip />} cursor={{ fill: ct.cursor }} />
-                  <Bar dataKey="revenue" name="Revenue" fill={CHART_COLORS.accent} radius={[4, 4, 0, 0]} isAnimationActive={false} maxBarSize={52} />
+                  <Bar dataKey="revenue" name="Revenue" fill={CHART_COLORS.accent} radius={BAR_RADIUS} isAnimationActive={false} maxBarSize={40} />
                 </BarChart>
               </ResponsiveContainer>
             </Panel>
           )}
 
           {/* Trend */}
-          <Panel title="Clients — last 24h" icon={<Activity size={15} />}>
+          <Panel title="Clients" subtitle="Last 24 hours" icon={<Activity size={15} />}>
             {trendPts.length === 0 ? (
               <EmptyState icon={Activity} title="No trend data yet" description="The monitor collects a sample every ~5 minutes." />
             ) : (
-              <ResponsiveContainer width="100%" height={240}>
-                <AreaChart data={trendPts} margin={{ top: 8, right: 8, left: -12, bottom: 0 }}>
-                  <defs><ChartGradient id="siteClients" color={CHART_COLORS.accent} /></defs>
-                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke={ct.grid} />
-                  <XAxis dataKey="t" tickLine={false} axisLine={false} tick={{ fill: ct.axis, fontSize: 11 }} minTickGap={24} />
-                  <YAxis tickLine={false} axisLine={false} tick={{ fill: ct.axis, fontSize: 11 }} width={36} allowDecimals={false} />
-                  <Tooltip content={<ChartTooltip />} cursor={{ stroke: ct.axisLine }} />
-                  <Area type="monotone" dataKey="clients" name="Clients" stroke={CHART_COLORS.accent} strokeWidth={2} fill="url(#siteClients)" isAnimationActive={false} />
-                </AreaChart>
-              </ResponsiveContainer>
+              <>
+                <ChartStat
+                  value={fmtNum(trendPts[trendPts.length - 1]?.clients ?? 0)}
+                  unit="online now"
+                  caption={`Peak ${fmtNum(Math.max(...trendPts.map((p) => p.clients || 0)))} in the last 24 hours`}
+                />
+                <ResponsiveContainer width="100%" height={240}>
+                  <AreaChart data={trendPts} margin={{ top: 8, right: 8, left: -12, bottom: 0 }}>
+                    <defs><ChartGradient id="siteClients" color={CHART_COLORS.accent} /></defs>
+                    <CartesianGrid {...gridProps(ct)} />
+                    <XAxis dataKey="t" {...axisX(ct, { minTickGap: 24 })} />
+                    <YAxis {...axisY(ct, { width: 36 })} allowDecimals={false} />
+                    <Tooltip content={<ChartTooltip />} cursor={{ stroke: ct.axisLine }} />
+                    <Area type="monotone" dataKey="clients" name="Clients" stroke={CHART_COLORS.accent} strokeWidth={2} fill="url(#siteClients)" isAnimationActive={false} />
+                  </AreaChart>
+                </ResponsiveContainer>
+              </>
             )}
           </Panel>
 
@@ -261,22 +271,34 @@ export default function SiteDashboard({ groupId, site }) {
               {statusData.length === 0 ? (
                 <EmptyState icon={Ticket} title="No vouchers" description="This village has no vouchers yet." />
               ) : (
-                <div className="flex items-center gap-4">
-                  <ResponsiveContainer width="55%" height={200}>
-                    <PieChart>
-                      <Pie data={statusData} dataKey="value" nameKey="name" innerRadius={52} outerRadius={80} paddingAngle={2} isAnimationActive={false} stroke="none">
-                        {statusData.map((d, i) => <Cell key={i} fill={d.color} />)}
-                      </Pie>
-                      <Tooltip content={<ChartTooltip hideLabel />} />
-                    </PieChart>
-                  </ResponsiveContainer>
-                  <div className="flex-1 space-y-2">
+                <div className="flex items-center gap-5">
+                  {/* Donut with the total stated in the hole, so the chart
+                      answers "how many" without reading the legend. */}
+                  <div className="relative shrink-0" style={{ width: 168, height: 168 }}>
+                    <ResponsiveContainer width="100%" height="100%">
+                      <PieChart>
+                        <Pie data={statusData} dataKey="value" nameKey="name" innerRadius={58} outerRadius={82} paddingAngle={2} cornerRadius={6} isAnimationActive={false} stroke="none">
+                          {statusData.map((d, i) => <Cell key={i} fill={d.color} />)}
+                        </Pie>
+                        <Tooltip content={<ChartTooltip hideLabel />} />
+                      </PieChart>
+                    </ResponsiveContainer>
+                    <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
+                      <span className="text-2xl font-semibold text-[var(--fg-primary)] tabular-nums leading-none">
+                        {fmtNum(statusData.reduce((a, d) => a + d.value, 0))}
+                      </span>
+                      <span className="text-[10.5px] uppercase tracking-wider text-[var(--fg-muted)] mt-1">Vouchers</span>
+                    </div>
+                  </div>
+                  <div className="flex-1 min-w-0 space-y-2.5">
                     {statusData.map((d) => (
-                      <div key={d.name} className="flex items-center gap-2 text-sm">
-                        <span className="h-2.5 w-2.5 rounded-full" style={{ background: d.color }} />
-                        <span className="text-[var(--fg-secondary)]">{d.name}</span>
-                        <span className="ml-auto font-semibold text-[var(--fg-primary)] tabular-nums">{fmtNum(d.value)}</span>
-                      </div>
+                      <LegendRow
+                        key={d.name}
+                        color={d.color}
+                        label={d.name}
+                        value={fmtNum(d.value)}
+                        total={statusData.reduce((a, x) => a + x.value, 0)}
+                      />
                     ))}
                   </div>
                 </div>
@@ -287,15 +309,15 @@ export default function SiteDashboard({ groupId, site }) {
               {pkgBar.length === 0 ? (
                 <EmptyState icon={Ticket} title="No packages" />
               ) : (
-                <ResponsiveContainer width="100%" height={200}>
-                  <BarChart data={pkgBar} margin={{ top: 4, right: 8, left: -12, bottom: 0 }}>
-                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke={ct.grid} />
-                    <XAxis dataKey="name" tickLine={false} axisLine={false} tick={{ fill: ct.axis, fontSize: 10 }} interval={0} angle={-12} textAnchor="end" height={40} />
-                    <YAxis tickLine={false} axisLine={false} tick={{ fill: ct.axis, fontSize: 11 }} width={32} allowDecimals={false} />
+                <ResponsiveContainer width="100%" height={216}>
+                  <BarChart data={pkgBar} margin={{ top: 4, right: 8, left: -12, bottom: 0 }} barCategoryGap={BAR_CATEGORY_GAP}>
+                    <CartesianGrid {...gridProps(ct)} />
+                    <XAxis dataKey="name" {...axisX(ct, { tick: { fill: ct.axis, fontSize: 10 }, interval: 0, angle: -12, textAnchor: "end", height: 40 })} />
+                    <YAxis {...axisY(ct, { width: 32 })} allowDecimals={false} />
                     <Tooltip content={<ChartTooltip />} cursor={{ fill: ct.cursor }} />
-                    <Bar dataKey="Active" stackId="a" fill={CHART_COLORS.emerald} isAnimationActive={false} />
-                    <Bar dataKey="Expired" stackId="a" fill={CHART_COLORS.amber} isAnimationActive={false} />
-                    <Bar dataKey="Left" stackId="a" fill={CHART_COLORS.accent} radius={[4, 4, 0, 0]} isAnimationActive={false} />
+                    <Bar dataKey="Active" stackId="a" fill={CHART_COLORS.emerald} radius={BAR_RADIUS} maxBarSize={BAR_MAX_SIZE} isAnimationActive={false} />
+                    <Bar dataKey="Expired" stackId="a" fill={CHART_COLORS.amber} radius={BAR_RADIUS} maxBarSize={BAR_MAX_SIZE} isAnimationActive={false} />
+                    <Bar dataKey="Left" stackId="a" fill={CHART_COLORS.accent} radius={BAR_RADIUS} maxBarSize={BAR_MAX_SIZE} isAnimationActive={false} />
                   </BarChart>
                 </ResponsiveContainer>
               )}
