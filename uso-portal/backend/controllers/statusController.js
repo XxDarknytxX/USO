@@ -76,16 +76,35 @@ const getVoucherStatus = async (req, res) => {
  * Returns the most recently authenticated voucher code.
  * Used by /status redirect when no voucher code is in the URL.
  */
-const getLatestVoucher = async (_req, res) => {
+const getLatestVoucher = async (req, res) => {
+  // This used to answer with the most recent authenticated voucher in the whole
+  // transactions table, ignoring the caller entirely. Any device that reached
+  // /status without a MAC or a cached code was handed whoever authenticated
+  // last on this instance — a live voucher belonging to a stranger, often in
+  // another village, which the status page then cached as the caller's own.
+  //
+  // The caller must now identify itself, and the row must match that identity.
+  // With no identity there is no correct answer, so 404 and let the caller fall
+  // through to its existing "No Voucher Found" screen.
+  const sessionId = String(req.query.sessionId || '').trim();
+  const clientMac = String(req.query.clientMac || '').trim();
+  if (!sessionId && !clientMac) {
+    return res.status(400).json({ ok: false, error: 'sessionId or clientMac is required' });
+  }
+
   try {
     const { pool } = require('../config/db');
     const [rows] = await pool.execute(`
       SELECT voucher_code
       FROM transactions
       WHERE auth_success = 1 AND voucher_code IS NOT NULL
+        AND (
+          (? <> '' AND session_id = ?)
+          OR (? <> '' AND client_mac IS NOT NULL AND client_mac = ?)
+        )
       ORDER BY auth_completed_at DESC
       LIMIT 1
-    `);
+    `, [sessionId, sessionId, clientMac, clientMac]);
 
     if (rows.length === 0) {
       return res.status(404).json({ ok: false, error: 'No recent voucher found' });

@@ -281,9 +281,22 @@ function StatusRedirect() {
         return;
       }
 
-      // 3. Fallback: latest authenticated voucher from DB
+      // 3. Fallback: this device's most recent authenticated voucher.
+      // Scoped to the caller — the endpoint used to answer with whoever
+      // authenticated last on the instance, which handed one customer another
+      // customer's live code. With neither identifier there is nothing safe to
+      // ask for, so skip straight to the "No Voucher Found" screen below.
+      const sid = searchParams.get('sessionId') || sessionStorage.getItem('wifiSessionId');
+      const mac = clientMac || sessionStorage.getItem('deviceMac');
+      if (!sid && !mac) {
+        if (!cancelled) { setLoading(false); }
+        return;
+      }
       try {
-        const r = await fetch('/api/latest-voucher');
+        const q = new URLSearchParams();
+        if (sid) q.set('sessionId', sid);
+        if (mac) q.set('clientMac', mac);
+        const r = await fetch(`/api/latest-voucher?${q}`);
         if (r.ok) {
           const d = await r.json();
           if (d.ok && d.voucherCode) {
