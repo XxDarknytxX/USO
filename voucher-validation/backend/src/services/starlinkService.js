@@ -233,11 +233,16 @@ function normalizeCycle(cycle, servicePlan) {
     const last = end || new Date(Date.UTC(
       start.getUTCFullYear(), start.getUTCMonth() + 1, start.getUTCDate()
     ));
+    // endDate is EXCLUSIVE: Starlink reports a cycle as "Aug 1 to Sep 1",
+    // meaning the month of August. Iterating inclusively added a stray bucket
+    // for the 1st of the following month, so the axis read 1..31 then 1 again.
     const out = [];
-    for (let d = new Date(start); d <= last; d.setUTCDate(d.getUTCDate() + 1)) {
+    for (let d = new Date(start); d < last; d.setUTCDate(d.getUTCDate() + 1)) {
       out.push(dayKey(d));
       if (out.length > 400) break; // guard against a bad date range
     }
+    // A degenerate range (end <= start) would otherwise plot nothing at all.
+    if (out.length === 0) out.push(dayKey(start));
     return out;
   })();
 

@@ -49,10 +49,15 @@ function relTime(ts) {
   return `${Math.floor(s / 86400)}d ago`;
 }
 
+// Starlink's cycle endDate is EXCLUSIVE — "Aug 1 to Sep 1" means August — so
+// the label steps back a day to show the last date the cycle actually covers.
 const dateRange = (c) => {
   if (!c?.startDate) return "";
   const f = (d) => new Date(d).toLocaleDateString(undefined, { day: "numeric", month: "short" });
-  return `${f(c.startDate)} to ${c.endDate ? f(c.endDate) : "now"}`;
+  if (!c.endDate) return `${f(c.startDate)} to now`;
+  const lastDay = new Date(c.endDate);
+  lastDay.setUTCDate(lastDay.getUTCDate() - 1);
+  return `${f(c.startDate)} to ${f(lastDay)}`;
 };
 
 /** One row of the breakdown under the chart. */
