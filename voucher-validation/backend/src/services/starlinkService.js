@@ -289,7 +289,11 @@ export async function getUsage(cfg, serviceLineNumber) {
   // that are genuinely simultaneous for the same service line.
   const payload = await singleFlight(`usage:${serviceLineNumber}`, async () => {
     const token = await getToken(cfg);
-    const url = `${String(cfg.api_base_url).replace(/\/$/, "")}/v2/data-usage/query?page=0`;
+    // Matches Starlink's own documented call:
+    //   POST https://starlink.com/api/public/v2/data-usage/query?page=0&limit=50
+    // A trailing slash on the configured base is stripped so the path cannot
+    // end up doubled (…/public//v2/…), which some gateways 404.
+    const url = `${String(cfg.api_base_url).replace(/\/+$/, "")}/v2/data-usage/query?page=0&limit=50`;
     const data = await starlinkFetch(() =>
       fetchJson(url, {
         method: "POST",
@@ -329,7 +333,7 @@ export async function getUsage(cfg, serviceLineNumber) {
 export async function getServiceLine(cfg, serviceLineNumber) {
   return singleFlight(`line:${serviceLineNumber}`, async () => {
     const token = await getToken(cfg);
-    const base = String(cfg.api_base_url).replace(/\/$/, "");
+    const base = String(cfg.api_base_url).replace(/\/+$/, "");
     const url = `${base}/v2/service-lines/${encodeURIComponent(serviceLineNumber)}`;
     const data = await starlinkFetch(() =>
       fetchJson(url, {
