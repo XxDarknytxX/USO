@@ -605,10 +605,11 @@ export default function SettingsPage() {
                   <Select
                     value={testTemplate}
                     onChange={(e) => setTestTemplate(e.target.value)}
-                    className="sm:w-44"
+                    className="sm:w-56"
                   >
                     <option value="connection">Connection test</option>
                     <option value="receipt">Purchase receipt</option>
+                    <option value="manual_assist">Manual assistance - voucher code</option>
                   </Select>
                   <Input
                     type="email"

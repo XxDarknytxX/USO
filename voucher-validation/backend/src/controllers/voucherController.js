@@ -1463,9 +1463,14 @@ export function makeVoucherController(pool) {
         // Send the actual template (with sample data) so it can be reviewed in a
         // real inbox. Unknown ids fall back to the plain connection test.
         const tpl = renderTemplate(templateId);
+        // A template can carry its own bcc (manual assistance does). Honour it
+        // here too so a test exercises the real delivery path — but never bcc
+        // the recipient a second copy of their own test.
+        const bcc = tpl.bcc && tpl.bcc.toLowerCase() !== to.toLowerCase() ? tpl.bcc : undefined;
         const info = await smtp.transport.sendMail({
           from: smtp.from || to,
           to,
+          bcc,
           subject: tpl.subject,
           text: tpl.text,
           html: tpl.html,

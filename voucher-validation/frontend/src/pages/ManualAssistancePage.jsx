@@ -4,9 +4,9 @@
 // manual voucher-login). "Mark sorted" resolves the case.
 import { useEffect, useState, useCallback } from "react";
 import toast from "react-hot-toast";
-import { LifeBuoy, RefreshCw, CheckCircle2, Phone, Ticket, Copy } from "lucide-react";
+import { LifeBuoy, RefreshCw, CheckCircle2, Phone, Ticket, Copy, Mail, Send } from "lucide-react";
 import { portalConfigApi } from "../services/api";
-import { PageHeader, Panel, Button, Badge, EmptyState } from "../components/ui";
+import { PageHeader, Panel, Button, Badge, EmptyState, Modal, Field, Input } from "../components/ui";
 
 const fmtMoney = (n) =>
   "$" + Number(n || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -18,6 +18,11 @@ export default function ManualAssistancePage() {
   const [loading, setLoading] = useState(true);
   const [statusFilter, setStatusFilter] = useState("open"); // open | resolved | all
   const [resolving, setResolving] = useState(null);
+  // Email-the-code dialog: the case being sent, plus the editable recipient
+  // (prefilled from the M-PAiSA mapping when there is one).
+  const [emailCase, setEmailCase] = useState(null);
+  const [emailTo, setEmailTo] = useState("");
+  const [sending, setSending] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -52,6 +57,29 @@ export default function ManualAssistancePage() {
   const copy = (code) => {
     navigator.clipboard?.writeText(code);
     toast.success("Voucher code copied");
+  };
+
+  const openEmail = (c) => {
+    setEmailCase(c);
+    setEmailTo(c.customerEmail || "");
+  };
+
+  const sendEmail = async () => {
+    if (!emailCase) return;
+    setSending(true);
+    try {
+      // Send the address only when it differs from the mapped one, so the
+      // backend resolves the mapping itself in the common case.
+      const body = emailTo && emailTo !== emailCase.customerEmail ? { email: emailTo.trim() } : {};
+      const res = await portalConfigApi.emailManualAssistance(emailCase.transactionId, body);
+      toast.success(`Voucher code emailed to ${res.to}`);
+      setEmailCase(null);
+      load();
+    } catch (e) {
+      toast.error("Failed to send: " + e.message);
+    } finally {
+      setSending(false);
+    }
   };
 
   return (
@@ -146,18 +174,35 @@ export default function ManualAssistancePage() {
                       <td className="px-4 py-3">
                         {c.resolved ? <Badge tone="success">Sorted</Badge> : <Badge tone="warning">Open</Badge>}
                       </td>
-                      <td className="px-4 py-3 text-right">
-                        {!c.resolved && (
-                          <Button
-                            variant="secondary"
-                            size="sm"
-                            loading={resolving === c.transactionId}
-                            iconLeft={resolving !== c.transactionId && <CheckCircle2 size={13} />}
-                            onClick={() => resolve(c.transactionId)}
-                          >
-                            Mark sorted
-                          </Button>
-                        )}
+                      <td className="px-4 py-3">
+                        <div className="flex items-center justify-end gap-2">
+                          {c.voucherCode && (
+                            <Button
+                              variant="secondary"
+                              size="sm"
+                              iconLeft={<Mail size={13} />}
+                              onClick={() => openEmail(c)}
+                              title={
+                                c.customerEmail
+                                  ? `Email the code to ${c.customerEmail}`
+                                  : "No email on file - you can type one"
+                              }
+                            >
+                              Email code
+                            </Button>
+                          )}
+                          {!c.resolved && (
+                            <Button
+                              variant="secondary"
+                              size="sm"
+                              loading={resolving === c.transactionId}
+                              iconLeft={resolving !== c.transactionId && <CheckCircle2 size={13} />}
+                              onClick={() => resolve(c.transactionId)}
+                            >
+                              Mark sorted
+                            </Button>
+                          )}
+                        </div>
                       </td>
                     </tr>
                   ))}
@@ -167,6 +212,70 @@ export default function ManualAssistancePage() {
           )}
         </Panel>
       </div>
+
+      {emailCase && (
+        <Modal open onClose={() => !sending && setEmailCase(null)} width="lg">
+          <Modal.Header
+            eyebrow="Manual assistance"
+            title="Email the voucher code"
+            subtitle="Sends the customer their reserved code and how to redeem it."
+            icon={Mail}
+            onClose={() => !sending && setEmailCase(null)}
+          />
+          <Modal.Body>
+            <div className="rounded-lg border border-[var(--border-default)] bg-[var(--surface-sunken)] px-4 py-3 mb-5">
+              <dl className="grid grid-cols-[auto_1fr] gap-x-5 gap-y-2 text-[13px]">
+                <dt className="text-[var(--fg-muted)]">Phone</dt>
+                <dd className="font-mono text-[var(--fg-primary)]">{emailCase.customerPhone || "—"}</dd>
+                <dt className="text-[var(--fg-muted)]">Plan</dt>
+                <dd className="text-[var(--fg-secondary)]">
+                  {emailCase.planName || "—"}
+                  <span className="text-[var(--fg-muted)]"> · {fmtMoney(emailCase.amount)}</span>
+                </dd>
+                <dt className="text-[var(--fg-muted)]">Voucher</dt>
+                <dd className="font-mono font-semibold text-[var(--fg-primary)]">{emailCase.voucherCode}</dd>
+              </dl>
+            </div>
+
+            <Field
+              label="Send to"
+              htmlFor="ma-email"
+              hint={
+                emailCase.customerEmail
+                  ? "From the M-PAiSA mapping for this number. Change it to send somewhere else."
+                  : "No M-PAiSA mapping for this number, so type where it should go."
+              }
+            >
+              <Input
+                id="ma-email"
+                type="email"
+                value={emailTo}
+                autoFocus
+                placeholder="customer@example.com"
+                onChange={(e) => setEmailTo(e.target.value)}
+              />
+            </Field>
+
+            <p className="mt-4 flex items-start gap-2 text-[12px] text-[var(--fg-muted)]">
+              <Send size={13} className="mt-0.5 shrink-0" />
+              A blind copy goes to the team inbox so the send can be checked afterwards.
+            </p>
+          </Modal.Body>
+          <Modal.Footer>
+            <Button variant="secondary" onClick={() => setEmailCase(null)} disabled={sending}>
+              Cancel
+            </Button>
+            <Button
+              onClick={sendEmail}
+              loading={sending}
+              disabled={!emailTo.trim()}
+              iconLeft={!sending && <Mail size={14} />}
+            >
+              Send code
+            </Button>
+          </Modal.Footer>
+        </Modal>
+      )}
     </div>
   );
 }

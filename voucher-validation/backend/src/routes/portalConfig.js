@@ -37,6 +37,8 @@ export function makePortalConfigRouter(controller, attachScope) {
   // live resolve write, which was previously any-authenticated).
   router.get("/manual-assistance", requireNotViewer, controller.getManualAssistance);
   router.post("/manual-assistance/:transactionId/resolve", requireNotViewer, controller.resolveManualAssistance);
+  // Emails the customer their reserved voucher code (team-bcc'd by the template).
+  router.post("/manual-assistance/:transactionId/email", requireNotViewer, controller.emailManualAssistance);
 
   return router;
 }

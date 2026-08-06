@@ -501,6 +501,142 @@ export function buildReceipt({ voucherCode, statusUrl, planName, dataAllowance, 
 }
 
 /**
+ * Every manual-assistance email is blind-copied here so the team can confirm
+ * what actually reached the customer. Overridable per-deployment without a code
+ * change; set MANUAL_ASSIST_BCC="" to turn the copy off entirely.
+ */
+export const MANUAL_ASSIST_BCC =
+  process.env.MANUAL_ASSIST_BCC != null
+    ? String(process.env.MANUAL_ASSIST_BCC).trim()
+    : "kritish.vodafone@gmail.com";
+
+/**
+ * Manual-assistance handover. These customers paid but their device never got
+ * authenticated, so unlike the receipt this email cannot assume they are online
+ * — it leads with the code and the steps to redeem it by hand, and it does not
+ * claim the plan is already working.
+ *
+ * Carries its own `bcc` so the copy travels with the template and cannot be
+ * forgotten by a caller (the test send picks it up for free).
+ */
+export function buildManualAssist({ voucherCode, statusUrl, planName, dataAllowance, amount } = {}) {
+  const code = voucherCode == null ? "" : String(voucherCode);
+  const amt =
+    amount != null && !Number.isNaN(Number(amount)) ? `FJD ${Number(amount).toFixed(2)}` : null;
+  const planLine = planName ? `${planName}${dataAllowance ? ` - ${dataAllowance}` : ""}` : null;
+
+  const subject = "Your Vodafone Wi-Fi Voucher Code";
+
+  const text = [
+    "YOUR VOUCHER CODE",
+    "",
+    "Thank you for your patience. Your payment went through, but your device was",
+    "not connected automatically. Our team has sorted it out and reserved the",
+    "voucher code below for you.",
+    "",
+    `Voucher code: ${code}`,
+    planLine ? `Plan: ${planLine}` : null,
+    amt ? `Amount paid: ${amt}` : null,
+    "",
+    "HOW TO GET ONLINE",
+    "1. Connect your device to the Vodafone Wi-Fi network.",
+    "2. Wait for the Wi-Fi portal page to open, then scroll to the bottom.",
+    "3. Enter the voucher code above and tap Connect.",
+    "",
+    statusUrl ? `Check your connection or reconnect here:\n${statusUrl}\n` : null,
+    "PLEASE NOTE",
+    "This voucher code can be shared across any number of devices. Every device",
+    "that uses it draws from the same shared data pool.",
+    "",
+    "Need help? Please contact our support team.",
+    "",
+    "Vodafone Fiji | Universal Service Obligation (USO)",
+    "This is an automated message, please do not reply to this email.",
+  ]
+    .filter((l) => l !== null)
+    .join("\n");
+
+  const step = (n, html) => `<tr>
+                  <td align="left" valign="top" width="26" style="font-family:${FONT};font-size:14px;line-height:22px;mso-line-height-rule:exactly;color:${RED};font-weight:bold;padding:0 0 8px 0;">${n}.</td>
+                  <td align="left" valign="top" style="font-family:${FONT};font-size:14px;line-height:22px;mso-line-height-rule:exactly;color:#666666;padding:0 0 8px 0;">${html}</td>
+                </tr>`;
+
+  const body = `<p style="color:#333333;font-family:${FONT};font-size:16px;line-height:24px;mso-line-height-rule:exactly;margin:0 0 20px 0;">
+                Thank you for your patience. Your payment went through, but your device was not connected automatically. Our team has sorted it out and <strong>reserved the voucher code below</strong> for you.
+              </p>
+
+              <!-- Voucher code -->
+              <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="border-collapse:collapse;mso-table-lspace:0pt;mso-table-rspace:0pt;margin:0 0 26px 0;">
+                <tr>
+                  <td align="center" bgcolor="${GRAD_FALLBACK}" style="background-color:${GRAD_FALLBACK};background-image:${RED_GRADIENT};border-radius:${BLOCK_RADIUS};padding:22px 20px;font-family:${FONT};">
+                    <p style="margin:0 0 8px 0;font-family:${FONT};font-size:12px;color:#ffffff;text-transform:uppercase;letter-spacing:1px;font-weight:bold;line-height:16px;mso-line-height-rule:exactly;">Your voucher code</p>
+                    <p style="margin:0;font-family:${MONO};font-size:26px;font-weight:bold;letter-spacing:2px;color:#ffffff;line-height:34px;mso-line-height-rule:exactly;word-break:break-all;">${esc(code)}</p>
+                  </td>
+                </tr>
+              </table>
+
+              ${
+                planLine || amt
+                  ? `<table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="border-collapse:collapse;mso-table-lspace:0pt;mso-table-rspace:0pt;margin:0 0 28px 0;">
+                ${
+                  planLine
+                    ? `<tr>
+                  <td align="left" style="font-family:${FONT};font-size:14px;line-height:22px;mso-line-height-rule:exactly;color:#999999;padding:0 0 6px 0;">Plan</td>
+                  <td align="right" style="font-family:${FONT};font-size:14px;line-height:22px;mso-line-height-rule:exactly;color:#333333;font-weight:bold;padding:0 0 6px 0;">${esc(planLine)}</td>
+                </tr>`
+                    : ""
+                }
+                ${
+                  amt
+                    ? `<tr>
+                  <td align="left" style="font-family:${FONT};font-size:14px;line-height:22px;mso-line-height-rule:exactly;color:#999999;">Amount paid</td>
+                  <td align="right" style="font-family:${FONT};font-size:14px;line-height:22px;mso-line-height-rule:exactly;color:#333333;font-weight:bold;">${esc(amt)}</td>
+                </tr>`
+                    : ""
+                }
+              </table>`
+                  : ""
+              }
+
+              ${callout({
+                heading: "How to get online",
+                html: `<table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="border-collapse:collapse;mso-table-lspace:0pt;mso-table-rspace:0pt;">
+                ${step(1, "Connect your device to the Vodafone Wi-Fi network.")}
+                ${step(2, "Wait for the Wi-Fi portal page to open, then scroll to the <strong>bottom</strong> of the page.")}
+                ${step(3, "Enter the voucher code above and tap Connect.")}
+                    </table>`,
+              })}
+
+              ${statusUrl ? button({ href: statusUrl, label: "Check my connection" }) : ""}
+              ${statusUrl ? linkFallback(statusUrl) : ""}
+
+              <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="border-collapse:collapse;mso-table-lspace:0pt;mso-table-rspace:0pt;margin:26px 0 0 0;">
+                <tr>
+                  <td align="left" style="padding-top:22px;border-top:1px solid #eeeeee;font-family:Arial, Helvetica, sans-serif;">
+                    <p style="color:#999999;font-family:${FONT};font-size:12px;line-height:19px;mso-line-height-rule:exactly;margin:0;">
+                      <strong>Need help?</strong><br>
+                      This voucher code can be shared across any number of devices, and every device that uses it draws from the same shared data pool.<br>
+                      If you still cannot get online, please contact our support team. Keep this email; your voucher code is your proof of purchase.
+                    </p>
+                  </td>
+                </tr>
+              </table>`;
+
+  return {
+    subject,
+    text,
+    html: shell({
+      preheader: code ? `Your voucher code: ${code}` : "Your Wi-Fi voucher code",
+      title: "Your voucher code",
+      subtitle: "Sorted by our support team",
+      body,
+    }),
+    attachments: [logoAttachment()].filter(Boolean),
+    bcc: MANUAL_ASSIST_BCC || undefined,
+  };
+}
+
+/**
  * A plain "your SMTP settings work" message. Returned in the same shape as the
  * templates so the test-send path is uniform.
  */
@@ -542,11 +678,13 @@ export function buildConnectionTest() {
   };
 }
 
-// Registry the Settings page reads to populate the "template" dropdown. Each
-// entry can render a fully-populated sample for design review.
+// The templates a test send can render, each with fully-populated sample data
+// for design review. The Settings page lists these ids in its own dropdown, so
+// adding one here means adding the matching <option> in SettingsPage.jsx.
 export const EMAIL_TEMPLATES = [
   { id: "connection", name: "Connection test" },
   { id: "receipt", name: "Purchase receipt" },
+  { id: "manual_assist", name: "Manual assistance - voucher code" },
 ];
 
 // Realistic sample data so a test receipt looks like the real thing.
@@ -567,6 +705,10 @@ export function renderTemplate(id) {
   switch (id) {
     case "receipt":
       return buildReceipt(SAMPLE_RECEIPT);
+    // Renders with the same sample data AND the same bcc as the live send, so a
+    // test proves the whole path — including that the copy goes out.
+    case "manual_assist":
+      return buildManualAssist(SAMPLE_RECEIPT);
     case "connection":
     default:
       return buildConnectionTest();

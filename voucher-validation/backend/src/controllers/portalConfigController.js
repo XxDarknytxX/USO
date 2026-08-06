@@ -1,6 +1,9 @@
 // src/controllers/portalConfigController.js
 // Admin CRUD for portal plan configurations + audit log viewing
 
+import { loadSmtpTransport, buildManualAssist } from "../services/mailer.js";
+import { logEmailEvent } from "../services/emailLog.js";
+
 const send = {
   ok: (res, data = {}) => res.json(data),
   created: (res, data = {}) => res.status(201).json(data),
@@ -793,6 +796,26 @@ export function makePortalConfigController(pool) {
             ON pc.plan_key COLLATE utf8mb4_unicode_ci = tx.plan_key COLLATE utf8mb4_unicode_ci
           ORDER BY tx.resolved ASC, tx.created_at DESC
         `);
+        // Which of these customers we can email their code to. Resolved in ONE
+        // pass over mpaisa_mappings rather than a per-case subquery: RIGHT() can
+        // never use the index either way, so this keeps it to a single scan no
+        // matter how many cases are open (the list is unbounded). Last 7 digits
+        // is the tolerant match — bare, trunk-0 and 679-prefixed forms all agree
+        // there. Display only; the send path re-resolves authoritatively.
+        const last7 = (p) => {
+          const d = String(p || '').replace(/\D/g, '').replace(/^0+/, '');
+          return d.length > 7 ? d.slice(-7) : d;
+        };
+        const keys = [...new Set(rows.map((r) => last7(r.customer_phone)).filter(Boolean))];
+        const emailByPhone = new Map();
+        if (keys.length) {
+          const [mm] = await pool.query(
+            'SELECT RIGHT(number, 7) AS k, email FROM mpaisa_mappings WHERE RIGHT(number, 7) IN (?)',
+            [keys]
+          );
+          for (const m of mm) if (!emailByPhone.has(m.k)) emailByPhone.set(m.k, m.email);
+        }
+
         const cases = rows.map((r) => ({
           transactionId: r.transaction_id,
           customerPhone: r.customer_phone,
@@ -800,6 +823,7 @@ export function makePortalConfigController(pool) {
           planKey: r.plan_key,
           planName: r.plan_name || r.plan_key || null,
           voucherCode: r.voucher_code,
+          customerEmail: emailByPhone.get(last7(r.customer_phone)) || null,
           sessionId: r.session_id,
           createdAt: r.created_at,
           resolved: !!r.resolved,
@@ -831,6 +855,131 @@ export function makePortalConfigController(pool) {
           );
         }
         return send.ok(res, { success: true });
+      } catch (e) { console.error(e); return send.serverErr(res); }
+    },
+
+    // POST /api/portal-config/manual-assistance/:transactionId/email { email? }
+    // Emails the reserved voucher code to the customer.
+    //
+    // Admin-triggered rather than automatic on resolve: support usually reads the
+    // code out over the phone first, and "sorted" can be reached several ways, so
+    // firing on resolve would send mail nobody asked for. Sending does NOT resolve
+    // the case either - the two actions stay independent.
+    //
+    // `email` in the body overrides the M-PAiSA mapping, which is what makes this
+    // usable for the many cases that have no mapping row at all.
+    emailManualAssistance: async (req, res) => {
+      const transactionId = req.params.transactionId;
+      if (!transactionId) return send.bad(res, 'transactionId is required');
+      const override = String(req.body?.email || '').trim();
+      if (override && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(override)) {
+        return send.bad(res, 'Enter a valid email address.');
+      }
+      const sentBy = req.user?.email || 'admin';
+      try {
+        // Rebuild the case from its audit trail - same aggregate the list uses.
+        // No GROUP BY, so an unknown transaction still returns one all-NULL row
+        // and is_case tells us it was never a manual-assistance case.
+        const [[c]] = await pool.query(
+          `SELECT MAX(customer_phone) AS customer_phone,
+                  MAX(amount)         AS amount,
+                  MAX(plan_key)       AS plan_key,
+                  MAX(voucher_code)   AS voucher_code,
+                  SUM(CASE WHEN event_type = 'manual_assistance_created' THEN 1 ELSE 0 END) AS is_case
+             FROM portal_audit_logs WHERE transaction_id = ?`,
+          [transactionId]
+        );
+        if (!c || !Number(c.is_case)) {
+          return send.notFound(res, 'No manual assistance case for that transaction.');
+        }
+        const voucherCode = c.voucher_code;
+        if (!voucherCode) {
+          return send.bad(res, 'This case has no reserved voucher code yet - there is nothing to send.');
+        }
+
+        // Recipient: the address the admin typed, else the M-PAiSA mapping.
+        // Normalise BOTH sides (same rule as the purchase receipt) so a stored
+        // number carrying a trunk 0 or a 679 is still reachable from the bare
+        // 7-digit number the portal records.
+        let email = override;
+        if (!email) {
+          const digits = String(c.customer_phone || '').replace(/\D/g, '');
+          if (digits) {
+            let core = digits.replace(/^0+/, '');
+            if (core.length > 7 && core.startsWith('679')) core = core.slice(3);
+            const last7 = core.length > 7 ? core.slice(-7) : core;
+            const [mr] = await pool.query(
+              `SELECT email FROM mpaisa_mappings
+                WHERE number = ? OR number = ? OR RIGHT(number, 7) = ?
+                ORDER BY (number = ?) DESC LIMIT 1`,
+              [digits, core, last7, core]
+            );
+            email = mr[0]?.email || '';
+          }
+        }
+        if (!email) {
+          return send.bad(res, 'No email on file for this number. Enter an address to send to, or add one under M-PAiSA Mapping.');
+        }
+
+        // Plan wording and the village status URL, both best-effort: a missing
+        // one drops that block from the email rather than failing the send.
+        const [[pc]] = await pool.query(
+          `SELECT name, data_allowance FROM portal_plan_configs
+            WHERE plan_key COLLATE utf8mb4_unicode_ci = ? LIMIT 1`,
+          [c.plan_key || '']
+        );
+        const [[vr]] = await pool.query(
+          'SELECT group_id FROM vouchers WHERE voucher_code = ? LIMIT 1', [voucherCode]
+        );
+        let statusUrl = null;
+        if (vr?.group_id) {
+          const [[np]] = await pool.query(
+            'SELECT hostname FROM network_projects WHERE ruijie_group_id = ? LIMIT 1', [vr.group_id]
+          );
+          if (np?.hostname) statusUrl = `https://${np.hostname}/status`;
+        }
+
+        const smtp = await loadSmtpTransport(pool);
+        if (!smtp) return send.bad(res, 'Save SMTP settings first - no mail host is configured.');
+
+        const mail = buildManualAssist({
+          voucherCode, statusUrl,
+          planName: pc?.name || c.plan_key || null,
+          dataAllowance: pc?.data_allowance || null,
+          amount: c.amount,
+        });
+        // The template carries the team bcc. Drop it only when it would send the
+        // recipient a duplicate of their own email.
+        const bcc = mail.bcc && mail.bcc.toLowerCase() !== email.toLowerCase() ? mail.bcc : undefined;
+        const base = {
+          transactionId, voucherCode, phone: c.customer_phone || null,
+          amount: c.amount, groupId: vr?.group_id || null,
+          template: 'manual_assist', sentBy,
+        };
+
+        try {
+          await smtp.transport.sendMail({
+            from: smtp.from, to: email, bcc,
+            subject: mail.subject, text: mail.text, html: mail.html,
+            attachments: mail.attachments,
+          });
+        } catch (sendErr) {
+          console.error('[manual-assist] SMTP send failed:', sendErr.message);
+          logEmailEvent(pool, {
+            eventType: 'manual_assist_email_failed', status: 'failed', reason: 'send_error',
+            to: email, subject: mail.subject,
+            message: `Voucher email failed to ${email}`, error: sendErr.message, ...base,
+          });
+          return res.status(502).json({ error: sendErr.message || 'SMTP send failed' });
+        }
+
+        logEmailEvent(pool, {
+          eventType: 'manual_assist_email_sent', status: 'sent',
+          to: email, subject: mail.subject,
+          message: `Voucher ${voucherCode} emailed to ${email}${bcc ? ` (bcc ${bcc})` : ''}`,
+          ...base,
+        });
+        return send.ok(res, { success: true, to: email, bcc: bcc || null });
       } catch (e) { console.error(e); return send.serverErr(res); }
     },
   };
