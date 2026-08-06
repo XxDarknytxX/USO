@@ -89,8 +89,24 @@ export default function Dashboard() {
   const [voucherStats, setVoucherStats] = useState(null);
   const [syncLogs, setSyncLogs] = useState([]);
   const [revenue, setRevenue] = useState(null);
-  // One month drives every historical figure on this page.
-  const mb = useMonthlyBreakdown(null);
+
+  // Ruijie groupIds of the villages currently in the "All Villages" scope.
+  // Declared up here because the breakdown below has to be fetched for exactly
+  // these villages — server-side, since its totals and series cannot be
+  // re-scoped after the fact the way the per-site payloads can.
+  const inScopeGroupIds = useMemo(
+    () =>
+      sites
+        .filter((s) => (allVisible ? true : isSiteVisible(s.id)))
+        .map((s) => s.ruijieGroupId)
+        .filter(Boolean),
+    [sites, allVisible, isSiteVisible]
+  );
+
+  // One window drives every historical figure on this page, scoped to the same
+  // villages as everything else. `null` when every village is in scope, so
+  // transactions that resolve to no village at all still count.
+  const mb = useMonthlyBreakdown(null, allVisible ? null : inScopeGroupIds);
   const [manualAssist, setManualAssist] = useState(null);
   const [activeView, setActiveView] = useState("overview");
   const [selectedPackage, setSelectedPackage] = useState(null);
@@ -180,16 +196,6 @@ export default function Dashboard() {
     if (val < 1024) return `${val} MB`;
     return `${(val / 1024).toFixed(1)} GB`;
   }
-
-  // Ruijie groupIds of the villages currently in the "All Villages" scope.
-  const inScopeGroupIds = useMemo(
-    () =>
-      sites
-        .filter((s) => (allVisible ? true : isSiteVisible(s.id)))
-        .map((s) => s.ruijieGroupId)
-        .filter(Boolean),
-    [sites, allVisible, isSiteVisible]
-  );
 
   // Per-plan stats collapsed to only the in-scope villages (falls back to the
   // server's all-villages packageStats if the per-site rollup isn't present).
@@ -480,7 +486,9 @@ export default function Dashboard() {
             icon={<TrendingUp size={14} />}
             sub={`${Number(mb.totals.customers || 0).toLocaleString()} customers`}
             onClick={() => {
-              if (mb.month) navigate(`/portal-flows?startDate=${mb.month}-01`);
+              // The window's real start date — `mb.month` is "all"/"week" for a
+              // moving range, which would build a nonsense "all-01".
+              if (mb.fromDate) navigate(`/portal-flows?startDate=${mb.fromDate}`);
             }}
           />
           <MetricCard

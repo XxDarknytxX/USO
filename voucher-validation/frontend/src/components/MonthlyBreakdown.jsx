@@ -19,7 +19,7 @@ import {
   Users, Wifi, AlertTriangle, Clock, MapPin,
 } from "lucide-react";
 
-import { monthLabel } from "../hooks/useMonthlyBreakdown";
+import { rangeLabel } from "../hooks/useMonthlyBreakdown";
 import {
   Panel, StatCard, EmptyState, Badge,
   SkeletonKpis, SkeletonCard,
@@ -55,6 +55,11 @@ export default function MonthlyBreakdown({ state, groupId = null }) {
   const activeGroupId = groupId;
   const ct = useChartTheme();
   const { month, months, data, loading } = state;
+  // "All time" buckets by month, every other window by day — the wording and
+  // the tooltip follow whatever the server actually bucketed by.
+  const byMonthBuckets = (data?.dailyUnit || "day") === "month";
+  const windowLabel = rangeLabel(month);
+  const barLabel = (d) => (String(d).match(/^\d+$/) ? `Day ${d}` : String(d));
 
 
   const t = data?.totals || {};
@@ -111,14 +116,14 @@ export default function MonthlyBreakdown({ state, groupId = null }) {
           )}
 
           {/* Revenue by day */}
-          <Panel title="Revenue by day" subtitle={monthLabel(month)} icon={<DollarSign size={15} />}>
-            <ChartStat value={money(t.revenue)} unit="this month" caption={`${num(t.transactions)} paid transactions`} />
+          <Panel title={byMonthBuckets ? "Revenue by month" : "Revenue by day"} subtitle={windowLabel} icon={<DollarSign size={15} />}>
+            <ChartStat value={money(t.revenue)} unit={windowLabel} caption={`${num(t.transactions)} paid transactions`} />
             <ResponsiveContainer width="100%" height={260}>
               <BarChart data={daily} margin={{ top: 8, right: 8, left: -4, bottom: 0 }} barCategoryGap={BAR_CATEGORY_GAP}>
                 <CartesianGrid {...gridProps(ct)} />
                 <XAxis dataKey="d" {...axisX(ct)} />
                 <YAxis {...axisY(ct, { width: 52 })} tickFormatter={(v) => "$" + Number(v).toLocaleString(undefined, { maximumFractionDigits: 0 })} />
-                <Tooltip content={<ChartTooltip valueFormatter={(v, e) => (e?.dataKey === "revenue" ? money(v) : num(v))} labelFormatter={(d) => `Day ${d}`} />} cursor={{ fill: ct.cursor }} />
+                <Tooltip content={<ChartTooltip valueFormatter={(v, e) => (e?.dataKey === "revenue" ? money(v) : num(v))} labelFormatter={barLabel} />} cursor={{ fill: ct.cursor }} />
                 <Bar dataKey="revenue" name="Revenue" fill={CHART_COLORS.accent} radius={BAR_RADIUS} maxBarSize={BAR_MAX_SIZE} isAnimationActive={false} />
               </BarChart>
             </ResponsiveContainer>
@@ -128,7 +133,7 @@ export default function MonthlyBreakdown({ state, groupId = null }) {
             {/* Revenue by plan */}
             <Panel title="Revenue by plan" icon={<Ticket size={15} />}>
               {byPlan.length === 0 ? (
-                <EmptyState icon={Ticket} title="No sales this month" />
+                <EmptyState icon={Ticket} title="No sales in this window" />
               ) : (
                 <div className="flex items-center gap-5">
                   <div className="relative shrink-0" style={{ width: 168, height: 168 }}>
@@ -157,7 +162,7 @@ export default function MonthlyBreakdown({ state, groupId = null }) {
             {/* Vouchers sold by plan */}
             <Panel title="Vouchers sold by plan" subtitle="From the claim ledger" icon={<Ticket size={15} />}>
               {soldByPlan.length === 0 ? (
-                <EmptyState icon={Ticket} title="No vouchers claimed this month" />
+                <EmptyState icon={Ticket} title="No vouchers claimed in this window" />
               ) : (
                 <ResponsiveContainer width="100%" height={232}>
                   <BarChart data={soldByPlan} layout="vertical" margin={{ top: 4, right: 16, left: 8, bottom: 0 }} barCategoryGap={BAR_CATEGORY_GAP}>
@@ -190,7 +195,7 @@ export default function MonthlyBreakdown({ state, groupId = null }) {
             {!activeGroupId && (
               <Panel title="Revenue by village" icon={<MapPin size={15} />}>
                 {byVillage.length === 0 ? (
-                  <EmptyState icon={MapPin} title="No sales this month" />
+                  <EmptyState icon={MapPin} title="No sales in this window" />
                 ) : (
                   <ResponsiveContainer width="100%" height={232}>
                     <BarChart data={byVillage.slice(0, 8)} layout="vertical" margin={{ top: 4, right: 16, left: 8, bottom: 0 }} barCategoryGap={BAR_CATEGORY_GAP}>
@@ -206,9 +211,9 @@ export default function MonthlyBreakdown({ state, groupId = null }) {
             )}
 
             {/* What happened, successes and failures alike */}
-            <Panel title="What happened" subtitle="Every recorded event this month" icon={<Users size={15} />}>
+            <Panel title="What happened" subtitle={`Every recorded event · ${windowLabel}`} icon={<Users size={15} />}>
               {outcomes.length === 0 ? (
-                <EmptyState icon={Users} title="No activity this month" />
+                <EmptyState icon={Users} title="No activity in this window" />
               ) : (
                 <div className="space-y-2.5 max-h-[232px] overflow-y-auto scrollbar-none pr-1">
                   {outcomes.slice(0, 12).map((o) => (
@@ -228,7 +233,7 @@ export default function MonthlyBreakdown({ state, groupId = null }) {
           {/* Village table, so the numbers can be read exactly rather than
               estimated off a bar. */}
           {!activeGroupId && byVillage.length > 0 && (
-            <Panel title="Village detail" subtitle={`${byVillage.length} villages with sales in ${monthLabel(month)}`} icon={<MapPin size={15} />} padding={false}>
+            <Panel title="Village detail" subtitle={`${byVillage.length} villages with sales · ${windowLabel}`} icon={<MapPin size={15} />} padding={false}>
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
                   <thead>

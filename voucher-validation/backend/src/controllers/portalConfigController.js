@@ -626,13 +626,27 @@ export function makePortalConfigController(pool) {
     // silently under-reporting revenue.
     getBreakdown: async (req, res) => {
       try {
-        const groupId = req.query.groupId ? String(req.query.groupId) : null;
+        // Village scope. Three independent narrowings, INTERSECTED - this used
+        // to honour only `groupId` and the viewer's own list, which meant the
+        // global dashboard ignored the "All Villages" set from Settings and
+        // every figure below the fold counted all 33 villages while the cards
+        // above it counted the selected ones.
+        //   groupId  - scope switcher pinned to one village
+        //   groupIds - the "All Villages" set (csv). PRESENT BUT EMPTY means no
+        //              village is in scope, which must read as zeroes, not as
+        //              "no filter" - hence the `!== undefined` test.
+        //   req.scope- a viewer's permitted villages
         const scope = req.scope || { isViewer: false };
-        const allowedGroups = scope.isViewer ? new Set((scope.groupIds || []).map(String)) : null;
-        // A viewer with no villages sees zeroes, never everything.
-        if (allowedGroups && allowedGroups.size === 0) {
-          return send.ok(res, { month: null, months: [], totals: {}, daily: [], byPlan: [], byVillage: [], byHour: [], outcomes: [] });
+        const narrow = (set, list) => {
+          const next = new Set(list.map(String).filter(Boolean));
+          return set ? new Set([...next].filter((g) => set.has(g))) : next;
+        };
+        let allowed = null; // null = every village
+        if (req.query.groupId) allowed = narrow(allowed, [String(req.query.groupId)]);
+        if (req.query.groupIds !== undefined) {
+          allowed = narrow(allowed, String(req.query.groupIds).split(','));
         }
+        if (scope.isViewer) allowed = narrow(allowed, scope.groupIds || []);
 
         // Which months actually have sales — drives the picker so it can never
         // offer a month that renders empty.
@@ -645,11 +659,59 @@ export function makePortalConfigController(pool) {
         const months = monthRows.map((r) => ({ month: r.month, txns: Number(r.txns) }));
 
         const now = new Date();
-        const fallback = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
-        const month = /^\d{4}-\d{2}$/.test(String(req.query.month || '')) ? String(req.query.month) : (months[0]?.month || fallback);
-        const [yy, mm] = month.split('-').map(Number);
-        const from = new Date(yy, mm - 1, 1);
-        const to = new Date(yy, mm, 1);
+        const pad = (n) => String(n).padStart(2, '0');
+        const ymd = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+        const ym = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}`;
+        const MON = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+
+        // The window being reported on. `range` gives the three moving presets,
+        // `month` a fixed calendar month; anything unrecognised falls back to
+        // the newest month with sales, which is the original behaviour.
+        const range = String(req.query.range || '').toLowerCase();
+        const monthParam = /^\d{4}-\d{2}$/.test(String(req.query.month || '')) ? String(req.query.month) : null;
+        let selection, from, to, bucket;
+        if (range === 'all') {
+          selection = 'all';
+          bucket = 'month';
+          const oldest = months.length ? months[months.length - 1].month : ym(now);
+          const [oy, om] = oldest.split('-').map(Number);
+          from = new Date(oy, om - 1, 1);
+          to = new Date(now.getFullYear(), now.getMonth() + 1, 1);
+        } else if (range === 'week') {
+          selection = 'week';
+          bucket = 'day';
+          // The last 7 days INCLUDING today, so the current day is never a
+          // half-empty bar hanging off the end.
+          to = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
+          from = new Date(to.getFullYear(), to.getMonth(), to.getDate() - 7);
+        } else if (range === 'month') {
+          selection = 'month';
+          bucket = 'day';
+          from = new Date(now.getFullYear(), now.getMonth(), 1);
+          to = new Date(now.getFullYear(), now.getMonth() + 1, 1);
+        } else {
+          selection = monthParam || months[0]?.month || ym(now);
+          bucket = 'day';
+          const [yy, mm] = selection.split('-').map(Number);
+          from = new Date(yy, mm - 1, 1);
+          to = new Date(yy, mm, 1);
+        }
+
+        // Nothing in scope: answer in the normal shape with zeroes, but keep the
+        // month list so the picker still works.
+        if (allowed && allowed.size === 0) {
+          return send.ok(res, {
+            month: selection, selection, months, dailyUnit: bucket,
+            fromDate: ymd(from), toDate: ymd(new Date(to.getTime() - 1)),
+            // Fully zeroed rather than {} so every card reads 0 instead of
+            // formatting an undefined.
+            totals: {
+              revenue: 0, transactions: 0, customers: 0, avgSale: 0, connected: 0,
+              connectedPct: 0, manualCases: 0, paidNoVoucher: 0, revenueAtRisk: 0, sold: 0,
+            },
+            daily: [], byPlan: [], byVillage: [], byHour: [], outcomes: [], soldByPlan: [],
+          });
+        }
 
         const [txns] = await pool.query(
           `SELECT l.transaction_id,
@@ -686,8 +748,26 @@ export function makePortalConfigController(pool) {
         const [projects] = await pool.query(`SELECT name, ruijie_group_id FROM network_projects`);
         const villageName = Object.fromEntries(projects.filter((p) => p.ruijie_group_id).map((p) => [String(p.ruijie_group_id), p.name]));
 
-        const days = new Date(yy, mm, 0).getDate();
-        const daily = Array.from({ length: days }, (_, i) => ({ d: String(i + 1), revenue: 0, count: 0 }));
+        // Bucket the series over the WINDOW, not over a fixed calendar month:
+        // "this week" can straddle two months and "all time" spans years, so the
+        // old day-of-month indexing would have silently dropped or collided
+        // points. Days are labelled bare ("14") within a single month and dated
+        // ("14 Aug") when the window crosses one.
+        const daily = [];
+        const bucketAt = new Map();
+        if (bucket === 'month') {
+          for (let d = new Date(from); d < to; d = new Date(d.getFullYear(), d.getMonth() + 1, 1)) {
+            bucketAt.set(ym(d), daily.length);
+            daily.push({ d: `${MON[d.getMonth()]} ${String(d.getFullYear()).slice(2)}`, revenue: 0, count: 0 });
+          }
+        } else {
+          const last = new Date(to.getTime() - 1);
+          const oneMonth = from.getFullYear() === last.getFullYear() && from.getMonth() === last.getMonth();
+          for (let d = new Date(from); d < to; d = new Date(d.getFullYear(), d.getMonth(), d.getDate() + 1)) {
+            bucketAt.set(ymd(d), daily.length);
+            daily.push({ d: oneMonth ? String(d.getDate()) : `${d.getDate()} ${MON[d.getMonth()]}`, revenue: 0, count: 0 });
+          }
+        }
         const byHour = Array.from({ length: 24 }, (_, h) => ({ h: String(h).padStart(2, '0'), count: 0, revenue: 0 }));
         const planAgg = {}, villageAgg = {};
         const phones = new Set();
@@ -695,8 +775,7 @@ export function makePortalConfigController(pool) {
 
         for (const t of txns) {
           const grp = resolveGroup(t);
-          if (groupId && String(grp) !== String(groupId)) continue;
-          if (allowedGroups && !allowedGroups.has(String(grp))) continue;
+          if (allowed && !allowed.has(String(grp))) continue;
           const amt = Number(t.amount) || 0;
           if (!(amt > 0)) continue;
           const ts = t.ts ? new Date(t.ts) : null;
@@ -706,8 +785,8 @@ export function makePortalConfigController(pool) {
           if (Number(t.has_manual)) manual++;
           if (!Number(t.has_voucher)) noVoucher++;
           if (ts) {
-            const di = ts.getDate() - 1;
-            if (daily[di]) { daily[di].revenue += amt; daily[di].count++; }
+            const bi = bucketAt.get(bucket === 'month' ? ym(ts) : ymd(ts));
+            if (bi !== undefined) { daily[bi].revenue += amt; daily[bi].count++; }
             const hi = ts.getHours();
             byHour[hi].count++; byHour[hi].revenue += amt;
           }
@@ -721,30 +800,82 @@ export function makePortalConfigController(pool) {
         }
 
         // What happened across the whole window, money or not — the failure
-        // types are as interesting as the successes.
-        const [events] = await pool.query(
-          `SELECT event_type, COUNT(*) AS c FROM portal_audit_logs
-            WHERE event_timestamp >= ? AND event_timestamp < ?
-            GROUP BY event_type ORDER BY c DESC`,
-          [from, to]
+        // types are as interesting as the successes. Grouped by the same
+        // plan/user-group keys the village resolution uses so this narrows with
+        // the rest of the page; it used to count every village unconditionally.
+        //
+        // Attribution is per TRANSACTION, not per row. Most audit rows carry no
+        // plan_key of their own — manual_assistance_resolved and token_mismatch
+        // write neither plan_key nor user_group_id — so judging each row alone
+        // would resolve them to no village and drop them from every scoped view,
+        // turning those counts into a structural zero. The derived table repeats
+        // the MAX() rollup the money query already uses so a bare row inherits
+        // its transaction's village.
+        //
+        // The third COALESCE arm is for the email events: emailLog.js has no
+        // group_id column to write to, so it puts the VILLAGE id in
+        // user_group_id, which no plan config will ever match.
+        //
+        // COLLATE on both joins because portal_audit_logs and
+        // portal_plan_configs do not share one.
+        const [eventRows] = await pool.query(
+          `SELECT l.event_type,
+                  COALESCE(pk.group_id      COLLATE utf8mb4_unicode_ci,
+                           pu.group_id      COLLATE utf8mb4_unicode_ci,
+                           t.user_group_id  COLLATE utf8mb4_unicode_ci) AS grp,
+                  COUNT(*) AS c
+             FROM portal_audit_logs l
+             LEFT JOIN (
+                   SELECT transaction_id,
+                          MAX(plan_key)      AS plan_key,
+                          MAX(user_group_id) AS user_group_id
+                     FROM portal_audit_logs
+                    WHERE transaction_id IS NOT NULL
+                      AND event_timestamp >= ? AND event_timestamp < ?
+                    GROUP BY transaction_id
+                 ) t ON t.transaction_id = l.transaction_id
+             LEFT JOIN portal_plan_configs pk
+                    ON pk.plan_key COLLATE utf8mb4_unicode_ci = t.plan_key COLLATE utf8mb4_unicode_ci
+             LEFT JOIN portal_plan_configs pu
+                    ON pu.user_group_id COLLATE utf8mb4_unicode_ci = t.user_group_id COLLATE utf8mb4_unicode_ci
+            WHERE l.event_timestamp >= ? AND l.event_timestamp < ?
+            GROUP BY l.event_type, grp`,
+          [from, to, from, to]
         );
+        const outcomeAgg = {};
+        for (const e of eventRows) {
+          const grp = e.grp == null ? null : String(e.grp);
+          // An event that resolves to NO village (a process-level system_error
+          // with no transaction at all) belongs to none of them, so it is shown
+          // in every scope rather than hidden from all of them.
+          if (allowed && grp != null && !allowed.has(grp)) continue;
+          outcomeAgg[e.event_type] = (outcomeAgg[e.event_type] || 0) + Number(e.c);
+        }
+        const events = Object.entries(outcomeAgg)
+          .map(([type, count]) => ({ type, count }))
+          .sort((a, b) => b.count - a.count);
 
         // Units sold, straight from the claim ledger (one row per purchase).
+        const allowedList = allowed ? [...allowed] : null;
         const [claims] = await pool.query(
           `SELECT pc.name AS plan, COUNT(*) AS sold
              FROM voucher_claims vc
              JOIN portal_plan_configs pc ON pc.id = vc.plan_config_id
             WHERE vc.claimed_at >= ? AND vc.claimed_at < ?
               AND vc.status IN ('claimed','used','manually_assigned')
-              ${groupId ? 'AND pc.group_id = ?' : ''}
+              ${allowedList ? 'AND pc.group_id IN (?)' : ''}
             GROUP BY pc.name ORDER BY sold DESC`,
-          groupId ? [from, to, groupId] : [from, to]
+          allowedList ? [from, to, allowedList] : [from, to]
         );
 
         const round = (n) => Math.round(n * 100) / 100;
         return send.ok(res, {
-          month,
+          month: selection, // legacy name; 'all' | 'week' | 'month' | 'YYYY-MM'
+          selection,
           months,
+          dailyUnit: bucket,
+          fromDate: ymd(from),
+          toDate: ymd(new Date(to.getTime() - 1)),
           totals: {
             revenue: round(revenue),
             transactions: count,
@@ -761,7 +892,7 @@ export function makePortalConfigController(pool) {
           byHour,
           byPlan: Object.values(planAgg).sort((a, b) => b.revenue - a.revenue).map((p) => ({ ...p, revenue: round(p.revenue) })),
           byVillage: Object.values(villageAgg).sort((a, b) => b.revenue - a.revenue).map((v) => ({ ...v, revenue: round(v.revenue) })),
-          outcomes: events.map((e) => ({ type: e.event_type, count: Number(e.c) })),
+          outcomes: events,
           soldByPlan: claims.map((c) => ({ name: c.plan, sold: Number(c.sold) })),
         });
       } catch (e) { console.error('[breakdown]', e); return send.serverErr(res); }
