@@ -176,21 +176,29 @@ export default function ManualAssistancePage() {
                       </td>
                       <td className="px-4 py-3">
                         <div className="flex items-center justify-end gap-2">
-                          {c.voucherCode && (
-                            <Button
-                              variant="secondary"
-                              size="sm"
-                              iconLeft={<Mail size={13} />}
-                              onClick={() => openEmail(c)}
-                              title={
-                                c.customerEmail
-                                  ? `Email the code to ${c.customerEmail}`
-                                  : "No email on file - you can type one"
-                              }
-                            >
-                              Email code
-                            </Button>
-                          )}
+                          {/* Only offered when we actually have an address for
+                              this number — there is nothing to email otherwise.
+                              The reason is shown rather than the button simply
+                              vanishing, so it is clear a mapping would fix it. */}
+                          {c.voucherCode &&
+                            (c.customerEmail ? (
+                              <Button
+                                variant="secondary"
+                                size="sm"
+                                iconLeft={<Mail size={13} />}
+                                onClick={() => openEmail(c)}
+                                title={`Email the code to ${c.customerEmail}`}
+                              >
+                                Email code
+                              </Button>
+                            ) : (
+                              <span
+                                className="text-[11.5px] text-[var(--fg-muted)] whitespace-nowrap"
+                                title="Add this number under M-PAiSA Mapping to email their code"
+                              >
+                                No email on file
+                              </span>
+                            ))}
                           {!c.resolved && (
                             <Button
                               variant="secondary"
@@ -240,11 +248,7 @@ export default function ManualAssistancePage() {
             <Field
               label="Send to"
               htmlFor="ma-email"
-              hint={
-                emailCase.customerEmail
-                  ? "From the M-PAiSA mapping for this number. Change it to send somewhere else."
-                  : "No M-PAiSA mapping for this number, so type where it should go."
-              }
+              hint="From the M-PAiSA mapping for this number. Change it to send somewhere else."
             >
               <Input
                 id="ma-email"
