@@ -284,7 +284,13 @@ export function makePortalApiController(pool) {
         const smtp = await loadSmtpTransport(pool);
         if (!smtp) return skip('smtp_not_configured', groupId);
 
-        const statusUrl = hostNorm ? `https://${hostNorm}/status` : null;
+        // Deep-link to THIS voucher rather than bare /status. /status resolves by
+        // device (session or MAC) and one number can hold several live vouchers
+        // at once, so a bare link can legitimately land on a different one than
+        // the email is about.
+        const statusUrl = hostNorm
+          ? `https://${hostNorm}/status${voucherCode ? `/${encodeURIComponent(voucherCode)}` : ''}`
+          : null;
         const mail = buildReceipt({ voucherCode, statusUrl, planName, dataAllowance, amount });
         try {
           await smtp.transport.sendMail({

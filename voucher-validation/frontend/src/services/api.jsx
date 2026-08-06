@@ -152,6 +152,8 @@ export const portalConfigApi = {
   // body.email overrides the M-PAiSA mapping; omit it to use the mapped address.
   emailManualAssistance: (transactionId, body = {}) =>
     api(`/portal-config/manual-assistance/${encodeURIComponent(transactionId)}/email`, { method: "POST", body }),
+  // Re-renders what was sent, for one *_email_sent audit row.
+  emailPreview: (logId) => api(`/portal-config/email-preview/${encodeURIComponent(logId)}`),
 };
 
 // Network monitoring API helpers

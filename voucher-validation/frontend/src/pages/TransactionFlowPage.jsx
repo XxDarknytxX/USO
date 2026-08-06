@@ -24,11 +24,12 @@ import {
   Tag,
   ArrowRight,
   Ticket,
+  Mail,
 } from "lucide-react";
 
-import { portalAuditApi } from "../services/api";
+import { portalAuditApi, portalConfigApi } from "../services/api";
 import Pagination from "../components/shared/Pagination";
-import { Badge, EmptyState, PageHeader, Panel } from "../components/ui";
+import { Badge, EmptyState, PageHeader, Panel, Modal, Button } from "../components/ui";
 
 const STATUS_OPTIONS = [
   { value: "", label: "All statuses" },
@@ -452,6 +453,23 @@ function TimelineStep({ event, isLast }) {
   const msg = event.event_data?.message;
   const hasError = event.event_data?.error;
 
+  // Only a SENT email has something to show. The preview is re-rendered from
+  // this row, so it is pinned to the voucher that was actually in that email.
+  const isSentEmail = /_email_sent$/.test(event.event_type || "") && event.id != null;
+  const [preview, setPreview] = useState(null);
+  const [loadingPreview, setLoadingPreview] = useState(false);
+
+  const openPreview = async () => {
+    setLoadingPreview(true);
+    try {
+      setPreview(await portalConfigApi.emailPreview(event.id));
+    } catch (e) {
+      toast.error("Could not load the email: " + e.message);
+    } finally {
+      setLoadingPreview(false);
+    }
+  };
+
   const dotClass =
     tone === "success"
       ? "bg-[var(--success-fg)]"
@@ -501,14 +519,26 @@ function TimelineStep({ event, isLast }) {
           </p>
         )}
 
-        {event.event_data && (
-          <button
-            onClick={() => setOpen(!open)}
-            className="text-[12px] font-medium text-[var(--text-tertiary)] hover:text-[var(--text-secondary)] mt-1 transition-colors"
-          >
-            {open ? "Hide details" : "Show details"}
-          </button>
-        )}
+        <div className="flex items-center gap-3 mt-1">
+          {event.event_data && (
+            <button
+              onClick={() => setOpen(!open)}
+              className="text-[12px] font-medium text-[var(--text-tertiary)] hover:text-[var(--text-secondary)] transition-colors"
+            >
+              {open ? "Hide details" : "Show details"}
+            </button>
+          )}
+          {isSentEmail && (
+            <button
+              onClick={openPreview}
+              disabled={loadingPreview}
+              className="text-[12px] font-medium text-[var(--brand)] hover:opacity-80 transition-opacity inline-flex items-center gap-1 disabled:opacity-50"
+            >
+              <Mail size={11} />
+              {loadingPreview ? "Loading…" : "View email"}
+            </button>
+          )}
+        </div>
 
         <AnimatePresence>
           {open && (
@@ -533,6 +563,49 @@ function TimelineStep({ event, isLast }) {
           )}
         </AnimatePresence>
       </div>
+
+      {preview && (
+        <Modal open onClose={() => setPreview(null)} width="xl">
+          <Modal.Header
+            eyebrow={preview.template === "manual_assist" ? "Manual assistance" : "Purchase receipt"}
+            title="Email sent to the customer"
+            subtitle={`${preview.to || "unknown recipient"} · ${formatTs(preview.sentAt)}`}
+            icon={Mail}
+            onClose={() => setPreview(null)}
+          />
+          <Modal.Body>
+            <div className="flex flex-wrap items-center gap-x-5 gap-y-2 mb-4 text-[12.5px]">
+              <span className="text-[var(--fg-muted)]">
+                Subject <span className="text-[var(--fg-primary)]">{preview.subject}</span>
+              </span>
+              {preview.voucherCode && (
+                <span className="text-[var(--fg-muted)]">
+                  Voucher{" "}
+                  <span className="font-mono font-semibold text-[var(--fg-primary)]">
+                    {preview.voucherCode}
+                  </span>
+                </span>
+              )}
+              {preview.bcc && (
+                <span className="text-[var(--fg-muted)]">
+                  Bcc <span className="text-[var(--fg-primary)]">{preview.bcc}</span>
+                </span>
+              )}
+            </div>
+            {/* Sandboxed: the email is rendered markup, and it must not be able
+                to run script or navigate the admin portal. */}
+            <iframe
+              title="Email preview"
+              sandbox=""
+              srcDoc={preview.html}
+              className="w-full h-[60vh] rounded-md border border-[var(--border-default)] bg-white"
+            />
+          </Modal.Body>
+          <Modal.Footer>
+            <Button variant="secondary" onClick={() => setPreview(null)}>Close</Button>
+          </Modal.Footer>
+        </Modal>
+      )}
     </div>
   );
 }

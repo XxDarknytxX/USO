@@ -1,7 +1,7 @@
 // src/controllers/portalConfigController.js
 // Admin CRUD for portal plan configurations + audit log viewing
 
-import { loadSmtpTransport, buildManualAssist } from "../services/mailer.js";
+import { loadSmtpTransport, buildManualAssist, buildReceipt, inlineLogo } from "../services/mailer.js";
 import { logEmailEvent } from "../services/emailLog.js";
 
 const send = {
@@ -1067,7 +1067,8 @@ export function makePortalConfigController(pool) {
           const [[np]] = await pool.query(
             'SELECT hostname FROM network_projects WHERE ruijie_group_id = ? LIMIT 1', [vr.group_id]
           );
-          if (np?.hostname) statusUrl = `https://${np.hostname}/status`;
+          // Deep-linked to this voucher — see the note in portalApiController.
+          if (np?.hostname) statusUrl = `https://${np.hostname}/status/${encodeURIComponent(voucherCode)}`;
         }
 
         const smtp = await loadSmtpTransport(pool);
@@ -1112,6 +1113,88 @@ export function makePortalConfigController(pool) {
         });
         return send.ok(res, { success: true, to: email, bcc: bcc || null });
       } catch (e) { console.error(e); return send.serverErr(res); }
+    },
+
+    // GET /api/portal-config/email-preview/:logId
+    // Shows exactly what a customer was sent, for one `*_email_sent` audit row.
+    //
+    // The HTML is RE-RENDERED from that row rather than stored: emails are a few
+    // KB of markup each and archiving them would bloat the audit table for no
+    // gain. The row carries the identity that matters — the voucher code that
+    // was in that email — so the preview is pinned to it and can never show a
+    // different, later voucher for the same customer.
+    getEmailPreview: async (req, res) => {
+      const logId = Number(req.params.logId);
+      if (!Number.isFinite(logId)) return send.bad(res, 'A numeric log id is required');
+      try {
+        const [[row]] = await pool.query(
+          `SELECT id, event_type, transaction_id, voucher_code, amount, user_group_id,
+                  customer_phone, event_data, event_timestamp
+             FROM portal_audit_logs WHERE id = ? LIMIT 1`,
+          [logId]
+        );
+        if (!row) return send.notFound(res, 'No such log entry');
+        if (!/_email_sent$/.test(row.event_type)) {
+          return send.bad(res, 'That log entry is not a sent email');
+        }
+        let meta = row.event_data;
+        if (typeof meta === 'string') { try { meta = JSON.parse(meta); } catch { meta = {}; } }
+        meta = meta || {};
+
+        const template = meta.template === 'manual_assist' ? 'manual_assist' : 'receipt';
+        // Pinned to the voucher recorded ON THIS ROW.
+        const voucherCode = row.voucher_code || null;
+
+        // Plan wording comes from the transaction's own plan_key; the amount and
+        // village from the row. All best-effort — a missing piece just drops that
+        // block, exactly as it would have on the original send.
+        let planName = null, dataAllowance = null;
+        if (row.transaction_id) {
+          const [[pk]] = await pool.query(
+            `SELECT MAX(plan_key) AS plan_key FROM portal_audit_logs WHERE transaction_id = ?`,
+            [row.transaction_id]
+          );
+          if (pk?.plan_key) {
+            const [[plan]] = await pool.query(
+              `SELECT name, data_allowance FROM portal_plan_configs
+                WHERE plan_key COLLATE utf8mb4_unicode_ci = ? LIMIT 1`,
+              [pk.plan_key]
+            );
+            planName = plan?.name || pk.plan_key;
+            dataAllowance = plan?.data_allowance || null;
+          }
+        }
+
+        let statusUrl = null;
+        if (voucherCode) {
+          const [[vr]] = await pool.query(
+            'SELECT group_id FROM vouchers WHERE voucher_code = ? LIMIT 1', [voucherCode]
+          );
+          const gid = vr?.group_id || row.user_group_id || null;
+          if (gid) {
+            const [[np]] = await pool.query(
+              'SELECT hostname FROM network_projects WHERE ruijie_group_id = ? LIMIT 1', [gid]
+            );
+            if (np?.hostname) statusUrl = `https://${np.hostname}/status/${encodeURIComponent(voucherCode)}`;
+          }
+        }
+
+        const args = { voucherCode, statusUrl, planName, dataAllowance, amount: row.amount };
+        const mail = template === 'manual_assist' ? buildManualAssist(args) : buildReceipt(args);
+
+        return send.ok(res, {
+          template,
+          subject: mail.subject,
+          html: inlineLogo(mail.html),
+          text: mail.text,
+          to: meta.to || null,
+          bcc: template === 'manual_assist' ? (mail.bcc || null) : null,
+          sentAt: row.event_timestamp,
+          voucherCode,
+          planName,
+          amount: row.amount,
+        });
+      } catch (e) { console.error('[email-preview]', e); return send.serverErr(res); }
     },
   };
 }

@@ -98,6 +98,19 @@ export function logoAttachment() {
   };
 }
 
+/**
+ * Swap the inline-logo CID reference for a data URI so the HTML can be viewed
+ * standalone — an admin previewing a sent email has no MIME parts to resolve
+ * `cid:` against, and would otherwise see a broken image.
+ */
+export function inlineLogo(html) {
+  if (!_logoBuf) return String(html);
+  return String(html).replaceAll(
+    `cid:${LOGO_CID}`,
+    `data:image/png;base64,${_logoBuf.toString("base64")}`
+  );
+}
+
 // One shared transport for the whole process, rebuilt only when the saved SMTP
 // settings actually change. See loadSmtpTransport for why this is cached.
 let _cachedSmtp = null;
@@ -690,7 +703,8 @@ export const EMAIL_TEMPLATES = [
 // Realistic sample data so a test receipt looks like the real thing.
 const SAMPLE_RECEIPT = {
   voucherCode: "USO-TEST-8842",
-  statusUrl: "https://uso2.vodafonefiji.cloud/status",
+  // Deep-linked exactly as a real send builds it.
+  statusUrl: "https://uso2.vodafonefiji.cloud/status/USO-TEST-8842",
   planName: "Daily Wi-Fi",
   dataAllowance: "2 GB",
   amount: 2.0,

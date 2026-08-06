@@ -40,5 +40,9 @@ export function makePortalConfigRouter(controller, attachScope) {
   // Emails the customer their reserved voucher code (team-bcc'd by the template).
   router.post("/manual-assistance/:transactionId/email", requireNotViewer, controller.emailManualAssistance);
 
+  // Re-renders a sent email for review. Not for viewers — it exposes the
+  // customer's address.
+  router.get("/email-preview/:logId", requireNotViewer, controller.getEmailPreview);
+
   return router;
 }

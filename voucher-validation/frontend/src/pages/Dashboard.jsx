@@ -53,13 +53,6 @@ import {
   BAR_RADIUS, BAR_MAX_SIZE, BAR_CATEGORY_GAP,
 } from "../components/ui";
 
-// Categorize package by time_period (minutes)
-function classifyPackage(timePeriodMinutes) {
-  const mins = Number(timePeriodMinutes || 0);
-  if (mins <= 1440) return "daily";
-  if (mins <= 10080) return "weekly";
-  return "monthly";
-}
 
 // Palette: brand red + neutrals. Charts pull from these via getCSSVar.
 function getVar(name, fallback) {
@@ -108,7 +101,6 @@ export default function Dashboard() {
   // transactions that resolve to no village at all still count.
   const mb = useMonthlyBreakdown(null, allVisible ? null : inScopeGroupIds);
   const [manualAssist, setManualAssist] = useState(null);
-  const [activeView, setActiveView] = useState("overview");
   const [selectedPackage, setSelectedPackage] = useState(null);
   const [drillDownData, setDrillDownData] = useState(null);
 
@@ -207,17 +199,8 @@ export default function Dashboard() {
     [voucherStats, inScopeGroupIds, allVisible]
   );
 
-  const filteredPackageStats = useMemo(() => {
-    const base = scopedPackageStats;
-    if (!base.length) return [];
-    if (activeView === "overview") return base;
-    return base.filter(
-      (pkg) => classifyPackage(Number(pkg.avg_duration_minutes || 0)) === activeView
-    );
-  }, [scopedPackageStats, activeView]);
-
   const metrics = useMemo(() => {
-    const f = filteredPackageStats;
+    const f = scopedPackageStats;
     return {
       totalVouchers: f.reduce((s, p) => s + Number(p.total || 0), 0),
       unusedVouchers: f.reduce((s, p) => s + Number(p.unused || 0), 0),
@@ -231,7 +214,7 @@ export default function Dashboard() {
       expired: f.reduce((s, p) => s + Number(p.expired || 0), 0),
       inactive: f.reduce((s, p) => s + Number(p.inactive || 0), 0),
     };
-  }, [filteredPackageStats]);
+  }, [scopedPackageStats]);
 
   // ---- Scope-aware headline numbers (from per-site totals) ----
   const scopedPerSite = useMemo(() => {
@@ -297,7 +280,7 @@ export default function Dashboard() {
     [revenue]
   );
 
-  const pieData = filteredPackageStats
+  const pieData = scopedPackageStats
     .filter((p) => Number(p.total || 0) > 0)
     .map((p) => ({
       name: p.package_name || "Unknown",
@@ -334,7 +317,7 @@ export default function Dashboard() {
     return out;
   })();
 
-  const quotaBarData = filteredPackageStats.map((p) => ({
+  const quotaBarData = scopedPackageStats.map((p) => ({
     name: p.package_name || "Unknown",
     shortName:
       (p.package_name || "Unknown").length > 12
@@ -438,39 +421,8 @@ export default function Dashboard() {
           </button>
         )}
 
-        {/* ----- View tabs ----- */}
-        <div
-          className={
-            "inline-flex items-center rounded-md p-0.5 " +
-            "bg-[var(--surface-raised)] border border-[var(--border-default)]"
-          }
-        >
-          {[
-            { key: "overview", label: "All" },
-            { key: "daily", label: "Daily" },
-            { key: "weekly", label: "Weekly" },
-            { key: "monthly", label: "Monthly" },
-          ].map(({ key, label }) => {
-            const active = activeView === key;
-            return (
-              <button
-                key={key}
-                onClick={() => setActiveView(key)}
-                className={
-                  "h-7 px-3 text-[12px] font-medium rounded transition-colors " +
-                  (active
-                    ? "bg-[var(--surface-hover)] text-[var(--text-primary)]"
-                    : "text-[var(--text-tertiary)] hover:text-[var(--text-primary)]")
-                }
-              >
-                {label}
-              </button>
-            );
-          })}
-        </div>
-
-        {/* ----- Sales for the selected month (scope-aware) -----
-             Labelled with the month so a figure can never be misread as
+        {/* ----- Sales for the selected window (scope-aware) -----
+             Labelled with the window so a figure can never be misread as
              all-time, which is what the old "total" card actually was. */}
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
           <MetricCard
@@ -842,7 +794,7 @@ export default function Dashboard() {
 
           <ChartCard title="Quick overview" icon={<Wifi size={14} />}>
             <div className="space-y-2 overflow-y-auto max-h-[280px] pr-1">
-              {filteredPackageStats.map((pkg, i) => {
+              {scopedPackageStats.map((pkg, i) => {
                 const total = Number(pkg.total || 0);
                 const active = Number(pkg.active || 0);
                 const pct = total ? Math.round((active / total) * 100) : 0;
@@ -892,7 +844,7 @@ export default function Dashboard() {
                   </div>
                 );
               })}
-              {filteredPackageStats.length === 0 && (
+              {scopedPackageStats.length === 0 && (
                 <EmptyChart message="No packages in this category" />
               )}
             </div>
@@ -910,7 +862,7 @@ export default function Dashboard() {
             </span>
           </div>
           <PlanBreakdown
-            packages={filteredPackageStats}
+            packages={scopedPackageStats}
             formatQuota={formatQuota}
             onSelect={handlePackageDrillDown}
           />
