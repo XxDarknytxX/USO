@@ -243,29 +243,15 @@ export default function Dashboard() {
   }, [scopedPerSite]);
 
   // ---- Revenue (scoped to the in-scope villages) ----
-  const revByGroup = useMemo(() => {
+  // Per-village revenue for the SELECTED WINDOW. The /revenue payload this used
+  // to read is all-time plus a hard-coded current calendar month, so the site
+  // cards sat frozen while the picker moved everything else on the page. The
+  // breakdown already returns exactly this, scoped to the same window.
+  const revWindowByGroup = useMemo(() => {
     const map = {};
-    for (const r of revenue?.perSite || []) map[String(r.groupId)] = r;
+    for (const v of mb.data?.byVillage || []) map[String(v.groupId)] = v;
     return map;
-  }, [revenue]);
-
-  const scopedRevenue = useMemo(() => {
-    if (!revenue) return { total: 0, month: 0, count: 0, monthCount: 0 };
-    if (allVisible)
-      return {
-        total: revenue.total || 0,
-        month: revenue.month || 0,
-        count: revenue.totalCount || 0,
-        monthCount: revenue.monthCount || 0,
-      };
-    let total = 0, month = 0, count = 0, monthCount = 0;
-    for (const site of sites) {
-      if (!isSiteVisible(site.id)) continue;
-      const r = revByGroup[String(site.ruijieGroupId)];
-      if (r) { total += r.revenue; month += r.month; count += r.count; monthCount += r.monthCount; }
-    }
-    return { total, month, count, monthCount };
-  }, [revenue, allVisible, sites, isSiteVisible, revByGroup]);
+  }, [mb.data]);
 
   const fmtMoney = (n) =>
     "$" + Number(n || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -515,7 +501,8 @@ export default function Dashboard() {
                       name={site?.name || (s.group_id ? `Group ${s.group_id}` : "Unassigned")}
                       hostname={site?.hostname}
                       stats={s}
-                      revenue={revByGroup[String(s.group_id)]}
+                      revenue={revWindowByGroup[String(s.group_id)]}
+                      windowLabel={mb.label}
                       fmtMoney={fmtMoney}
                       onOpen={
                         site
@@ -997,7 +984,7 @@ export default function Dashboard() {
 
 /* ------------ Sub-components --------------------------------------------- */
 
-function SiteCard({ name, hostname, stats, revenue, fmtMoney, onOpen }) {
+function SiteCard({ name, hostname, stats, revenue, windowLabel, fmtMoney, onOpen }) {
   const total = Number(stats.total || 0);
   const active = Number(stats.active || 0);
   const live = Number(stats.currently_in_use || 0);
@@ -1005,8 +992,9 @@ function SiteCard({ name, hostname, stats, revenue, fmtMoney, onOpen }) {
   const totalQ = Number(stats.total_quota_mb || 0);
   const dataPct = totalQ ? Math.round((usedQ / totalQ) * 100) : 0;
   const money = fmtMoney || ((n) => "$" + Number(n || 0).toFixed(2));
+  // Both figures are for the window the picker is on, so a village can read
+  // $0 — that is a real answer for the window, not missing data.
   const rev = Number(revenue?.revenue || 0);
-  const revMonth = Number(revenue?.month || 0);
   const revCount = Number(revenue?.count || 0);
   return (
     <button
@@ -1049,7 +1037,7 @@ function SiteCard({ name, hostname, stats, revenue, fmtMoney, onOpen }) {
         </div>
         <div className="text-right">
           <span className="block text-[10px] text-[var(--brand-fg-on-soft)] opacity-80">
-            {money(revMonth)} this month
+            {windowLabel || "this month"}
           </span>
           <span className="block text-[10px] text-[var(--brand-fg-on-soft)] opacity-70">
             {revCount.toLocaleString()} sale{revCount === 1 ? "" : "s"}
