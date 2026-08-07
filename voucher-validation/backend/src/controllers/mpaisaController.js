@@ -270,5 +270,101 @@ export function makeMpaisaController(pool) {
     }
   }
 
-  return { upload, list, create, update };
+  // GET /api/mpaisa/unmapped?page&pageSize&search&all=1
+  //
+  // Every transaction number that has no M-PAiSA mapping. Take the numbers we
+  // have seen in transactions, compare them against the mapping table, list the
+  // ones that are not there — that is the whole rule.
+  //
+  // THE TEST MUST BE THE INVERSE OF THE RECEIPT LOOKUP or this lists the wrong
+  // people. That lookup tries three arms — `number = digits`, `number = core`
+  // (leading zeros and a 679 stripped) and `RIGHT(number,7) = last7`. All three
+  // normalisations only ever remove a PREFIX, so the last 7 digits are identical
+  // across them: RIGHT(...,7) is the widest arm, and anything the exact arms
+  // match it matches too. "No RIGHT-7 match" therefore implies "no match at
+  // all", so nobody who would really have been emailed can appear here.
+  async function unmapped(req, res) {
+    try {
+      const all = String(req.query.all || "") === "1";
+      const page = Math.max(1, parseInt(req.query.page, 10) || 1);
+      // `all` is for the CSV export. Capped so one click can never try to
+      // serialise an unbounded table; the response says when it was truncated.
+      const EXPORT_CAP = 10000;
+      const pageSize = all ? EXPORT_CAP : Math.min(200, Math.max(1, parseInt(req.query.pageSize, 10) || 25));
+      const offset = all ? 0 : (page - 1) * pageSize;
+      const search = String(req.query.search || "").trim();
+
+      // One row per transaction first, so a customer who bought ten times is
+      // counted as ten transactions and not as ten audit rows.
+      const TX = `
+        (
+          SELECT transaction_id,
+                 MAX(customer_phone)  AS customer_phone,
+                 MAX(amount)          AS amount,
+                 MAX(event_timestamp) AS last_at
+            FROM portal_audit_logs
+           WHERE transaction_id IS NOT NULL
+           GROUP BY transaction_id
+          HAVING customer_phone IS NOT NULL AND customer_phone <> ''
+        ) tx`;
+
+      const NO_MAPPING = `
+        NOT EXISTS (
+          SELECT 1 FROM mpaisa_mappings mm
+           WHERE RIGHT(mm.number, 7) COLLATE utf8mb4_unicode_ci
+               = RIGHT(tx.customer_phone, 7) COLLATE utf8mb4_unicode_ci
+        )`;
+
+      const params = [];
+      let filter = "";
+      if (search) {
+        filter = " AND tx.customer_phone LIKE ?";
+        params.push(`%${search}%`);
+      }
+
+      // Collapsed to ONE ROW PER NUMBER. Grouped on the last 7 digits so the
+      // same customer recorded once bare and once with a 679 prefix is one
+      // person here, not two — the same key the mapping test uses.
+      const GROUPED = `
+           FROM ${TX}
+          WHERE ${NO_MAPPING}${filter}
+          GROUP BY RIGHT(tx.customer_phone, 7)`;
+
+      const [[counts]] = await pool.query(
+        `SELECT COUNT(*) AS total FROM (SELECT 1 ${GROUPED}) g`,
+        params
+      );
+
+      const [rows] = await pool.query(
+        `SELECT MIN(tx.customer_phone)      AS phone,
+                COUNT(*)                    AS txn_count,
+                SUM(COALESCE(tx.amount, 0)) AS total_amount,
+                MAX(tx.last_at)             AS last_at
+         ${GROUPED}
+          ORDER BY last_at DESC
+          LIMIT ? OFFSET ?`,
+        [...params, pageSize, offset]
+      );
+
+      const total = Number(counts?.total || 0);
+      res.json({
+        rows: rows.map((r) => ({
+          phone: r.phone,
+          transactions: Number(r.txn_count || 0),
+          totalAmount: Number(r.total_amount || 0),
+          lastAt: r.last_at,
+        })),
+        total,
+        page: all ? 1 : page,
+        pageSize,
+        totalPages: all ? 1 : Math.max(1, Math.ceil(total / pageSize)),
+        truncated: all && total > EXPORT_CAP,
+      });
+    } catch (e) {
+      console.error("[mpaisa] unmapped failed:", e.message);
+      res.status(500).json({ error: e.message });
+    }
+  }
+
+  return { upload, list, create, update, unmapped };
 }

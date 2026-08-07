@@ -11,6 +11,7 @@ import {
 import toast from "react-hot-toast";
 
 import { mpaisaApi } from "../services/api";
+import UnmappedTransactions from "../components/UnmappedTransactions";
 import {
   PageHeader, Panel, Button, IconButton, Modal, Field, Input, Select, Badge,
 } from "../components/ui";
@@ -222,6 +223,8 @@ function MappingModal({ row, onClose, onSaved }) {
 }
 
 export default function MpaisaMappingPage() {
+  // "mapped" = the mapping table; "unmapped" = paying customers we cannot email.
+  const [tab, setTab] = useState("mapped");
   const [rows, setRows] = useState([]);
   const [total, setTotal] = useState(0);
   const [totalPages, setTotalPages] = useState(1);
@@ -338,7 +341,33 @@ export default function MpaisaMappingPage() {
         }
       />
 
-      <div className="mt-6">
+      {/* Two views of the same subject: who we can reach, and who we cannot. */}
+      <div className="mt-6 inline-flex items-center rounded-md p-0.5 bg-[var(--surface-raised)] border border-[var(--border-default)]">
+        {[
+          { v: "mapped", l: "Mappings" },
+          { v: "unmapped", l: "Unmapped customers" },
+        ].map(({ v, l }) => (
+          <button
+            key={v}
+            onClick={() => setTab(v)}
+            className={
+              "h-7 px-3 text-[12px] font-medium rounded transition-colors " +
+              (tab === v
+                ? "bg-[var(--surface-hover)] text-[var(--text-primary)]"
+                : "text-[var(--text-tertiary)] hover:text-[var(--text-primary)]")
+            }
+          >
+            {l}
+          </button>
+        ))}
+      </div>
+
+      {tab === "unmapped" ? (
+        <div className="mt-5">
+          <UnmappedTransactions />
+        </div>
+      ) : (
+      <div className="mt-5">
         <Panel
           padding={false}
           title="Number → email"
@@ -419,6 +448,7 @@ export default function MpaisaMappingPage() {
           <Pagination page={page} totalPages={totalPages} total={total} onPageChange={setPage} />
         </Panel>
       </div>
+      )}
 
       {editing && (
         <MappingModal

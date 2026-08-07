@@ -199,6 +199,11 @@ export const mpaisaApi = {
     return api(`/mpaisa${qs ? `?${qs}` : ""}`);
   },
   upload: (content) => api("/mpaisa/upload", { method: "POST", body: { content } }),
+  // Paid transactions whose number has no mapping. Pass all: 1 for the CSV.
+  unmapped: (params = {}) => {
+    const qs = new URLSearchParams(params).toString();
+    return api(`/mpaisa/unmapped${qs ? `?${qs}` : ""}`);
+  },
   create: (row) => api("/mpaisa", { method: "POST", body: row }),
   // `original` is the number of the row being edited; `row.number` may differ
   // (the number is the primary key and is itself editable).

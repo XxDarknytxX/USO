@@ -11,6 +11,8 @@ export function makeMpaisaRouter(controller) {
   // The upload body (a whole customer report as JSON text) is parsed by a
   // larger-limit express.json() mounted on this path in server.js.
   router.post("/upload", controller.upload);
+  // Paid customers with no mapping — the gap list, exported to CSV by the UI.
+  router.get("/unmapped", controller.unmapped);
   router.get("/", controller.list);
 
   // Manual entry: add one mapping, or edit an existing one (the number itself
