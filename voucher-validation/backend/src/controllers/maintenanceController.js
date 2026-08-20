@@ -155,7 +155,8 @@ export function makeMaintenanceController(pool) {
           return send.forbidden(res, "That draft belongs to another engineer");
         }
         const [checks] = await pool.query(
-          'SELECT component_key, condition_rating, notes FROM maintenance_checks WHERE visit_id = ?', [id]
+          `SELECT component_key, condition_rating, notes, status, submitted_at, reopen_reason
+             FROM maintenance_checks WHERE visit_id = ?`, [id]
         );
         const [photos] = await pool.query(
           `SELECT id, component_key, caption, mime_type, bytes, uploaded_at
@@ -172,6 +173,9 @@ export function makeMaintenanceController(pool) {
             hint: c.hint,
             condition: byKey[c.key]?.condition_rating || 'na',
             notes: byKey[c.key]?.notes || '',
+            status: byKey[c.key]?.status || 'draft',
+            submittedAt: byKey[c.key]?.submitted_at || null,
+            reopenReason: byKey[c.key]?.reopen_reason || null,
             photos: photos.filter((p) => p.component_key === c.key)
               .map((p) => ({ id: p.id, caption: p.caption, uploadedAt: p.uploaded_at })),
           })),
@@ -236,10 +240,15 @@ export function makeMaintenanceController(pool) {
         for (const c of checks) {
           if (!COMPONENT_KEYS.has(c?.key)) continue;           // ignore unknown components
           const cond = CONDITIONS.has(c?.condition) ? c.condition : 'na';
+          // A submitted component is evidence and does not move. The WHERE on
+          // the UPDATE half is what enforces that, so a stale browser holding
+          // an old draft cannot overwrite something already filed.
           await pool.query(
             `INSERT INTO maintenance_checks (visit_id, component_key, condition_rating, notes)
              VALUES (?, ?, ?, ?)
-             ON DUPLICATE KEY UPDATE condition_rating = VALUES(condition_rating), notes = VALUES(notes)`,
+             ON DUPLICATE KEY UPDATE
+               condition_rating = IF(status = 'submitted', condition_rating, VALUES(condition_rating)),
+               notes            = IF(status = 'submitted', notes, VALUES(notes))`,
             [id, c.key, cond, String(c?.notes || '').slice(0, 65535)]
           );
         }
@@ -266,6 +275,15 @@ export function makeMaintenanceController(pool) {
 
         const componentKey = req.body?.componentKey ? String(req.body.componentKey) : null;
         if (componentKey && !COMPONENT_KEYS.has(componentKey)) return send.bad(res, 'Unknown component');
+        if (componentKey) {
+          const [[chk]] = await pool.query(
+            'SELECT status FROM maintenance_checks WHERE visit_id = ? AND component_key = ? LIMIT 1',
+            [id, componentKey]
+          );
+          if (chk?.status === 'submitted') {
+            return send.forbidden(res, 'That component is filed — its photos are locked.');
+          }
+        }
         const mimeType = String(req.body?.mimeType || 'image/jpeg');
         if (!ALLOWED_MIME.includes(mimeType)) return send.bad(res, `Unsupported image type: ${mimeType}`);
 
@@ -312,17 +330,187 @@ export function makeMaintenanceController(pool) {
       try {
         const id = Number(req.params.id);
         const [[p]] = await pool.query(
-          `SELECT ph.id, ph.file_path, v.status, v.engineer_id
-             FROM maintenance_photos ph JOIN maintenance_visits v ON v.id = ph.visit_id
+          `SELECT ph.id, ph.file_path, ph.component_key, v.status, v.engineer_id,
+                  ck.status AS check_status
+             FROM maintenance_photos ph
+             JOIN maintenance_visits v ON v.id = ph.visit_id
+             LEFT JOIN maintenance_checks ck
+                    ON ck.visit_id = ph.visit_id AND ck.component_key = ph.component_key
             WHERE ph.id = ? LIMIT 1`, [id]
         );
         if (!p) return send.notFound(res, 'No such photo');
         if (p.status === 'submitted') return send.forbidden(res, 'This report is filed — photos cannot be removed.');
+        if (p.check_status === 'submitted') return send.forbidden(res, 'That component is filed — its photos are locked.');
         if (!isAdmin(req) && p.engineer_id !== req.user?.id) return send.forbidden(res, "That draft belongs to another engineer");
         await pool.query('DELETE FROM maintenance_photos WHERE id = ?', [id]);
         await deletePhoto(p.file_path);
         return send.ok(res, { success: true });
       } catch (e) { console.error('[maintenance] deletePhoto:', e); return send.serverErr(res); }
+    },
+
+    // POST /api/maintenance/visits/:id/checks/:key/submit
+    // Files ONE component. The engineer inspects the AP today and the gateway
+    // when that information is to hand — there is no reason to hold seven
+    // findings hostage to the last one. Submitting locks that component; the
+    // visit finalises by itself once all of them are in.
+    submitCheck: async (req, res) => {
+      try {
+        const id = Number(req.params.id);
+        const key = String(req.params.key || '');
+        if (!COMPONENT_KEYS.has(key)) return send.bad(res, 'Unknown component');
+
+        const [[v]] = await pool.query('SELECT * FROM maintenance_visits WHERE id = ? LIMIT 1', [id]);
+        if (!v) return send.notFound(res, 'No such visit');
+        if (!isAdmin(req) && v.engineer_id !== req.user?.id) return send.forbidden(res, "That draft belongs to another engineer");
+
+        const [[chk]] = await pool.query(
+          'SELECT * FROM maintenance_checks WHERE visit_id = ? AND component_key = ? LIMIT 1', [id, key]
+        );
+        if (!chk) return send.bad(res, 'Fill this component in before filing it');
+        if (chk.status === 'submitted') return send.bad(res, 'That component is already filed');
+
+        const [[{ n: photoCount }]] = await pool.query(
+          'SELECT COUNT(*) AS n FROM maintenance_photos WHERE visit_id = ? AND component_key = ?', [id, key]
+        );
+        // "Not applicable" is a legitimate finding — a village with no switch
+        // must still be completable — but it has to say why, since there is no
+        // photograph to speak for it.
+        if (chk.condition_rating === 'na') {
+          if (!String(chk.notes || '').trim()) {
+            return send.bad(res, 'Say why this component is not applicable before filing it');
+          }
+        } else if (!photoCount) {
+          return send.bad(res, 'At least one photo is needed before filing this component');
+        }
+
+        await pool.query(
+          `UPDATE maintenance_checks
+              SET status = 'submitted', submitted_at = NOW(), submitted_by = ?
+            WHERE visit_id = ? AND component_key = ? AND status = 'draft'`,
+          [req.user?.id ?? null, id, key]
+        );
+
+        // Finalise the visit when every component is in, so nobody has to
+        // remember a separate "file the report" step.
+        const [rows] = await pool.query(
+          `SELECT component_key, condition_rating FROM maintenance_checks
+            WHERE visit_id = ? AND status = 'submitted'`, [id]
+        );
+        const done = new Set(rows.map((r) => r.component_key));
+        const remaining = COMPONENTS.filter((c) => !done.has(c.key));
+        let finalised = false;
+        if (remaining.length === 0) {
+          const rated = rows.filter((r) => r.condition_rating !== 'na');
+          const overall = rated.some((r) => r.condition_rating === 'faulty')
+            ? 'faulty'
+            : rated.some((r) => r.condition_rating === 'attention') ? 'attention' : 'ok';
+          const [u] = await pool.query(
+            `UPDATE maintenance_visits SET status = 'submitted', submitted_at = NOW(), overall_condition = ?
+              WHERE id = ? AND status = 'draft'`, [overall, id]
+          );
+          finalised = u.affectedRows > 0;
+        }
+        return send.ok(res, {
+          success: true,
+          remaining: remaining.map((c) => c.label),
+          submittedCount: done.size,
+          totalCount: COMPONENTS.length,
+          visitFinalised: finalised,
+        });
+      } catch (e) { console.error('[maintenance] submitCheck:', e); return send.serverErr(res); }
+    },
+
+    // POST /api/maintenance/visits/:id/checks/:key/reopen { reason } — admin.
+    // Reopening a component also un-finalises the visit: the report as a whole
+    // is no longer complete while one of its findings is being revised.
+    reopenCheck: async (req, res) => {
+      try {
+        const id = Number(req.params.id);
+        const key = String(req.params.key || '');
+        const reason = String(req.body?.reason || '').trim();
+        if (!COMPONENT_KEYS.has(key)) return send.bad(res, 'Unknown component');
+        if (!reason) return send.bad(res, 'A reason is required to reopen a filed component');
+        const [r] = await pool.query(
+          `UPDATE maintenance_checks
+              SET status = 'draft', reopened_at = NOW(), reopen_reason = ?
+            WHERE visit_id = ? AND component_key = ? AND status = 'submitted'`,
+          [reason.slice(0, 500), id, key]
+        );
+        if (!r.affectedRows) return send.bad(res, 'That component is not filed');
+        await pool.query(
+          `UPDATE maintenance_visits SET status = 'draft', overall_condition = NULL
+            WHERE id = ? AND status = 'submitted'`, [id]
+        );
+        return send.ok(res, { success: true });
+      } catch (e) { console.error('[maintenance] reopenCheck:', e); return send.serverErr(res); }
+    },
+
+    // DELETE /api/maintenance/visits/:id — drafts only, owner or admin.
+    // Removes the photo files too: leaving orphans on disk would grow the data
+    // directory forever with nothing pointing at them.
+    deleteVisit: async (req, res) => {
+      try {
+        const id = Number(req.params.id);
+        const [[v]] = await pool.query('SELECT * FROM maintenance_visits WHERE id = ? LIMIT 1', [id]);
+        if (!v) return send.notFound(res, 'No such visit');
+        if (v.status === 'submitted') {
+          return send.forbidden(res, 'Filed reports cannot be deleted. An admin can reopen one instead.');
+        }
+        if (!isAdmin(req) && v.engineer_id !== req.user?.id) {
+          return send.forbidden(res, "That draft belongs to another engineer");
+        }
+        const [photos] = await pool.query('SELECT file_path FROM maintenance_photos WHERE visit_id = ?', [id]);
+        await pool.query('DELETE FROM maintenance_photos WHERE visit_id = ?', [id]);
+        await pool.query('DELETE FROM maintenance_checks WHERE visit_id = ?', [id]);
+        await pool.query('DELETE FROM maintenance_visits WHERE id = ?', [id]);
+        for (const p of photos) await deletePhoto(p.file_path);
+        return send.ok(res, { success: true, photosRemoved: photos.length });
+      } catch (e) { console.error('[maintenance] deleteVisit:', e); return send.serverErr(res); }
+    },
+
+    // GET /api/maintenance/submissions?projectId=&component=&limit=
+    // Every filed COMPONENT across every visit, newest first. The visit view
+    // answers "what happened on this attendance"; this answers "when was the
+    // Starlink dish last looked at, anywhere".
+    listSubmissions: async (req, res) => {
+      try {
+        const where = ["ck.status = 'submitted'"];
+        const params = [];
+        if (req.query.projectId) { where.push('v.project_id = ?'); params.push(Number(req.query.projectId)); }
+        if (req.query.component && COMPONENT_KEYS.has(String(req.query.component))) {
+          where.push('ck.component_key = ?'); params.push(String(req.query.component));
+        }
+        const limit = Math.min(500, Math.max(1, Number(req.query.limit) || 200));
+        const [rows] = await pool.query(
+          `SELECT ck.visit_id, ck.component_key, ck.condition_rating, ck.notes, ck.submitted_at,
+                  v.project_id, v.visit_date, v.engineer_name, p.name AS project_name,
+                  (SELECT COUNT(*) FROM maintenance_photos ph
+                    WHERE ph.visit_id = ck.visit_id AND ph.component_key = ck.component_key) AS photo_count
+             FROM maintenance_checks ck
+             JOIN maintenance_visits v ON v.id = ck.visit_id
+             LEFT JOIN network_projects p ON p.id = v.project_id
+            WHERE ${where.join(' AND ')}
+            ORDER BY ck.submitted_at DESC, ck.id DESC
+            LIMIT ?`,
+          [...params, limit]
+        );
+        const labels = Object.fromEntries(COMPONENTS.map((c) => [c.key, c.label]));
+        return send.ok(res, {
+          submissions: rows.map((r) => ({
+            visitId: r.visit_id,
+            projectId: r.project_id,
+            projectName: r.project_name,
+            component: r.component_key,
+            componentLabel: labels[r.component_key] || r.component_key,
+            condition: r.condition_rating,
+            notes: r.notes,
+            submittedAt: r.submitted_at,
+            visitDate: r.visit_date,
+            engineerName: r.engineer_name,
+            photoCount: Number(r.photo_count || 0),
+          })),
+        });
+      } catch (e) { console.error('[maintenance] listSubmissions:', e); return send.serverErr(res); }
     },
 
     // POST /api/maintenance/visits/:id/submit — files the report.

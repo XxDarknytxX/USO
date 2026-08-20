@@ -1,9 +1,11 @@
 // src/components/maintenance/VisitEditor.jsx
 // One service report: the checklist, notes and photos for a single visit.
 //
-// Two modes, from the same component, because they are the same document:
-//   draft     — the engineer fills it in and files it
-//   submitted — read-only evidence; an admin may reopen it with a reason
+// Each COMPONENT is filed on its own. An engineer inspects the access points
+// today and the gateway when that information is to hand; there is no reason to
+// hold seven findings hostage to the last one. Filing a component locks it, and
+// the visit finalises by itself once all seven are in — so there is no separate
+// "submit the report" step to forget.
 //
 // Drafts save on demand rather than on every keystroke: these are filed from
 // village Wi-Fi, and an autosave firing per character would spend the whole
@@ -12,16 +14,19 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import toast from "react-hot-toast";
 import {
-  ClipboardCheck, Camera, Send, Lock, Unlock, Save, AlertTriangle, CheckCircle2, X,
+  ClipboardCheck, Camera, Send, Lock, Unlock, Save, AlertTriangle, CheckCircle2, X, Check,
 } from "lucide-react";
 import { maintenanceApi, downscaleImage } from "../../services/api";
 import { Modal, Button, Badge, Field, Textarea, Input } from "../ui";
 import PhotoThumb from "./PhotoThumb";
 
 const CONDITION_UI = {
-  ok:        { label: "OK",             tone: "success", cls: "bg-[var(--success-fg)]" },
+  ok:        { label: "OK",              tone: "success", cls: "bg-[var(--success-fg)]" },
   attention: { label: "Needs attention", tone: "warning", cls: "bg-[var(--warning-fg)]" },
   faulty:    { label: "Faulty",          tone: "danger",  cls: "bg-[var(--brand)]" },
+  // Not every village has every component. N/A is a real finding, but it has to
+  // say why — there is no photograph to speak for it.
+  na:        { label: "N/A",             tone: "neutral", cls: "bg-[var(--text-quaternary)]" },
 };
 
 const fmtDate = (d) => (d ? new Date(d).toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" }) : "—");
@@ -30,8 +35,8 @@ export default function VisitEditor({ visitId, isAdmin, onClose, onChanged }) {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [submitting, setSubmitting] = useState(false);
   const [uploading, setUploading] = useState(null); // component key being uploaded
+  const [filing, setFiling] = useState(null);      // component key being filed
   const [lightbox, setLightbox] = useState(null);
   const fileRef = useRef(null);
   const pendingComponent = useRef(null);
@@ -117,19 +122,37 @@ export default function VisitEditor({ visitId, isAdmin, onClose, onChanged }) {
     }
   }
 
-  async function submit() {
-    // Save first: the server validates what it has stored, not what is on screen.
+  // Save first: the server validates what it has STORED, not what is on screen,
+  // so an unsaved condition or note would be judged against the old values.
+  async function fileComponent(key) {
     if (!(await save({ quiet: true }))) return;
-    setSubmitting(true);
+    setFiling(key);
     try {
-      const r = await maintenanceApi.submitVisit(visitId);
-      toast.success(`Report filed — overall condition: ${CONDITION_UI[r.overallCondition]?.label || r.overallCondition}`);
+      const r = await maintenanceApi.submitCheck(visitId, key);
+      if (r.visitFinalised) {
+        toast.success("Last component filed — the report is complete and locked.", { duration: 6000 });
+      } else {
+        toast.success(`Filed. ${r.submittedCount} of ${r.totalCount} done — still to do: ${r.remaining.join(", ")}`, { duration: 6000 });
+      }
       await load();
       onChanged?.();
     } catch (e) {
-      toast.error(e.message, { duration: 8000 });
+      toast.error(e.message, { duration: 7000 });
     } finally {
-      setSubmitting(false);
+      setFiling(null);
+    }
+  }
+
+  async function reopenComponent(key) {
+    const reason = window.prompt("Why is this component being reopened? (recorded on the report)");
+    if (!reason || !reason.trim()) return;
+    try {
+      await maintenanceApi.reopenCheck(visitId, key, reason.trim());
+      toast.success("Component reopened");
+      await load();
+      onChanged?.();
+    } catch (e) {
+      toast.error(e.message);
     }
   }
 
@@ -146,7 +169,8 @@ export default function VisitEditor({ visitId, isAdmin, onClose, onChanged }) {
     }
   }
 
-  const unanswered = (data?.checks || []).filter((c) => c.condition === "na").length;
+  const filedCount = (data?.checks || []).filter((c) => c.status === "submitted").length;
+  const totalCount = (data?.checks || []).length;
   const photoTotal =
     (data?.generalPhotos?.length || 0) + (data?.checks || []).reduce((a, c) => a + c.photos.length, 0);
 
@@ -220,16 +244,28 @@ export default function VisitEditor({ visitId, isAdmin, onClose, onChanged }) {
                 >
                   <div className="flex items-start justify-between gap-3 flex-wrap">
                     <div className="min-w-0">
-                      <div className="text-[13.5px] font-semibold text-[var(--fg-primary)]">{c.label}</div>
+                      <div className="text-[13.5px] font-semibold text-[var(--fg-primary)] flex items-center gap-1.5">
+                        {c.label}
+                        {c.status === "submitted" && (
+                          <span title={`Filed ${fmtDate(c.submittedAt)}`}>
+                            <Lock size={11} className="text-[var(--success-fg)]" />
+                          </span>
+                        )}
+                      </div>
                       <div className="text-[11.5px] text-[var(--fg-muted)] mt-0.5">{c.hint}</div>
+                      {c.reopenReason && (
+                        <div className="text-[11px] text-[var(--warning-fg)] mt-0.5">
+                          Reopened: {c.reopenReason}
+                        </div>
+                      )}
                     </div>
-                    {readOnly ? (
+                    {readOnly || c.status === "submitted" ? (
                       <Badge tone={CONDITION_UI[c.condition]?.tone || "neutral"}>
                         {CONDITION_UI[c.condition]?.label || "Not inspected"}
                       </Badge>
                     ) : (
                       <div className="inline-flex rounded-md p-0.5 bg-[var(--surface-raised)] border border-[var(--border-default)]">
-                        {["ok", "attention", "faulty"].map((v) => (
+                        {["ok", "attention", "faulty", "na"].map((v) => (
                           <button
                             key={v}
                             type="button"
@@ -248,9 +284,9 @@ export default function VisitEditor({ visitId, isAdmin, onClose, onChanged }) {
                     )}
                   </div>
 
-                  {(!readOnly || c.notes) && (
+                  {(!(readOnly || c.status === "submitted") || c.notes) && (
                     <div className="mt-3">
-                      {readOnly ? (
+                      {readOnly || c.status === "submitted" ? (
                         <p className="text-[12.5px] text-[var(--fg-secondary)] whitespace-pre-wrap">{c.notes}</p>
                       ) : (
                         <Textarea
@@ -269,11 +305,11 @@ export default function VisitEditor({ visitId, isAdmin, onClose, onChanged }) {
                         key={p.id}
                         photoId={p.id}
                         caption={p.caption}
-                        onRemove={readOnly ? undefined : removePhoto}
+                        onRemove={readOnly || c.status === "submitted" ? undefined : removePhoto}
                         onOpen={(url) => setLightbox({ url, caption: c.label })}
                       />
                     ))}
-                    {!readOnly && (
+                    {!readOnly && c.status !== "submitted" && (
                       <Button
                         variant="secondary"
                         size="sm"
@@ -284,9 +320,47 @@ export default function VisitEditor({ visitId, isAdmin, onClose, onChanged }) {
                         Add photo
                       </Button>
                     )}
-                    {readOnly && c.photos.length === 0 && (
+                    {(readOnly || c.status === "submitted") && c.photos.length === 0 && (
                       <span className="text-[11.5px] text-[var(--fg-muted)]">No photo</span>
                     )}
+
+                    <span className="ml-auto flex items-center gap-2">
+                      {c.status === "submitted" ? (
+                        <>
+                          <span className="text-[11.5px] text-[var(--success-fg)] flex items-center gap-1">
+                            <Check size={12} /> Filed {fmtDate(c.submittedAt)}
+                          </span>
+                          {isAdmin && !readOnly && (
+                            <Button variant="ghost" size="sm" onClick={() => reopenComponent(c.key)} iconLeft={<Unlock size={12} />}>
+                              Reopen
+                            </Button>
+                          )}
+                        </>
+                      ) : (
+                        !readOnly && (
+                          <Button
+                            variant="primary"
+                            size="sm"
+                            onClick={() => fileComponent(c.key)}
+                            loading={filing === c.key}
+                            disabled={
+                              filing === c.key ||
+                              (c.condition === "na"
+                                ? !String(c.notes || "").trim()
+                                : c.photos.length === 0)
+                            }
+                            iconLeft={filing !== c.key && <Send size={12} />}
+                            title={
+                              c.condition === "na"
+                                ? "Not applicable — say why in the notes"
+                                : "Needs a condition and at least one photo"
+                            }
+                          >
+                            File this
+                          </Button>
+                        )
+                      )}
+                    </span>
                   </div>
                 </div>
               ))}
@@ -345,43 +419,32 @@ export default function VisitEditor({ visitId, isAdmin, onClose, onChanged }) {
             </span>
             {isAdmin && (
               <Button variant="secondary" onClick={reopen} iconLeft={<Unlock size={14} />}>
-                Reopen
+                Reopen report
               </Button>
             )}
             <Button variant="primary" onClick={onClose}>Close</Button>
           </>
         ) : (
           <>
+            {/* No all-or-nothing step: each component files itself, and the
+                report completes when the last one is in. */}
             <span className="mr-auto flex items-center gap-1.5 text-[11.5px] text-[var(--fg-muted)]">
-              {unanswered > 0 ? (
+              {filedCount === totalCount ? (
                 <>
-                  <AlertTriangle size={12} className="text-[var(--warning-fg)]" />
-                  {unanswered} component{unanswered === 1 ? "" : "s"} still to inspect
-                </>
-              ) : photoTotal === 0 ? (
-                <>
-                  <AlertTriangle size={12} className="text-[var(--warning-fg)]" />
-                  At least one photo is needed
+                  <CheckCircle2 size={12} className="text-[var(--success-fg)]" />
+                  All {totalCount} components filed
                 </>
               ) : (
                 <>
-                  <CheckCircle2 size={12} className="text-[var(--success-fg)]" />
-                  Ready to file
+                  <AlertTriangle size={12} className="text-[var(--warning-fg)]" />
+                  {filedCount} of {totalCount} components filed — file each one as you go
                 </>
               )}
             </span>
             <Button variant="secondary" onClick={() => save()} loading={saving} iconLeft={!saving && <Save size={14} />}>
               Save draft
             </Button>
-            <Button
-              variant="primary"
-              onClick={submit}
-              loading={submitting}
-              disabled={submitting || unanswered > 0 || photoTotal === 0}
-              iconLeft={!submitting && <Send size={14} />}
-            >
-              File report
-            </Button>
+            <Button variant="primary" onClick={onClose}>Done for now</Button>
           </>
         )}
       </Modal.Footer>

@@ -231,6 +231,16 @@ export const maintenanceApi = {
   createVisit: (body) => api("/maintenance/visits", { method: "POST", body }),
   updateVisit: (id, body) => api(`/maintenance/visits/${id}`, { method: "PUT", body }),
   submitVisit: (id) => api(`/maintenance/visits/${id}/submit`, { method: "POST" }),
+  deleteVisit: (id) => api(`/maintenance/visits/${id}`, { method: "DELETE" }),
+  // File one component at a time — the normal path.
+  submitCheck: (visitId, key) =>
+    api(`/maintenance/visits/${visitId}/checks/${key}/submit`, { method: "POST" }),
+  reopenCheck: (visitId, key, reason) =>
+    api(`/maintenance/visits/${visitId}/checks/${key}/reopen`, { method: "POST", body: { reason } }),
+  submissions: (params = {}) => {
+    const qs = new URLSearchParams(params).toString();
+    return api(`/maintenance/submissions${qs ? `?${qs}` : ""}`);
+  },
   reopenVisit: (id, reason) => api(`/maintenance/visits/${id}/reopen`, { method: "POST", body: { reason } }),
   addPhoto: (visitId, body) => api(`/maintenance/visits/${visitId}/photos`, { method: "POST", body }),
   deletePhoto: (photoId) => api(`/maintenance/photos/${photoId}`, { method: "DELETE" }),

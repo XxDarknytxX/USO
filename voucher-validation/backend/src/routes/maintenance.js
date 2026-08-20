@@ -15,10 +15,20 @@ export function makeMaintenanceRouter(controller) {
   // Which villages are due or overdue for their 6-monthly service.
   router.get("/schedule", controller.getSchedule);
 
+  // Every filed component across every visit — the "what was inspected when"
+  // view, as opposed to the per-attendance one.
+  router.get("/submissions", controller.listSubmissions);
+
   router.get("/visits", controller.listVisits);
   router.post("/visits", controller.createVisit);
   router.get("/visits/:id", controller.getVisit);
   router.put("/visits/:id", controller.updateVisit);
+  // A draft can be thrown away; a filed report cannot.
+  router.delete("/visits/:id", controller.deleteVisit);
+  // Per-component filing — the normal path. The whole-visit submit below stays
+  // as a way to file everything at once.
+  router.post("/visits/:id/checks/:key/submit", controller.submitCheck);
+  router.post("/visits/:id/checks/:key/reopen", requireAdmin, controller.reopenCheck);
   router.post("/visits/:id/submit", controller.submitVisit);
   // Unfiling a report is an admin action and records who and why.
   router.post("/visits/:id/reopen", requireAdmin, controller.reopenVisit);

@@ -81,8 +81,15 @@ export async function getPool() {
       id INT AUTO_INCREMENT PRIMARY KEY,
       visit_id INT NOT NULL,
       component_key VARCHAR(50) NOT NULL,
+      -- Each component is submitted on its own: an engineer files the AP now and
+      -- the gateway when that information is to hand. Locked once submitted.
+      status ENUM('draft','submitted') NOT NULL DEFAULT 'draft',
       condition_rating ENUM('ok','attention','faulty','na') NOT NULL DEFAULT 'na',
       notes TEXT NULL,
+      submitted_at TIMESTAMP NULL,
+      submitted_by INT NULL,
+      reopened_at TIMESTAMP NULL,
+      reopen_reason VARCHAR(500) NULL,
       UNIQUE KEY uniq_visit_component (visit_id, component_key),
       INDEX idx_visit (visit_id)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
@@ -312,6 +319,22 @@ export async function getPool() {
         console.error('Table creation error:', e.message);
       }
     }
+  }
+
+  // Per-component submission on maintenance_checks. Runs here, not in the
+  // migrations array at the top: that one executes BEFORE the tables are
+  // created and rethrows anything that is not a duplicate column, so a missing
+  // table would stop a fresh database from booting.
+  const maintenanceMigrations = [
+    `ALTER TABLE maintenance_checks ADD COLUMN status ENUM('draft','submitted') NOT NULL DEFAULT 'draft' AFTER component_key`,
+    `ALTER TABLE maintenance_checks ADD COLUMN submitted_at TIMESTAMP NULL`,
+    `ALTER TABLE maintenance_checks ADD COLUMN submitted_by INT NULL`,
+    `ALTER TABLE maintenance_checks ADD COLUMN reopened_at TIMESTAMP NULL`,
+    `ALTER TABLE maintenance_checks ADD COLUMN reopen_reason VARCHAR(500) NULL`,
+  ];
+  for (const sql of maintenanceMigrations) {
+    try { await pool.query(sql); console.log(`Migration OK: ${sql.slice(0, 60)}...`); }
+    catch (e) { if (e.code !== 'ER_DUP_FIELDNAME' && !String(e.message).includes("doesn't exist")) { /* ignore */ } }
   }
 
   // Add client_mac column to voucher_claims if it doesn't exist (migration for existing DBs)
