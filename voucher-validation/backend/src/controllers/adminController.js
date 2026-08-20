@@ -22,10 +22,17 @@ async function findUserByEmail(pool, email) {
   return rows[0] || null;
 }
 
+// The only roles that may ever be written. Anything else falls back to the
+// least-privileged one, so an unrecognised value can never grant access.
+const ROLES = new Set(["admin", "viewer", "engineer"]);
+export function safeRoleOf(role) {
+  return ROLES.has(role) ? role : "viewer";
+}
+
 async function insertUser(pool, { email, passwordHash, name, role }) {
   // Whitelist the role — never trust an arbitrary value into the privileged
-  // column. Anything that isn't exactly "admin" becomes "viewer".
-  const safeRole = role === "admin" ? "admin" : "viewer";
+  // column.
+  const safeRole = safeRoleOf(role);
   const [res] = await pool.query(
     "INSERT INTO users (email, password_hash, name, role) VALUES (?, ?, ?, ?)",
     [email, passwordHash, name || null, safeRole]
@@ -275,7 +282,8 @@ export function makeAdminController(pool) {
         const params = [];
         if (email !== undefined) { sets.push("email = ?"); params.push(email); }
         if (name !== undefined) { sets.push("name = ?"); params.push(name); }
-        if (role !== undefined) { sets.push("role = ?"); params.push(role); }
+        // Same whitelist as insertUser: this previously took the raw value.
+        if (role !== undefined) { sets.push("role = ?"); params.push(safeRoleOf(role)); }
         if (password) {
           sets.push("password_hash = ?");
           params.push(await bcrypt.hash(password, 10));

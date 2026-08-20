@@ -41,3 +41,6 @@ pids/
 # Coverage / test artifacts
 coverage/
 .nyc_output/
+
+# Maintenance photo evidence — user data, never in git
+/data/

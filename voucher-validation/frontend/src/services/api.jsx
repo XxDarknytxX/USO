@@ -217,3 +217,57 @@ export const mpaisaApi = {
   update: (original, row) =>
     api(`/mpaisa/${encodeURIComponent(original)}`, { method: "PUT", body: row }),
 };
+
+// Service maintenance API. Photos go up base64 in the JSON body, already
+// downscaled in the browser — see downscaleImage below.
+export const maintenanceApi = {
+  components: () => api("/maintenance/components"),
+  schedule: () => api("/maintenance/schedule"),
+  visits: (params = {}) => {
+    const qs = new URLSearchParams(params).toString();
+    return api(`/maintenance/visits${qs ? `?${qs}` : ""}`);
+  },
+  visit: (id) => api(`/maintenance/visits/${id}`),
+  createVisit: (body) => api("/maintenance/visits", { method: "POST", body }),
+  updateVisit: (id, body) => api(`/maintenance/visits/${id}`, { method: "PUT", body }),
+  submitVisit: (id) => api(`/maintenance/visits/${id}/submit`, { method: "POST" }),
+  reopenVisit: (id, reason) => api(`/maintenance/visits/${id}/reopen`, { method: "POST", body: { reason } }),
+  addPhoto: (visitId, body) => api(`/maintenance/visits/${visitId}/photos`, { method: "POST", body }),
+  deletePhoto: (photoId) => api(`/maintenance/photos/${photoId}`, { method: "DELETE" }),
+  // The <img> src for a stored photo. It is behind auth, so it cannot be a bare
+  // URL in an <img> tag — the component fetches it as a blob instead.
+  photoUrl: (photoId) => `${API_BASE_URL}/maintenance/photos/${photoId}`,
+};
+
+/**
+ * Fetch an authenticated photo as an object URL. The photo route needs the
+ * Bearer token, which a plain <img src> cannot send.
+ * Caller must URL.revokeObjectURL when done.
+ */
+export async function fetchPhotoObjectUrl(photoId) {
+  const res = await fetch(maintenanceApi.photoUrl(photoId), { headers: { ...authHeader() } });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return URL.createObjectURL(await res.blob());
+}
+
+/**
+ * Downscale a camera photo in the browser before upload.
+ *
+ * A phone photo is 3-5 MB; these are filed from village Wi-Fi or mobile data,
+ * where that is the difference between a report submitted and a report
+ * abandoned. 1600px on the long edge at q0.8 is ~200-400 KB and still shows a
+ * corroded connector clearly.
+ */
+export async function downscaleImage(file, { maxEdge = 1600, quality = 0.8 } = {}) {
+  const bitmap = await createImageBitmap(file);
+  const scale = Math.min(1, maxEdge / Math.max(bitmap.width, bitmap.height));
+  const w = Math.round(bitmap.width * scale);
+  const h = Math.round(bitmap.height * scale);
+  const canvas = document.createElement("canvas");
+  canvas.width = w;
+  canvas.height = h;
+  canvas.getContext("2d").drawImage(bitmap, 0, 0, w, h);
+  bitmap.close?.();
+  const dataUrl = canvas.toDataURL("image/jpeg", quality);
+  return { mimeType: "image/jpeg", dataBase64: dataUrl.split(",")[1], width: w, height: h };
+}

@@ -14,6 +14,7 @@ import {
   RefreshCw,
   Check,
   MapPin,
+  Wrench,
 } from "lucide-react";
 
 import { userApi, networkApi } from "../services/api";
@@ -421,6 +422,12 @@ function UserFormModal({ mode, user, onClose, onSaved }) {
                     label: "Admin",
                     desc: "Full administrative access",
                     icon: Shield,
+                  },
+                  {
+                    value: "engineer",
+                    label: "Engineer",
+                    desc: "Field contractor. Files maintenance reports for any village and sees nothing else.",
+                    icon: Wrench,
                   },
                 ].map((opt) => {
                   const selected = form.role === opt.value;

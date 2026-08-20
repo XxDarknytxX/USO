@@ -19,6 +19,7 @@ const TransactionFlowPage = lazy(() => import("./pages/TransactionFlowPage"));
 const ManualAssistancePage = lazy(() => import("./pages/ManualAssistancePage"));
 const ProfilePage = lazy(() => import("./pages/ProfilePage"));
 const MpaisaMappingPage = lazy(() => import("./pages/MpaisaMappingPage"));
+const MaintenancePage = lazy(() => import("./pages/MaintenancePage"));
 
 function ProtectedRoute({ children }) {
   const token = localStorage.getItem("token");
@@ -27,7 +28,15 @@ function ProtectedRoute({ children }) {
 
 function AdminRoute({ children }) {
   const role = getAuthRole();
+  // An engineer bounced off an admin page must not land on the dashboard —
+  // that is not their app. Send them where they belong.
+  if (role === "engineer") return <Navigate to="/maintenance" replace />;
   return role === "admin" ? children : <Navigate to="/dashboard" replace />;
+}
+
+function MaintenanceRoute({ children }) {
+  const role = getAuthRole();
+  return role === "admin" || role === "engineer" ? children : <Navigate to="/dashboard" replace />;
 }
 
 function PageLoader() {
@@ -58,6 +67,8 @@ export default function App() {
             {/* Profile: every signed-in user (incl. viewers) — not admin-gated. */}
             <Route path="/profile" element={<ProfilePage />} />
             <Route path="/mpaisa" element={<AdminRoute><MpaisaMappingPage /></AdminRoute>} />
+            {/* Admins and engineers. The server enforces the same pair. */}
+            <Route path="/maintenance" element={<MaintenanceRoute><MaintenancePage /></MaintenanceRoute>} />
             <Route path="/overview" element={<AdminRoute><OverviewPage /></AdminRoute>} />
             <Route path="/vouchers" element={<AdminRoute><VouchersPage /></AdminRoute>} />
             <Route path="/vouchers/:uuid" element={<AdminRoute><VouchersPage /></AdminRoute>} />
@@ -120,7 +131,7 @@ export default function App() {
               }
             />
           </Route>
-          <Route path="/" element={<Navigate to="/dashboard" replace />} />
+          <Route path="/" element={<Navigate to={getAuthRole() === "engineer" ? "/maintenance" : "/dashboard"} replace />} />
           <Route path="*" element={<Navigate to="/login" replace />} />
         </Routes>
       </Suspense>

@@ -27,8 +27,21 @@ export function requireAdmin(req, res, next) {
 // settings). With only admin/viewer roles this is effectively "admin only" today,
 // but the name states the intent for read endpoints that were previously any-authed.
 export function requireNotViewer(req, res, next) {
-  if (req.user?.role === "viewer") {
+  // Engineers are denied here too. They are not viewers, so without this every
+  // endpoint guarded by requireNotViewer — settings, audit logs, transaction
+  // flows, voucher CRUD — would open to a field contractor the moment the role
+  // was added. Allow-list the roles that may pass rather than deny-listing.
+  if (req.user?.role !== "admin") {
     return res.status(403).json({ error: "Not permitted for this account" });
+  }
+  next();
+}
+
+// Maintenance: admins and engineers. Engineers are scoped to nothing else.
+export function requireMaintainer(req, res, next) {
+  const role = req.user?.role;
+  if (role !== "admin" && role !== "engineer") {
+    return res.status(403).json({ error: "Maintenance access required" });
   }
   next();
 }
@@ -41,8 +54,16 @@ export function requireNotViewer(req, res, next) {
 // A factory because it needs the pool. Mount AFTER requireAuth on scoped routers.
 export function makeAttachScope(pool) {
   return async function attachScope(req, res, next) {
-    if (req.user?.role !== "viewer") {
+    if (req.user?.role === "admin") {
       req.scope = { isViewer: false, projectIds: null, groupIds: null };
+      return next();
+    }
+    // Anyone who is not an admin is RESTRICTED. Written as "not admin" rather
+    // than "is viewer" so a new role can never default to unrestricted: an
+    // engineer reaching a scoped dashboard endpoint gets an empty set (they
+    // have no user_villages rows), not every village's revenue.
+    if (req.user?.role !== "viewer") {
+      req.scope = { isViewer: true, projectIds: [], groupIds: [] };
       return next();
     }
     try {

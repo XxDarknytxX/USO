@@ -16,7 +16,9 @@ import { makePortalRouter } from "./routes/portal.js";
 import { makeNetworkController } from "./controllers/networkController.js";
 import { makeNetworkRouter } from "./routes/network.js";
 import { makeMpaisaController } from "./controllers/mpaisaController.js";
+import { makeMaintenanceController } from "./controllers/maintenanceController.js";
 import { makeMpaisaRouter } from "./routes/mpaisa.js";
+import { makeMaintenanceRouter } from "./routes/maintenance.js";
 import { collectOnceGuarded } from "./services/networkCollector.js";
 import { makeNetworkCollectScheduler } from "./services/networkCollectScheduler.js";
 import RuijieService from "./services/ruijieService.js";
@@ -53,6 +55,8 @@ app.use(
 // just that route a larger body limit. The global parser below then skips a body
 // already parsed here (body-parser marks req._body once parsed).
 app.use("/api/mpaisa/upload", express.json({ limit: "25mb" }));
+// Maintenance photos arrive base64 in the JSON body (browser-downscaled).
+app.use("/api/maintenance", express.json({ limit: "15mb" }));
 app.use(express.json());
 
 // Boot env check (presence only — never log secret values)
@@ -81,6 +85,7 @@ const portalConfig = makePortalConfigController(pool);
 const portalApi = makePortalApiController(pool);
 const network = makeNetworkController(pool);
 const mpaisa = makeMpaisaController(pool);
+const maintenance = makeMaintenanceController(pool);
 
 // Automatic Excel voucher sync — interval + on/off configured from the admin
 // Settings page (app_settings: sync_enabled / sync_interval_minutes). Lives in
@@ -103,6 +108,7 @@ app.use("/api/portal-config", makePortalConfigRouter(portalConfig, attachScope))
 app.use("/api/portal", makePortalRouter(portalApi));
 app.use("/api/network", makeNetworkRouter(network, attachScope));
 app.use("/api/mpaisa", makeMpaisaRouter(mpaisa));
+app.use("/api/maintenance", makeMaintenanceRouter(maintenance));
 
 // Health check (no secrets exposed)
 app.get("/health", (_req, res) =>

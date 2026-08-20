@@ -26,6 +26,8 @@ export function useAuth() {
       name: payload?.name || "",
       isAdmin: role === "admin",
       isViewer: role === "viewer",
+      // Field contractor: maintenance only, nothing else in the app.
+      isEngineer: role === "engineer",
       logout: () => {
         localStorage.removeItem("token");
         localStorage.removeItem("role");

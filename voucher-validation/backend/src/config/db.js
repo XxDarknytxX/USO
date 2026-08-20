@@ -32,6 +32,9 @@ export async function getPool() {
   const migrations = [
     `ALTER TABLE users ADD COLUMN name VARCHAR(255) NULL AFTER email`,
     `ALTER TABLE users ADD COLUMN role ENUM('admin','viewer') NOT NULL DEFAULT 'viewer' AFTER password_hash`,
+    // 'engineer' = field contractor: files maintenance reports, nothing else.
+    // MODIFY (not ADD) so it also widens an enum created by the line above.
+    `ALTER TABLE users MODIFY COLUMN role ENUM('admin','viewer','engineer') NOT NULL DEFAULT 'viewer'`,
   ];
   for (const sql of migrations) {
     try { await pool.query(sql); console.log(`Migration OK: ${sql.slice(0, 60)}...`); }
@@ -46,6 +49,60 @@ export async function getPool() {
   // (set by schema.sql). Mixing with the MySQL 8 default 0900_ai_ci breaks
   // JOINs with ER_CANT_AGGREGATE_2COLLATIONS.
   const tableCreations = [
+    // ── Service maintenance ────────────────────────────────────────────────
+    // A visit is one contractor attendance at one village. It is a DRAFT while
+    // being filled in and SUBMITTED once filed; submitted visits are the
+    // evidence record and are read-only unless an admin reopens one.
+    `CREATE TABLE IF NOT EXISTS maintenance_visits (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      project_id INT NOT NULL,
+      status ENUM('draft','submitted') NOT NULL DEFAULT 'draft',
+      visit_date DATE NOT NULL,
+      engineer_id INT NULL,
+      -- Denormalised on purpose: the contractor who attended, as named at the
+      -- time. A later rename or a deleted account must not rewrite history.
+      engineer_name VARCHAR(255) NULL,
+      summary TEXT NULL,
+      overall_condition ENUM('ok','attention','faulty') NULL,
+      submitted_at TIMESTAMP NULL,
+      reopened_at TIMESTAMP NULL,
+      reopened_by INT NULL,
+      reopen_reason VARCHAR(500) NULL,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      INDEX idx_project (project_id),
+      INDEX idx_visit_date (visit_date),
+      INDEX idx_status (status)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
+
+    // One row per component per visit. "condition" is reserved in MySQL, hence
+    // condition_rating.
+    `CREATE TABLE IF NOT EXISTS maintenance_checks (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      visit_id INT NOT NULL,
+      component_key VARCHAR(50) NOT NULL,
+      condition_rating ENUM('ok','attention','faulty','na') NOT NULL DEFAULT 'na',
+      notes TEXT NULL,
+      UNIQUE KEY uniq_visit_component (visit_id, component_key),
+      INDEX idx_visit (visit_id)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
+
+    // Photos live on disk (see services/maintenanceStore.js); the row is the
+    // index. component_key NULL = a general photo of the visit.
+    `CREATE TABLE IF NOT EXISTS maintenance_photos (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      visit_id INT NOT NULL,
+      component_key VARCHAR(50) NULL,
+      file_path VARCHAR(500) NOT NULL,
+      mime_type VARCHAR(50) NOT NULL DEFAULT 'image/jpeg',
+      bytes INT NULL,
+      caption VARCHAR(255) NULL,
+      uploaded_by INT NULL,
+      uploaded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      INDEX idx_visit (visit_id),
+      INDEX idx_component (visit_id, component_key)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
+
     `CREATE TABLE IF NOT EXISTS portal_plan_configs (
       id INT AUTO_INCREMENT PRIMARY KEY,
       user_group_id VARCHAR(50) NOT NULL,

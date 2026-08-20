@@ -12,6 +12,7 @@ import {
   LayoutDashboard, Gauge, Network, Ticket, History, RefreshCw, Globe,
   FileText, GitBranch, Users, Settings, Menu, X, ChevronLeft, ChevronRight,
   ChevronDown, LogOut, Shield, Eye, LifeBuoy, UserCircle, Wallet,
+  Wrench,
 } from "lucide-react";
 
 import { useAuth } from "../../hooks/useAuth";
@@ -35,6 +36,7 @@ const navSections = [
       { to: "/dashboard", label: "Dashboard", Icon: LayoutDashboard, end: true, viewerOk: true },
       { to: "/overview", label: "Overview", Icon: Gauge },
       { to: "/network", label: "Network", Icon: Network },
+      { to: "/maintenance", label: "Maintenance", Icon: Wrench, engineerOk: true },
     ],
   },
   {
@@ -77,7 +79,7 @@ export default function AppLayout() {
 function Shell() {
   const navigate = useNavigate();
   const location = useLocation();
-  const { email, name, role, isAdmin, isViewer, logout } = useAuth();
+  const { email, name, role, isAdmin, isViewer, isEngineer, logout } = useAuth();
   const { loading: siteLoading } = useSite();
 
   const [mobileOpen, setMobileOpen] = useState(false);
@@ -99,7 +101,13 @@ function Shell() {
   // items marked viewerOk (just Dashboard), and empty sections are dropped.
   const sections = navSections
     .filter((s) => !s.adminOnly || isAdmin)
-    .map((s) => ({ ...s, items: s.items.filter((it) => !isViewer || it.viewerOk) }))
+    .map((s) => ({
+      ...s,
+      items: s.items.filter(
+        (it) => (!isViewer || it.viewerOk) && (!isEngineer || it.engineerOk)
+      ),
+    }))
+    .filter((s) => s.items.length > 0)
     .filter((s) => s.items.length > 0);
 
   function toggleCollapsed() {

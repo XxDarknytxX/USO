@@ -1,0 +1,383 @@
+// src/controllers/maintenanceController.js
+// Service maintenance: a contractor attends a village, walks a fixed checklist,
+// photographs each component and files the report. Every 6 months per village.
+//
+// A visit is a DRAFT while it is being filled in and SUBMITTED once filed.
+// Submitted visits are the evidence record: they cannot be edited, and photos
+// cannot be added or removed. An admin can reopen one (with a reason, recorded)
+// if something was genuinely wrong — that is deliberately an admin action and
+// deliberately leaves a trace, because the point of the record is that it says
+// what was found on that date.
+
+import {
+  COMPONENTS, COMPONENT_KEYS, CONDITIONS,
+  savePhoto, streamPhoto, deletePhoto, resolvePhoto,
+  ALLOWED_MIME, MAX_BYTES,
+} from "../services/maintenanceStore.js";
+
+const send = {
+  ok: (res, data = {}) => res.json(data),
+  created: (res, data = {}) => res.status(201).json(data),
+  bad: (res, msg = "Bad request") => res.status(400).json({ error: msg }),
+  forbidden: (res, msg = "Not permitted") => res.status(403).json({ error: msg }),
+  notFound: (res, msg = "Not found") => res.status(404).json({ error: msg }),
+  serverErr: (res, msg = "Internal server error") => res.status(500).json({ error: msg }),
+};
+
+// The servicing cadence. Used to derive "next due" and the overdue flag.
+const SERVICE_INTERVAL_MONTHS = 6;
+
+const isAdmin = (req) => req.user?.role === "admin";
+
+function mapVisit(r) {
+  return {
+    id: r.id,
+    projectId: r.project_id,
+    projectName: r.project_name || null,
+    status: r.status,
+    visitDate: r.visit_date,
+    engineerId: r.engineer_id,
+    engineerName: r.engineer_name,
+    summary: r.summary,
+    overallCondition: r.overall_condition,
+    submittedAt: r.submitted_at,
+    reopenedAt: r.reopened_at,
+    reopenReason: r.reopen_reason,
+    createdAt: r.created_at,
+    photoCount: r.photo_count == null ? undefined : Number(r.photo_count),
+  };
+}
+
+export function makeMaintenanceController(pool) {
+  return {
+    // GET /api/maintenance/components — the checklist, so the UI and the export
+    // never drift from what the server validates against.
+    getComponents: (_req, res) =>
+      send.ok(res, { components: COMPONENTS, conditions: [...CONDITIONS], intervalMonths: SERVICE_INTERVAL_MONTHS }),
+
+    // GET /api/maintenance/schedule
+    // Every active village with its last submitted visit and when the next one
+    // is due. This is the "are we compliant" view.
+    getSchedule: async (_req, res) => {
+      try {
+        const [rows] = await pool.query(
+          `SELECT p.id, p.name, p.hostname,
+                  v.id            AS last_visit_id,
+                  v.visit_date    AS last_visit_date,
+                  v.engineer_name AS last_engineer,
+                  v.overall_condition AS last_condition
+             FROM network_projects p
+             LEFT JOIN maintenance_visits v
+                    ON v.id = (
+                         SELECT id FROM maintenance_visits
+                          WHERE project_id = p.id AND status = 'submitted'
+                          ORDER BY visit_date DESC, id DESC LIMIT 1)
+            WHERE p.is_active = 1
+            ORDER BY p.sort_order, p.name`
+        );
+        const now = new Date();
+        const sites = rows.map((r) => {
+          let nextDue = null;
+          if (r.last_visit_date) {
+            const d = new Date(r.last_visit_date);
+            d.setMonth(d.getMonth() + SERVICE_INTERVAL_MONTHS);
+            nextDue = d;
+          }
+          const daysUntilDue =
+            nextDue == null ? null : Math.round((nextDue - now) / 86400000);
+          return {
+            projectId: r.id,
+            name: r.name,
+            hostname: r.hostname,
+            lastVisitId: r.last_visit_id,
+            lastVisitDate: r.last_visit_date,
+            lastEngineer: r.last_engineer,
+            lastCondition: r.last_condition,
+            nextDue,
+            daysUntilDue,
+            // No visit ever = overdue. A village nobody has serviced is the
+            // case this whole feature exists to surface, so it must not read
+            // as "fine" just because there is no date to compare against.
+            overdue: r.last_visit_date == null || (daysUntilDue != null && daysUntilDue < 0),
+            neverServiced: r.last_visit_date == null,
+          };
+        });
+        return send.ok(res, {
+          sites,
+          intervalMonths: SERVICE_INTERVAL_MONTHS,
+          overdueCount: sites.filter((s) => s.overdue).length,
+        });
+      } catch (e) { console.error('[maintenance] schedule:', e); return send.serverErr(res); }
+    },
+
+    // GET /api/maintenance/visits?projectId=&status=&limit=
+    listVisits: async (req, res) => {
+      try {
+        const where = [];
+        const params = [];
+        if (req.query.projectId) { where.push('v.project_id = ?'); params.push(Number(req.query.projectId)); }
+        if (req.query.status === 'draft' || req.query.status === 'submitted') {
+          where.push('v.status = ?'); params.push(req.query.status);
+        }
+        // An engineer sees their own drafts plus every submitted report; they
+        // must not see another contractor's unfiled working notes.
+        if (!isAdmin(req)) {
+          where.push("(v.status = 'submitted' OR v.engineer_id = ?)");
+          params.push(req.user?.id ?? 0);
+        }
+        const limit = Math.min(200, Math.max(1, Number(req.query.limit) || 50));
+        const [rows] = await pool.query(
+          `SELECT v.*, p.name AS project_name,
+                  (SELECT COUNT(*) FROM maintenance_photos ph WHERE ph.visit_id = v.id) AS photo_count
+             FROM maintenance_visits v
+             LEFT JOIN network_projects p ON p.id = v.project_id
+            ${where.length ? 'WHERE ' + where.join(' AND ') : ''}
+            ORDER BY v.visit_date DESC, v.id DESC
+            LIMIT ?`,
+          [...params, limit]
+        );
+        return send.ok(res, { visits: rows.map(mapVisit) });
+      } catch (e) { console.error('[maintenance] listVisits:', e); return send.serverErr(res); }
+    },
+
+    // GET /api/maintenance/visits/:id — the full report: checks + photos.
+    getVisit: async (req, res) => {
+      try {
+        const id = Number(req.params.id);
+        if (!Number.isFinite(id)) return send.bad(res, 'A numeric visit id is required');
+        const [[v]] = await pool.query(
+          `SELECT v.*, p.name AS project_name FROM maintenance_visits v
+             LEFT JOIN network_projects p ON p.id = v.project_id
+            WHERE v.id = ? LIMIT 1`, [id]
+        );
+        if (!v) return send.notFound(res, 'No such visit');
+        if (!isAdmin(req) && v.status !== 'submitted' && v.engineer_id !== req.user?.id) {
+          return send.forbidden(res, "That draft belongs to another engineer");
+        }
+        const [checks] = await pool.query(
+          'SELECT component_key, condition_rating, notes FROM maintenance_checks WHERE visit_id = ?', [id]
+        );
+        const [photos] = await pool.query(
+          `SELECT id, component_key, caption, mime_type, bytes, uploaded_at
+             FROM maintenance_photos WHERE visit_id = ? ORDER BY id`, [id]
+        );
+        const byKey = Object.fromEntries(checks.map((c) => [c.component_key, c]));
+        return send.ok(res, {
+          visit: mapVisit(v),
+          // Always the full checklist, so a component nobody filled in shows as
+          // an unanswered row rather than silently vanishing from the report.
+          checks: COMPONENTS.map((c) => ({
+            key: c.key,
+            label: c.label,
+            hint: c.hint,
+            condition: byKey[c.key]?.condition_rating || 'na',
+            notes: byKey[c.key]?.notes || '',
+            photos: photos.filter((p) => p.component_key === c.key)
+              .map((p) => ({ id: p.id, caption: p.caption, uploadedAt: p.uploaded_at })),
+          })),
+          generalPhotos: photos.filter((p) => p.component_key == null)
+            .map((p) => ({ id: p.id, caption: p.caption, uploadedAt: p.uploaded_at })),
+        });
+      } catch (e) { console.error('[maintenance] getVisit:', e); return send.serverErr(res); }
+    },
+
+    // POST /api/maintenance/visits { projectId, visitDate }
+    createVisit: async (req, res) => {
+      try {
+        const projectId = Number(req.body?.projectId);
+        if (!Number.isFinite(projectId)) return send.bad(res, 'projectId is required');
+        const [[proj]] = await pool.query(
+          'SELECT id FROM network_projects WHERE id = ? AND is_active = 1 LIMIT 1', [projectId]
+        );
+        if (!proj) return send.bad(res, 'No such active village');
+
+        const raw = String(req.body?.visitDate || '').trim();
+        const visitDate = /^\d{4}-\d{2}-\d{2}$/.test(raw) ? raw : new Date().toISOString().slice(0, 10);
+
+        // One open draft per engineer per village: reattaching to it stops a
+        // flaky connection from scattering half-filled reports.
+        const [[existing]] = await pool.query(
+          `SELECT id FROM maintenance_visits
+            WHERE project_id = ? AND status = 'draft' AND engineer_id = ? LIMIT 1`,
+          [projectId, req.user?.id ?? 0]
+        );
+        if (existing) return send.ok(res, { visitId: existing.id, reused: true });
+
+        const [r] = await pool.query(
+          `INSERT INTO maintenance_visits (project_id, status, visit_date, engineer_id, engineer_name)
+           VALUES (?, 'draft', ?, ?, ?)`,
+          [projectId, visitDate, req.user?.id ?? null, req.user?.name || req.user?.email || null]
+        );
+        return send.created(res, { visitId: r.insertId, reused: false });
+      } catch (e) { console.error('[maintenance] createVisit:', e); return send.serverErr(res); }
+    },
+
+    // PUT /api/maintenance/visits/:id { visitDate?, summary?, checks:[{key,condition,notes}] }
+    updateVisit: async (req, res) => {
+      try {
+        const id = Number(req.params.id);
+        const [[v]] = await pool.query('SELECT * FROM maintenance_visits WHERE id = ? LIMIT 1', [id]);
+        if (!v) return send.notFound(res, 'No such visit');
+        if (v.status === 'submitted') {
+          return send.forbidden(res, 'This report is filed and cannot be edited. An admin can reopen it.');
+        }
+        if (!isAdmin(req) && v.engineer_id !== req.user?.id) {
+          return send.forbidden(res, "That draft belongs to another engineer");
+        }
+
+        const fields = [];
+        const params = [];
+        const raw = String(req.body?.visitDate || '').trim();
+        if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) { fields.push('visit_date = ?'); params.push(raw); }
+        if (req.body?.summary !== undefined) { fields.push('summary = ?'); params.push(String(req.body.summary || '').slice(0, 65535)); }
+        if (fields.length) await pool.query(`UPDATE maintenance_visits SET ${fields.join(', ')} WHERE id = ?`, [...params, id]);
+
+        const checks = Array.isArray(req.body?.checks) ? req.body.checks : [];
+        for (const c of checks) {
+          if (!COMPONENT_KEYS.has(c?.key)) continue;           // ignore unknown components
+          const cond = CONDITIONS.has(c?.condition) ? c.condition : 'na';
+          await pool.query(
+            `INSERT INTO maintenance_checks (visit_id, component_key, condition_rating, notes)
+             VALUES (?, ?, ?, ?)
+             ON DUPLICATE KEY UPDATE condition_rating = VALUES(condition_rating), notes = VALUES(notes)`,
+            [id, c.key, cond, String(c?.notes || '').slice(0, 65535)]
+          );
+        }
+        return send.ok(res, { success: true });
+      } catch (e) { console.error('[maintenance] updateVisit:', e); return send.serverErr(res); }
+    },
+
+    // POST /api/maintenance/visits/:id/photos { componentKey?, caption?, mimeType, dataBase64 }
+    // Photos arrive base64 in JSON, already downscaled by the browser. That
+    // avoids a multipart dependency and, more importantly, keeps the upload
+    // small on a rural link — a raw 5 MB phone photo over village Wi-Fi is the
+    // difference between a report filed and a report abandoned.
+    addPhoto: async (req, res) => {
+      try {
+        const id = Number(req.params.id);
+        const [[v]] = await pool.query('SELECT * FROM maintenance_visits WHERE id = ? LIMIT 1', [id]);
+        if (!v) return send.notFound(res, 'No such visit');
+        if (v.status === 'submitted') {
+          return send.forbidden(res, 'This report is filed — photos cannot be added or removed.');
+        }
+        if (!isAdmin(req) && v.engineer_id !== req.user?.id) {
+          return send.forbidden(res, "That draft belongs to another engineer");
+        }
+
+        const componentKey = req.body?.componentKey ? String(req.body.componentKey) : null;
+        if (componentKey && !COMPONENT_KEYS.has(componentKey)) return send.bad(res, 'Unknown component');
+        const mimeType = String(req.body?.mimeType || 'image/jpeg');
+        if (!ALLOWED_MIME.includes(mimeType)) return send.bad(res, `Unsupported image type: ${mimeType}`);
+
+        const b64 = String(req.body?.dataBase64 || '').replace(/^data:[^;]+;base64,/, '');
+        if (!b64) return send.bad(res, 'No image data');
+        let buf;
+        try { buf = Buffer.from(b64, 'base64'); } catch { return send.bad(res, 'Image data is not valid base64'); }
+        if (!buf.length) return send.bad(res, 'Image data is empty');
+        if (buf.length > MAX_BYTES) {
+          return send.bad(res, `Image is too large (${Math.round(buf.length / 1048576)} MB, max ${MAX_BYTES / 1048576} MB)`);
+        }
+
+        const rel = await savePhoto(id, buf, mimeType);
+        const [r] = await pool.query(
+          `INSERT INTO maintenance_photos (visit_id, component_key, file_path, mime_type, bytes, caption, uploaded_by)
+           VALUES (?, ?, ?, ?, ?, ?, ?)`,
+          [id, componentKey, rel, mimeType, buf.length, String(req.body?.caption || '').slice(0, 255) || null, req.user?.id ?? null]
+        );
+        return send.created(res, { photoId: r.insertId, bytes: buf.length });
+      } catch (e) { console.error('[maintenance] addPhoto:', e); return send.serverErr(res, e.message); }
+    },
+
+    // GET /api/maintenance/photos/:id — streams the file. Served through the API
+    // rather than as a static directory so it stays behind authentication.
+    getPhoto: async (req, res) => {
+      try {
+        const id = Number(req.params.id);
+        const [[p]] = await pool.query(
+          'SELECT file_path, mime_type FROM maintenance_photos WHERE id = ? LIMIT 1', [id]
+        );
+        if (!p) return send.notFound(res, 'No such photo');
+        if (!resolvePhoto(p.file_path)) return send.notFound(res, 'No such photo');
+        const stream = streamPhoto(p.file_path);
+        if (!stream) return send.notFound(res, 'No such photo');
+        res.setHeader('Content-Type', p.mime_type || 'image/jpeg');
+        res.setHeader('Cache-Control', 'private, max-age=86400');
+        stream.on('error', () => { if (!res.headersSent) res.status(404).end(); else res.end(); });
+        return stream.pipe(res);
+      } catch (e) { console.error('[maintenance] getPhoto:', e); return send.serverErr(res); }
+    },
+
+    // DELETE /api/maintenance/photos/:id — drafts only.
+    deletePhoto: async (req, res) => {
+      try {
+        const id = Number(req.params.id);
+        const [[p]] = await pool.query(
+          `SELECT ph.id, ph.file_path, v.status, v.engineer_id
+             FROM maintenance_photos ph JOIN maintenance_visits v ON v.id = ph.visit_id
+            WHERE ph.id = ? LIMIT 1`, [id]
+        );
+        if (!p) return send.notFound(res, 'No such photo');
+        if (p.status === 'submitted') return send.forbidden(res, 'This report is filed — photos cannot be removed.');
+        if (!isAdmin(req) && p.engineer_id !== req.user?.id) return send.forbidden(res, "That draft belongs to another engineer");
+        await pool.query('DELETE FROM maintenance_photos WHERE id = ?', [id]);
+        await deletePhoto(p.file_path);
+        return send.ok(res, { success: true });
+      } catch (e) { console.error('[maintenance] deletePhoto:', e); return send.serverErr(res); }
+    },
+
+    // POST /api/maintenance/visits/:id/submit — files the report.
+    submitVisit: async (req, res) => {
+      try {
+        const id = Number(req.params.id);
+        const [[v]] = await pool.query('SELECT * FROM maintenance_visits WHERE id = ? LIMIT 1', [id]);
+        if (!v) return send.notFound(res, 'No such visit');
+        if (v.status === 'submitted') return send.bad(res, 'Already filed');
+        if (!isAdmin(req) && v.engineer_id !== req.user?.id) return send.forbidden(res, "That draft belongs to another engineer");
+
+        const [checks] = await pool.query(
+          "SELECT component_key, condition_rating FROM maintenance_checks WHERE visit_id = ? AND condition_rating <> 'na'", [id]
+        );
+        const answered = new Set(checks.map((c) => c.component_key));
+        const missing = COMPONENTS.filter((c) => !answered.has(c.key));
+        if (missing.length) {
+          return send.bad(res, `Every component needs a condition before filing. Still unanswered: ${missing.map((m) => m.label).join(', ')}`);
+        }
+        const [[{ n: photoCount }]] = await pool.query(
+          'SELECT COUNT(*) AS n FROM maintenance_photos WHERE visit_id = ?', [id]
+        );
+        // The report is evidence; evidence without a photo is just an assertion.
+        if (!photoCount) return send.bad(res, 'At least one photo is required before filing.');
+
+        // Worst rating wins: one faulty component makes the site faulty.
+        const overall = checks.some((c) => c.condition_rating === 'faulty')
+          ? 'faulty'
+          : checks.some((c) => c.condition_rating === 'attention') ? 'attention' : 'ok';
+
+        await pool.query(
+          `UPDATE maintenance_visits
+              SET status = 'submitted', submitted_at = NOW(), overall_condition = ?
+            WHERE id = ? AND status = 'draft'`,
+          [overall, id]
+        );
+        return send.ok(res, { success: true, overallCondition: overall, photoCount: Number(photoCount) });
+      } catch (e) { console.error('[maintenance] submitVisit:', e); return send.serverErr(res); }
+    },
+
+    // POST /api/maintenance/visits/:id/reopen { reason } — admin only.
+    reopenVisit: async (req, res) => {
+      try {
+        const id = Number(req.params.id);
+        const reason = String(req.body?.reason || '').trim();
+        if (!reason) return send.bad(res, 'A reason is required to reopen a filed report');
+        const [r] = await pool.query(
+          `UPDATE maintenance_visits
+              SET status = 'draft', reopened_at = NOW(), reopened_by = ?, reopen_reason = ?
+            WHERE id = ? AND status = 'submitted'`,
+          [req.user?.id ?? null, reason.slice(0, 500), id]
+        );
+        if (!r.affectedRows) return send.bad(res, 'That report is not in a filed state');
+        return send.ok(res, { success: true });
+      } catch (e) { console.error('[maintenance] reopenVisit:', e); return send.serverErr(res); }
+    },
+  };
+}
