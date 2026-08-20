@@ -14,6 +14,7 @@ import {
 } from "lucide-react";
 import { maintenanceApi } from "../services/api";
 import { useAuth } from "../hooks/useAuth";
+import { useSite } from "../hooks/useSite";
 import { PageHeader, Panel, Button, Badge, EmptyState, Select } from "../components/ui";
 import VisitEditor from "../components/maintenance/VisitEditor";
 
@@ -36,6 +37,11 @@ function dueLabel(site) {
 
 export default function MaintenancePage() {
   const { isAdmin } = useAuth();
+  // Follow the scope switcher and the "All Villages" set from Settings, the
+  // same as Overview and Network. A village deselected there is not part of
+  // the estate the operator is looking at, so it must not appear in the
+  // compliance counts either — a test site would otherwise read as overdue.
+  const { isInScope } = useSite();
   const [schedule, setSchedule] = useState(null);
   const [visits, setVisits] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -61,7 +67,14 @@ export default function MaintenancePage() {
 
   useEffect(() => { load(); }, [load]);
 
-  const sites = schedule?.sites || [];
+  const sites = useMemo(
+    () => (schedule?.sites || []).filter((s) => isInScope(s.projectId)),
+    [schedule, isInScope]
+  );
+  const scopedVisits = useMemo(
+    () => visits.filter((v) => v.projectId == null || isInScope(v.projectId)),
+    [visits, isInScope]
+  );
   const overdue = useMemo(() => sites.filter((s) => s.overdue), [sites]);
 
   async function startReport(projectId) {
@@ -96,7 +109,7 @@ export default function MaintenancePage() {
         <Stat label="Villages" value={sites.length} />
         <Stat label="Overdue" value={overdue.length} tone={overdue.length ? "danger" : "success"} />
         <Stat label="Never serviced" value={sites.filter((s) => s.neverServiced).length} tone={sites.some((s) => s.neverServiced) ? "warning" : "success"} />
-        <Stat label="Reports filed" value={visits.filter((v) => v.status === "submitted").length} />
+        <Stat label="Reports filed" value={scopedVisits.filter((v) => v.status === "submitted").length} />
       </div>
 
       <div className="mt-5">
@@ -208,7 +221,7 @@ export default function MaintenancePage() {
               <tbody className="divide-y divide-[var(--border-default)]">
                 {loading ? (
                   <tr><td colSpan={7} className="px-5 py-10 text-center text-[var(--fg-muted)]">Loading…</td></tr>
-                ) : visits.length === 0 ? (
+                ) : scopedVisits.length === 0 ? (
                   <tr><td colSpan={7} className="px-5 py-8">
                     <EmptyState
                       icon={ClipboardCheck}
@@ -217,7 +230,7 @@ export default function MaintenancePage() {
                     />
                   </td></tr>
                 ) : (
-                  visits.map((v) => (
+                  scopedVisits.map((v) => (
                     <tr key={v.id} className="hover:bg-[var(--bg-surface)] transition-colors">
                       <td className="px-5 py-3 text-[var(--fg-secondary)] whitespace-nowrap">{fmtDate(v.visitDate)}</td>
                       <td className="px-5 py-3 font-medium text-[var(--fg-primary)]">{v.projectName || "—"}</td>
