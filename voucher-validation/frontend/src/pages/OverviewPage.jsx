@@ -48,8 +48,42 @@ export default function OverviewPage() {
 
   useEffect(() => {
     load();
+    // Cheap poll: re-reads the stored snapshot only, no Ruijie calls.
     timer.current = setInterval(() => load(true), 30000);
     return () => clearInterval(timer.current);
+  }, [load]);
+
+  // Refresh means COLLECT — go to Ruijie for every village and rewrite the
+  // snapshots, then re-read. Without this the button only re-fetched the same
+  // stored numbers, so a stale page stayed stale however often you pressed it.
+  //
+  // It is deliberately all-villages: the page compares villages side by side,
+  // and refreshing one at a time would show them measured at different moments.
+  // Takes the better part of a minute for ~30 villages (the Ruijie limiter
+  // spaces every call), and is admin-only server-side.
+  const [collecting, setCollecting] = useState(false);
+  const collectAndReload = useCallback(async () => {
+    setCollecting(true);
+    const tid = toast.loading("Collecting every village from Ruijie… this takes a moment");
+    try {
+      const r = await networkApi.collectNow();
+      toast.success(
+        `${r.villagesUpdated ?? "?"}/${r.villagesTotal ?? "?"} villages refreshed` +
+          (r.joinedExisting ? " (joined a run already in progress)" : ""),
+        { id: tid, duration: 6000 }
+      );
+    } catch (e) {
+      // Non-admins cannot collect; still give them the freshest stored numbers.
+      toast.error(
+        /403|forbidden|admin/i.test(e.message || "")
+          ? "Only an admin can refresh from Ruijie — showing the last collected values."
+          : `Collection failed: ${e.message}`,
+        { id: tid, duration: 7000 }
+      );
+    } finally {
+      await load(true);
+      setCollecting(false);
+    }
   }, [load]);
 
   // Follow the scope switcher: a single village → just that one; All Villages →
@@ -77,11 +111,11 @@ export default function OverviewPage() {
           <Button
             variant="secondary"
             size="sm"
-            onClick={() => load(true)}
-            disabled={refreshing}
-            iconLeft={<RefreshCw size={14} className={refreshing ? "animate-spin" : ""} />}
+            onClick={collectAndReload}
+            disabled={collecting}
+            iconLeft={<RefreshCw size={14} className={collecting || refreshing ? "animate-spin" : ""} />}
           >
-            Refresh
+            {collecting ? "Collecting…" : "Refresh all"}
           </Button>
         }
       />

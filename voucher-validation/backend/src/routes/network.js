@@ -21,6 +21,12 @@ export function makeNetworkRouter(controller, attachScope) {
   // Time-bucketed trend (clients / usage / uptime) for dashboards
   router.get("/overview/history", controller.getTrend);
 
+  // Refresh every village's health now (admin). Spends Ruijie quota, so it is
+  // admin-only and single-flighted in the collector.
+  router.post("/collect", requireAdmin, controller.collectNow);
+  // Scheduler state for the Settings page.
+  router.get("/collect/status", requireAdmin, controller.collectStatus);
+
   // Discover Ruijie network groups for the "add site" picker (admin)
   router.get("/discover", requireAdmin, controller.discoverGroups);
 

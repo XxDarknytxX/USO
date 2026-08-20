@@ -39,6 +39,17 @@ export function makeSettingsRouter(controller) {
     controller.updateSyncSettings
   );
 
+  // PUT /api/settings/network-collect — atomically set the network-health
+  // collection schedule (enabled + interval).
+  router.put(
+    "/network-collect",
+    [
+      body("enabled").isBoolean().withMessage("enabled must be a boolean"),
+      body("intervalMinutes").isNumeric().withMessage("intervalMinutes must be a number"),
+    ],
+    controller.updateNetworkCollectSettings
+  );
+
   // PUT /api/settings
   router.put(
     "/",

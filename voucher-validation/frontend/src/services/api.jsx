@@ -95,6 +95,9 @@ export const settingsApi = {
   // Atomic schedule update — both keys committed together server-side, single reload.
   updateSync: (enabled, intervalMinutes) =>
     api("/settings/sync", { method: "PUT", body: { enabled, intervalMinutes } }),
+  // Same shape for the network-health collection schedule.
+  updateNetworkCollect: (enabled, intervalMinutes) =>
+    api("/settings/network-collect", { method: "PUT", body: { enabled, intervalMinutes } }),
   // SMTP (outgoing email) config. getSmtp never returns the password (only
   // hasPassword); leave the password field blank on save to keep the stored one.
   getSmtp: () => api("/settings/smtp"),
@@ -168,6 +171,10 @@ export const networkApi = {
     return api(`/network/overview/history${qs ? `?${qs}` : ""}`);
   },
   discoverGroups: () => api("/network/discover"),
+  // Refresh every village's health now (admin). Costs Ruijie quota; the server
+  // single-flights it, so a double click joins the run in progress.
+  collectNow: () => api("/network/collect", { method: "POST" }),
+  collectStatus: () => api("/network/collect/status"),
   createProject: (body) => api("/network/projects", { method: "POST", body }),
   updateProject: (id, body) => api(`/network/projects/${id}`, { method: "PUT", body }),
   removeProject: (id) => api(`/network/projects/${id}`, { method: "DELETE" }),

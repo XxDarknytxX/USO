@@ -17,7 +17,9 @@ import { makeNetworkController } from "./controllers/networkController.js";
 import { makeNetworkRouter } from "./routes/network.js";
 import { makeMpaisaController } from "./controllers/mpaisaController.js";
 import { makeMpaisaRouter } from "./routes/mpaisa.js";
-import { startCollector } from "./services/networkCollector.js";
+import { collectOnceGuarded } from "./services/networkCollector.js";
+import { makeNetworkCollectScheduler } from "./services/networkCollectScheduler.js";
+import RuijieService from "./services/ruijieService.js";
 import { makeSyncScheduler } from "./services/syncScheduler.js";
 import { makeAttachScope } from "./middleware/auth.js";
 
@@ -126,15 +128,28 @@ if (_isSchedulerPrimary) {
   console.log(`[SyncScheduler] instance ${_instanceId} is not primary — scheduler not started`);
 }
 
-// Background network-health/usage collector — DISABLED by default to conserve
-// the Ruijie Cloud API quota. It polled every active village every few minutes
-// (getDevices + getClients + getGatewayInterfaces + getGatewayUsage ≈ 4 calls ×
-// villages × 12/hr × 24h ≈ the whole 5,000/day quota) — the dominant driver of
-// the `code: 44` throttle. Device health + usage now refresh ON DEMAND: opening
-// a village's Network diagram does one gated, cached live fetch (see
-// networkController.getProjectHealth's cold-start fallback). Trade-off: the
-// Overview dashboard's per-village status table (network_status) shows the last
-// collected values until this is re-enabled.
-// To re-enable later: set NETWORK_COLLECT_INTERVAL_MIN to a positive number.
-const collectMin = Number(process.env.NETWORK_COLLECT_INTERVAL_MIN ?? 0);
-if (collectMin > 0) startCollector(pool, { intervalMs: collectMin * 60 * 1000 });
+// Periodic all-villages network-health collection. This was disabled outright
+// for a while: at every-5-minutes it cost ~4 Ruijie calls x ~30 villages x 288
+// cycles/day, which alone exceeded the account quota and drove the `code: 44`
+// throttle. It is back as a SCHEDULED job whose interval and on/off live in
+// app_settings (network_collect_enabled / network_collect_interval_minutes),
+// edited from the admin Settings page, with an hour floor. Daily is ~120
+// calls/day (~2.4% of quota); 6-hourly ~480 (~10%).
+//
+// NETWORK_COLLECT_INTERVAL_MIN is no longer read — the setting replaces it.
+const networkCollectScheduler = makeNetworkCollectScheduler({
+  pool,
+  runCollect: () => collectOnceGuarded(pool, new RuijieService()),
+});
+network.setCollectScheduler(networkCollectScheduler);
+voucher.setNetworkCollectScheduler(networkCollectScheduler);
+
+// Same primary-instance gate as the sync scheduler: N schedulers would mean N
+// times the Ruijie call volume, which is the exact failure this job caused before.
+if (_isSchedulerPrimary) {
+  networkCollectScheduler
+    .start()
+    .catch((e) => console.error("Network collect scheduler failed to start:", e.message));
+} else {
+  console.log(`[NetCollect] instance ${_instanceId} is not primary — scheduler not started`);
+}

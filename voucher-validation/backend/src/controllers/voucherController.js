@@ -617,6 +617,7 @@ export function makeVoucherController(pool) {
   // Scheduler ref, wired by server.js. Lets updateSetting re-arm the timer the
   // moment a sync setting changes (no service restart needed).
   let syncScheduler = null;
+  let networkCollectScheduler = null;
 
   // Shared, single-flight sync starter used by BOTH the manual POST /sync and the
   // background scheduler. Acquires the advisory lock, creates the sync-log row, and
@@ -1272,6 +1273,10 @@ export function makeVoucherController(pool) {
         if (key === 'sync_enabled' || key === 'sync_interval_minutes') {
           try { await syncScheduler?.reload(); } catch (e) { console.error('Scheduler reload failed:', e.message); }
         }
+        // Same for the network-health collection schedule.
+        if (key === 'network_collect_enabled' || key === 'network_collect_interval_minutes') {
+          try { await networkCollectScheduler?.reload(); } catch (e) { console.error('Collect scheduler reload failed:', e.message); }
+        }
         return send.ok(res, { success: true });
       } catch (e) { console.error(e); return send.serverErr(res); }
     },
@@ -1548,8 +1553,45 @@ export function makeVoucherController(pool) {
       return send.ok(res, { success: true, enabled, intervalMinutes: clamped, status });
     },
 
+    // PUT /api/settings/network-collect { enabled, intervalMinutes }
+    // Atomic twin of updateSyncSettings for the network-health collection: both
+    // keys in one transaction, one scheduler reload after the commit, so the
+    // scheduler can never observe a half-applied pair.
+    updateNetworkCollectSettings: async (req, res) => {
+      const enabled = req.body?.enabled === true || String(req.body?.enabled) === 'true';
+      const mins = Number(req.body?.intervalMinutes);
+      if (!Number.isFinite(mins)) return send.bad(res, 'intervalMinutes must be a number');
+      // Same clamp the scheduler applies, so the saved value matches what runs.
+      // The 60-minute floor is a quota guard, not a preference: see the note in
+      // services/networkCollectScheduler.js.
+      const clamped = Math.min(10080, Math.max(60, Math.round(mins)));
+      const uid = req.user?.id ?? null;
+
+      const conn = await pool.getConnection();
+      try {
+        await conn.beginTransaction();
+        const upsert =
+          `INSERT INTO app_settings (setting_key, setting_value, setting_type, updated_by) VALUES (?, ?, ?, ?)
+           ON DUPLICATE KEY UPDATE setting_value = VALUES(setting_value), setting_type = VALUES(setting_type), updated_by = VALUES(updated_by)`;
+        await conn.query(upsert, ['network_collect_enabled', enabled ? 'true' : 'false', 'boolean', uid]);
+        await conn.query(upsert, ['network_collect_interval_minutes', String(clamped), 'number', uid]);
+        await conn.commit();
+      } catch (e) {
+        try { await conn.rollback(); } catch { /* ignore */ }
+        conn.release();
+        console.error('updateNetworkCollectSettings failed:', e);
+        return send.serverErr(res);
+      }
+      conn.release();
+
+      let status = null;
+      try { status = await networkCollectScheduler?.reload(); } catch (e) { console.error('Collect scheduler reload failed:', e.message); }
+      return send.ok(res, { success: true, enabled, intervalMinutes: clamped, status });
+    },
+
     // Wiring hook (server.js) + shared starter exposed for the scheduler.
     setSyncScheduler: (s) => { syncScheduler = s; },
+    setNetworkCollectScheduler: (s) => { networkCollectScheduler = s; },
     runGuardedSync,
   };
 }

@@ -82,6 +82,8 @@ export default function Dashboard() {
   const [voucherStats, setVoucherStats] = useState(null);
   const [syncLogs, setSyncLogs] = useState([]);
   const [revenue, setRevenue] = useState(null);
+  // Village uptime/status from the collector snapshots (no Ruijie calls here).
+  const [netOverview, setNetOverview] = useState(null);
 
   // Ruijie groupIds of the villages currently in the "All Villages" scope.
   // Declared up here because the breakdown below has to be fetched for exactly
@@ -138,16 +140,20 @@ export default function Dashboard() {
     try {
       // Viewers can't reach sync-logs or manual-assistance (403, server-blocked),
       // so skip those fetches entirely — they only get stats + (scoped) revenue.
-      const [statsData, logsData, revenueData, maData] = await Promise.all([
+      const [statsData, logsData, revenueData, maData, netData] = await Promise.all([
         api("/vouchers/stats", { auth: true }),
         isViewer ? Promise.resolve({ logs: [] }) : api("/vouchers/sync-logs", { auth: true }),
         api("/portal-config/revenue", { auth: true }).catch(() => null),
         isViewer ? Promise.resolve(null) : api("/portal-config/manual-assistance?status=open", { auth: true }).catch(() => null),
+        // 30 days so daily collection still yields enough samples to mean
+        // something — at a 24h window one sample is only ever 0% or 100%.
+        api("/network/overview?uptimeHours=720", { auth: true }).catch(() => null),
       ]);
       setVoucherStats(statsData);
       setSyncLogs(logsData.logs || []);
       setRevenue(revenueData);
       setManualAssist(maData);
+      setNetOverview(netData);
     } catch (error) {
       console.error("Failed to load dashboard data:", error);
       if (
@@ -247,6 +253,13 @@ export default function Dashboard() {
   // to read is all-time plus a hard-coded current calendar month, so the site
   // cards sat frozen while the picker moved everything else on the page. The
   // breakdown already returns exactly this, scoped to the same window.
+  // Village network status keyed by Ruijie group id, for the site cards.
+  const netByGroup = useMemo(() => {
+    const map = {};
+    for (const v of netOverview?.sites || []) if (v.groupId != null) map[String(v.groupId)] = v;
+    return map;
+  }, [netOverview]);
+
   const revWindowByGroup = useMemo(() => {
     const map = {};
     for (const v of mb.data?.byVillage || []) map[String(v.groupId)] = v;
@@ -502,6 +515,7 @@ export default function Dashboard() {
                       hostname={site?.hostname}
                       stats={s}
                       revenue={revWindowByGroup[String(s.group_id)]}
+                      net={netByGroup[String(s.group_id)]}
                       windowLabel={mb.label}
                       fmtMoney={fmtMoney}
                       onOpen={
@@ -984,7 +998,7 @@ export default function Dashboard() {
 
 /* ------------ Sub-components --------------------------------------------- */
 
-function SiteCard({ name, hostname, stats, revenue, windowLabel, fmtMoney, onOpen }) {
+function SiteCard({ name, hostname, stats, revenue, net, windowLabel, fmtMoney, onOpen }) {
   const total = Number(stats.total || 0);
   const active = Number(stats.active || 0);
   const live = Number(stats.currently_in_use || 0);
@@ -1044,6 +1058,31 @@ function SiteCard({ name, hostname, stats, revenue, windowLabel, fmtMoney, onOpe
           </span>
         </div>
       </div>
+      {/* Uptime + link status from the collector. Absent when collection has
+          never run, rather than implying a village is down. */}
+      {net && (
+        <div className="flex items-center justify-between mb-3 text-[10.5px]">
+          <span className="flex items-center gap-1.5">
+            <span
+              className={
+                "w-1.5 h-1.5 rounded-full " +
+                (net.online === true
+                  ? "bg-[var(--success-fg)]"
+                  : net.online === false
+                    ? "bg-[var(--brand)]"
+                    : "bg-[var(--text-quaternary)]")
+              }
+            />
+            <span className="text-[var(--text-tertiary)] uppercase tracking-wide font-mono">
+              {net.online === true ? "Online" : net.online === false ? "Offline" : "Unknown"}
+            </span>
+          </span>
+          <span className="text-[var(--text-tertiary)] font-mono">
+            {net.uptimePct == null ? "no uptime data" : `${net.uptimePct}% uptime · 30d`}
+            {net.apsTotal > 0 ? ` · ${net.apsOnline}/${net.apsTotal} APs` : ""}
+          </span>
+        </div>
+      )}
       <div>
         <div className="flex items-center justify-between text-[10.5px] mb-1.5 font-mono">
           <span className="text-[var(--text-quaternary)] uppercase tracking-wide">Data</span>

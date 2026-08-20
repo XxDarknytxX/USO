@@ -66,14 +66,26 @@ export async function collectOnce(pool, ruijie) {
   } catch { /* ignore */ }
 
   console.log(`[collector] cycle done: ${ok}/${projects.length} villages updated`);
-  return ok;
+  return { ok, total: projects.length };
+}
+
+// SINGLE-FLIGHT. A cycle costs up to 4 Ruijie calls per village, so a scheduled
+// tick landing on top of an operator hitting "Refresh all" would double that
+// against an account-wide quota that has been exhausted before. Concurrent
+// callers share the run in progress rather than starting a second one.
+let _inFlight = null;
+export function isCollecting() { return _inFlight !== null; }
+export function collectOnceGuarded(pool, ruijie) {
+  if (_inFlight) return _inFlight;
+  _inFlight = collectOnce(pool, ruijie).finally(() => { _inFlight = null; });
+  return _inFlight;
 }
 
 let timer = null;
 export function startCollector(pool, { intervalMs = 5 * 60 * 1000 } = {}) {
   if (timer) return timer;
   const ruijie = new RuijieService();
-  const run = () => collectOnce(pool, ruijie).catch((e) => console.error('[collector] cycle error:', e.message));
+  const run = () => collectOnceGuarded(pool, ruijie).catch((e) => console.error('[collector] cycle error:', e.message));
   setTimeout(run, 8000); // first run shortly after boot
   timer = setInterval(run, intervalMs);
   console.log(`[collector] started — every ${Math.round(intervalMs / 60000)} min`);

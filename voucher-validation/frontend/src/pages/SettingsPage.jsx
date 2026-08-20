@@ -11,6 +11,18 @@ import { Button, Panel, Badge, PageHeader, Toggle, Select, Field, Input, Tabs } 
 
 // Sync-frequency presets. Floor is 5 min to protect the Ruijie account-wide rate
 // limit (the backend clamps to the same range regardless of what's sent).
+// Network-health collection runs ~4 Ruijie calls per village per cycle, so the
+// choices start at an hour. The labels carry the cost because that is the whole
+// reason this job was switched off once already.
+const COLLECT_INTERVAL_OPTIONS = [
+  { v: 60, label: "Every hour (~2,900 calls/day)" },
+  { v: 180, label: "Every 3 hours (~960/day)" },
+  { v: 360, label: "Every 6 hours (~480/day)" },
+  { v: 720, label: "Every 12 hours (~240/day)" },
+  { v: 1440, label: "Once a day (~120/day)" },
+  { v: 10080, label: "Once a week (~17/day)" },
+];
+
 const INTERVAL_OPTIONS = [
   { v: 5, label: "Every 5 minutes" },
   { v: 10, label: "Every 10 minutes" },
@@ -47,6 +59,13 @@ export default function SettingsPage() {
   const [origSync, setOrigSync] = useState({ enabled: true, interval: 10 });
   const [savingSync, setSavingSync] = useState(false);
   const [syncStatus, setSyncStatus] = useState(null);
+  // Network-health collection schedule (the same shape as the voucher sync).
+  const [netEnabled, setNetEnabled] = useState(false);
+  const [netInterval, setNetInterval] = useState(1440);
+  const [origNet, setOrigNet] = useState({ enabled: false, interval: 1440 });
+  const [savingNet, setSavingNet] = useState(false);
+  const [netStatus, setNetStatus] = useState(null);
+  const [collecting, setCollecting] = useState(false);
 
   // SMTP (outgoing email) config
   const [smtp, setSmtp] = useState({ enabled: false, host: "", port: "", encryption: "starttls", username: "", fromName: "", fromEmail: "" });
@@ -82,6 +101,10 @@ export default function SettingsPage() {
     receiptsEnabled !== origReceipts.enabled || normGroups(receiptGroupIds) !== normGroups(origReceipts.groupIds);
 
   const syncDirty = syncEnabled !== origSync.enabled || syncInterval !== origSync.interval;
+  const netDirty = netEnabled !== origNet.enabled || netInterval !== origNet.interval;
+  const netIntervalChoices = COLLECT_INTERVAL_OPTIONS.some((o) => o.v === netInterval)
+    ? COLLECT_INTERVAL_OPTIONS
+    : [{ v: netInterval, label: `Every ${netInterval} minutes` }, ...COLLECT_INTERVAL_OPTIONS];
 
   // If the stored interval isn't one of the presets (e.g. set directly in the DB),
   // surface it as a selectable option so the dropdown reflects the real value.
@@ -200,6 +223,13 @@ export default function SettingsPage() {
       const enabled =
         byKey.sync_enabled == null ? true : String(byKey.sync_enabled).toLowerCase() === "true";
       const interval = Number(byKey.sync_interval_minutes) || 10;
+      // Absent means OFF — this job spends Ruijie quota, so a missing setting
+      // must never be read as consent to start polling.
+      const nEnabled = String(byKey.network_collect_enabled || "").toLowerCase() === "true";
+      const nInterval = Number(byKey.network_collect_interval_minutes) || 1440;
+      setNetEnabled(nEnabled);
+      setNetInterval(nInterval);
+      setOrigNet({ enabled: nEnabled, interval: nInterval });
       setSyncEnabled(enabled);
       setSyncInterval(interval);
       setOrigSync({ enabled, interval });
@@ -220,6 +250,7 @@ export default function SettingsPage() {
   async function loadSyncStatus() {
     try {
       setSyncStatus(await settingsApi.syncStatus());
+      try { setNetStatus(await networkApi.collectStatus()); } catch { /* admin-only; ignore */ }
     } catch {
       // non-critical
     }
@@ -241,6 +272,40 @@ export default function SettingsPage() {
       loadSettings();
     } finally {
       setSavingSync(false);
+    }
+  }
+
+  async function saveNetSettings() {
+    setSavingNet(true);
+    try {
+      await settingsApi.updateNetworkCollect(netEnabled, netInterval);
+      setOrigNet({ enabled: netEnabled, interval: netInterval });
+      toast.success(netEnabled ? "Collection schedule saved" : "Automatic collection paused");
+      try { setNetStatus(await networkApi.collectStatus()); } catch { /* ignore */ }
+    } catch (e) {
+      toast.error(e.message);
+    } finally {
+      setSavingNet(false);
+    }
+  }
+
+  // Collect every village now. The server single-flights this, so a second click
+  // joins the run in progress rather than spending the Ruijie quota twice.
+  async function runCollectNow() {
+    setCollecting(true);
+    const tid = toast.loading("Collecting every village from Ruijie…");
+    try {
+      const r = await networkApi.collectNow();
+      toast.success(
+        `${r.villagesUpdated ?? "?"}/${r.villagesTotal ?? "?"} villages updated` +
+          (r.joinedExisting ? " (joined a run already in progress)" : ""),
+        { id: tid, duration: 6000 }
+      );
+      try { setNetStatus(await networkApi.collectStatus()); } catch { /* ignore */ }
+    } catch (e) {
+      toast.error(e.message || "Collection failed", { id: tid });
+    } finally {
+      setCollecting(false);
     }
   }
 
@@ -465,6 +530,77 @@ export default function SettingsPage() {
                   onClick={saveSyncSettings}
                   loading={savingSync}
                   disabled={!syncDirty || savingSync}
+                >
+                  Save changes
+                </Button>
+              </div>
+            </div>
+          </Panel>
+          <Panel
+            title="Network health collection"
+            subtitle="How often every village's device health and uptime are collected from Ruijie. This feeds the Overview page and the village uptime on the Dashboard."
+            icon={<Globe2 size={15} />}
+          >
+            <div className="space-y-5">
+              <Toggle
+                checked={netEnabled}
+                onChange={setNetEnabled}
+                label="Automatic collection"
+                hint={
+                  netEnabled
+                    ? "Every village is collected on the schedule below."
+                    : "Paused — the Overview and Dashboard uptime will show the last collected values."
+                }
+              />
+
+              <Field
+                label="Collection frequency"
+                hint="Each cycle costs about 4 Ruijie calls per village against a ~5,000/day account quota. Minimum one hour. Uptime % is the share of collected samples that were up, so a longer interval means coarser uptime."
+                className="max-w-sm"
+              >
+                <Select
+                  value={netInterval}
+                  onChange={(e) => setNetInterval(Number(e.target.value))}
+                  disabled={!netEnabled}
+                >
+                  {netIntervalChoices.map((o) => (
+                    <option key={o.v} value={o.v}>
+                      {o.label}
+                    </option>
+                  ))}
+                </Select>
+              </Field>
+
+              {netStatus && (
+                <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[11.5px] text-[var(--text-tertiary)]">
+                  <Badge tone={netStatus.enabled ? "success" : "neutral"}>
+                    {netStatus.enabled
+                      ? `Collection on · every ${netStatus.intervalMinutes} min`
+                      : "Collection off"}
+                  </Badge>
+                  {netStatus.running && <Badge tone="warning">Running now</Badge>}
+                  {netStatus.lastCollected && <span>Last collected {relTime(netStatus.lastCollected)}</span>}
+                  {netStatus.lastRun?.error && (
+                    <span className="text-[var(--brand)]">Last run failed: {netStatus.lastRun.error}</span>
+                  )}
+                </div>
+              )}
+
+              <div className="flex items-center justify-between gap-3 border-t border-[var(--border-default)] pt-4">
+                <Button
+                  variant="secondary"
+                  onClick={runCollectNow}
+                  loading={collecting}
+                  disabled={collecting}
+                  iconLeft={!collecting && <RefreshCw size={14} />}
+                >
+                  Refresh all villages now
+                </Button>
+                <Button
+                  variant="primary"
+                  onClick={saveNetSettings}
+                  loading={savingNet}
+                  disabled={!netDirty || savingNet}
                 >
                   Save changes
                 </Button>

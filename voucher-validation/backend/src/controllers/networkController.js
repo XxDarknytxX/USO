@@ -6,6 +6,7 @@ import RuijieService from "../services/ruijieService.js";
 import { fetchProjectHealth } from "../services/networkHealth.js";
 import { getHealthSnapshot, setHealthSnapshot } from "../services/networkHealthStore.js";
 import * as starlink from "../services/starlinkService.js";
+import { collectOnceGuarded, isCollecting } from "../services/networkCollector.js";
 
 const send = {
   ok: (res, data = {}) => res.json(data),
@@ -38,6 +39,8 @@ const mapProject = (r) => ({
 const _healthInflight = new Map();  // projectId -> Promise<payload>
 
 export function makeNetworkController(pool) {
+  // Set from server.js once the scheduler exists (it needs this controller first).
+  let collectScheduler = null;
   const ruijie = new RuijieService();
 
   return {
@@ -59,6 +62,41 @@ export function makeNetworkController(pool) {
         console.error(e);
         return send.serverErr(res);
       }
+    },
+
+    setCollectScheduler: (s) => { collectScheduler = s; },
+
+    // POST /api/network/collect  (admin)
+    // Refresh EVERY village now. Deliberately not per-village: the Overview and
+    // the dashboard both read one snapshot set, so a partial refresh would leave
+    // the page comparing villages measured at different times.
+    //
+    // Costs up to 4 Ruijie calls per village, so it is single-flighted in the
+    // collector — a double click, or a click landing on a scheduled tick, joins
+    // the run already in progress instead of spending the quota twice.
+    collectNow: async (_req, res) => {
+      try {
+        const already = isCollecting();
+        const r = await collectOnceGuarded(pool, ruijie);
+        return send.ok(res, {
+          success: true,
+          joinedExisting: already,
+          villagesUpdated: r?.ok ?? null,
+          villagesTotal: r?.total ?? null,
+        });
+      } catch (e) {
+        console.error('[network] collectNow failed:', e.message);
+        return send.serverErr(res, e.message);
+      }
+    },
+
+    // GET /api/network/collect/status — scheduler state for the Settings page.
+    collectStatus: async (_req, res) => {
+      try {
+        const s = typeof collectScheduler?.status === 'function' ? collectScheduler.status() : null;
+        const [[row]] = await pool.query('SELECT MAX(checked_at) AS last FROM network_status');
+        return send.ok(res, { ...(s || {}), running: isCollecting(), lastCollected: row?.last || null });
+      } catch (e) { console.error(e); return send.serverErr(res); }
     },
 
     // GET /api/network/discover  (admin)
