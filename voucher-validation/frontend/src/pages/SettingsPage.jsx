@@ -18,6 +18,7 @@ const COLLECT_INTERVAL_OPTIONS = [
   { v: 60, label: "Every hour (~2,900 calls/day)" },
   { v: 180, label: "Every 3 hours (~960/day)" },
   { v: 360, label: "Every 6 hours (~480/day)" },
+  { v: 480, label: "Every 8 hours (~360/day)" },
   { v: 720, label: "Every 12 hours (~240/day)" },
   { v: 1440, label: "Once a day (~120/day)" },
   { v: 10080, label: "Once a week (~17/day)" },
