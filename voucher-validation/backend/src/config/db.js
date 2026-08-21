@@ -94,6 +94,25 @@ export async function getPool() {
       INDEX idx_visit (visit_id)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
 
+    // Documents that belong to the VILLAGE rather than to any one visit:
+    // handover packs, as-builts, warranties, permits. Files on disk, row is the
+    // index — same reasoning as the photos below.
+    `CREATE TABLE IF NOT EXISTS maintenance_documents (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      project_id INT NOT NULL,
+      category ENUM('handover','asbuilt','warranty','permit','manual','other') NOT NULL DEFAULT 'other',
+      title VARCHAR(255) NOT NULL,
+      notes VARCHAR(500) NULL,
+      file_path VARCHAR(500) NOT NULL,
+      file_name VARCHAR(255) NULL,
+      mime_type VARCHAR(100) NOT NULL,
+      bytes INT NULL,
+      uploaded_by INT NULL,
+      uploaded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      INDEX idx_project (project_id),
+      INDEX idx_category (project_id, category)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
+
     // Photos live on disk (see services/maintenanceStore.js); the row is the
     // index. component_key NULL = a general photo of the visit.
     `CREATE TABLE IF NOT EXISTS maintenance_photos (

@@ -13,6 +13,8 @@ import {
   COMPONENTS, COMPONENT_KEYS, CONDITIONS,
   savePhoto, streamPhoto, deletePhoto, resolvePhoto,
   ALLOWED_MIME, MAX_BYTES,
+  DOC_CATEGORIES, DOC_CATEGORY_KEYS, ALLOWED_DOC_MIME, MAX_DOC_BYTES,
+  saveDocument, streamDocument, deleteDocument, resolveDocument,
 } from "../services/maintenanceStore.js";
 
 const send = {
@@ -108,6 +110,203 @@ export function makeMaintenanceController(pool) {
           overdueCount: sites.filter((s) => s.overdue).length,
         });
       } catch (e) { console.error('[maintenance] schedule:', e); return send.serverErr(res); }
+    },
+
+    // GET /api/maintenance/villages/:projectId/profile
+    //
+    // The village as a THING, not as a stack of reports. For each component:
+    // what condition is it in right now, when was that established, who by, and
+    // the photographs. Plus the paperwork that belongs to the site rather than
+    // to any one visit.
+    //
+    // "Right now" = the most recent SUBMITTED check for that component, across
+    // every visit. A component nobody has ever filed reads as never inspected,
+    // which is a finding in itself.
+    getVillageProfile: async (req, res) => {
+      try {
+        const projectId = Number(req.params.projectId);
+        if (!Number.isFinite(projectId)) return send.bad(res, 'A numeric village id is required');
+
+        const [[project]] = await pool.query(
+          'SELECT id, name, hostname, ruijie_group_id FROM network_projects WHERE id = ? LIMIT 1', [projectId]
+        );
+        if (!project) return send.notFound(res, 'No such village');
+
+        // Newest first, so the first row seen per component is the current one.
+        const [rows] = await pool.query(
+          `SELECT ck.visit_id, ck.component_key, ck.condition_rating, ck.notes,
+                  ck.submitted_at, v.visit_date, v.engineer_name
+             FROM maintenance_checks ck
+             JOIN maintenance_visits v ON v.id = ck.visit_id
+            WHERE v.project_id = ? AND ck.status = 'submitted'
+            ORDER BY ck.submitted_at DESC, ck.id DESC`,
+          [projectId]
+        );
+        const [photos] = await pool.query(
+          `SELECT ph.id, ph.visit_id, ph.component_key, ph.caption, ph.uploaded_at
+             FROM maintenance_photos ph
+             JOIN maintenance_visits v ON v.id = ph.visit_id
+            WHERE v.project_id = ?
+            ORDER BY ph.id DESC`,
+          [projectId]
+        );
+
+        const history = {};
+        for (const r of rows) (history[r.component_key] ||= []).push(r);
+
+        const components = COMPONENTS.map((c) => {
+          const past = history[c.key] || [];
+          const current = past[0] || null;
+          return {
+            key: c.key,
+            label: c.label,
+            hint: c.hint,
+            condition: current?.condition_rating || null,
+            notes: current?.notes || '',
+            lastInspected: current?.submitted_at || null,
+            lastVisitDate: current?.visit_date || null,
+            engineerName: current?.engineer_name || null,
+            visitId: current?.visit_id || null,
+            neverInspected: past.length === 0,
+            // Photos from the visit that established the CURRENT state, so the
+            // gallery matches the condition shown beside it.
+            photos: current
+              ? photos.filter((p) => p.visit_id === current.visit_id && p.component_key === c.key)
+                      .map((p) => ({ id: p.id, caption: p.caption, uploadedAt: p.uploaded_at }))
+              : [],
+            history: past.map((h) => ({
+              visitId: h.visit_id,
+              condition: h.condition_rating,
+              notes: h.notes,
+              submittedAt: h.submitted_at,
+              visitDate: h.visit_date,
+              engineerName: h.engineer_name,
+              photoCount: photos.filter((p) => p.visit_id === h.visit_id && p.component_key === c.key).length,
+            })),
+          };
+        });
+
+        const [docs] = await pool.query(
+          `SELECT id, category, title, notes, file_name, mime_type, bytes, uploaded_at
+             FROM maintenance_documents WHERE project_id = ?
+            ORDER BY uploaded_at DESC, id DESC`,
+          [projectId]
+        );
+
+        const [[lastVisit]] = await pool.query(
+          `SELECT id, visit_date, engineer_name, overall_condition, submitted_at
+             FROM maintenance_visits
+            WHERE project_id = ? AND status = 'submitted'
+            ORDER BY visit_date DESC, id DESC LIMIT 1`,
+          [projectId]
+        );
+        let nextDue = null;
+        if (lastVisit?.visit_date) {
+          const d = new Date(lastVisit.visit_date);
+          d.setMonth(d.getMonth() + SERVICE_INTERVAL_MONTHS);
+          nextDue = d;
+        }
+        const rated = components.filter((c) => c.condition && c.condition !== 'na');
+
+        return send.ok(res, {
+          village: {
+            id: project.id,
+            name: project.name,
+            hostname: project.hostname,
+            groupId: project.ruijie_group_id,
+          },
+          service: {
+            lastVisitId: lastVisit?.id || null,
+            lastVisitDate: lastVisit?.visit_date || null,
+            lastEngineer: lastVisit?.engineer_name || null,
+            overallCondition: lastVisit?.overall_condition || null,
+            nextDue,
+            overdue: !lastVisit || (nextDue != null && nextDue < new Date()),
+            neverServiced: !lastVisit,
+            intervalMonths: SERVICE_INTERVAL_MONTHS,
+          },
+          summary: {
+            total: components.length,
+            inspected: components.filter((c) => !c.neverInspected).length,
+            faulty: rated.filter((c) => c.condition === 'faulty').length,
+            attention: rated.filter((c) => c.condition === 'attention').length,
+            ok: rated.filter((c) => c.condition === 'ok').length,
+          },
+          components,
+          documents: docs.map((d) => ({
+            id: d.id, category: d.category, title: d.title, notes: d.notes,
+            fileName: d.file_name, mimeType: d.mime_type, bytes: d.bytes, uploadedAt: d.uploaded_at,
+          })),
+          documentCategories: DOC_CATEGORIES,
+        });
+      } catch (e) { console.error('[maintenance] profile:', e); return send.serverErr(res); }
+    },
+
+    // POST /api/maintenance/villages/:projectId/documents
+    // { category, title, notes?, fileName, mimeType, dataBase64 }
+    addDocument: async (req, res) => {
+      try {
+        const projectId = Number(req.params.projectId);
+        if (!Number.isFinite(projectId)) return send.bad(res, 'A numeric village id is required');
+        const [[project]] = await pool.query('SELECT id FROM network_projects WHERE id = ? LIMIT 1', [projectId]);
+        if (!project) return send.notFound(res, 'No such village');
+
+        const title = String(req.body?.title || '').trim();
+        if (!title) return send.bad(res, 'A title is required');
+        const category = DOC_CATEGORY_KEYS.has(req.body?.category) ? req.body.category : 'other';
+        const mimeType = String(req.body?.mimeType || '');
+        if (!ALLOWED_DOC_MIME.includes(mimeType)) return send.bad(res, `Unsupported file type: ${mimeType || 'unknown'}`);
+
+        const b64 = String(req.body?.dataBase64 || '').replace(/^data:[^;]+;base64,/, '');
+        if (!b64) return send.bad(res, 'No file data');
+        const buf = Buffer.from(b64, 'base64');
+        if (!buf.length) return send.bad(res, 'File is empty');
+        if (buf.length > MAX_DOC_BYTES) {
+          return send.bad(res, `File is too large (${Math.round(buf.length / 1048576)} MB, max ${MAX_DOC_BYTES / 1048576} MB)`);
+        }
+
+        const rel = await saveDocument(projectId, buf, mimeType);
+        const [r] = await pool.query(
+          `INSERT INTO maintenance_documents
+             (project_id, category, title, notes, file_path, file_name, mime_type, bytes, uploaded_by)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          [projectId, category, title.slice(0, 255), String(req.body?.notes || '').slice(0, 500) || null,
+           rel, String(req.body?.fileName || '').slice(0, 255) || null, mimeType, buf.length, req.user?.id ?? null]
+        );
+        return send.created(res, { documentId: r.insertId, bytes: buf.length });
+      } catch (e) { console.error('[maintenance] addDocument:', e); return send.serverErr(res, e.message); }
+    },
+
+    // GET /api/maintenance/documents/:id — streams it, behind auth like photos.
+    getDocument: async (req, res) => {
+      try {
+        const id = Number(req.params.id);
+        const [[d]] = await pool.query(
+          'SELECT file_path, file_name, mime_type FROM maintenance_documents WHERE id = ? LIMIT 1', [id]
+        );
+        if (!d || !resolveDocument(d.file_path)) return send.notFound(res, 'No such document');
+        const stream = streamDocument(d.file_path);
+        if (!stream) return send.notFound(res, 'No such document');
+        res.setHeader('Content-Type', d.mime_type || 'application/octet-stream');
+        // inline, not attachment: a PDF handover pack should open in the viewer
+        // rather than force a download the operator then has to find.
+        const safeName = String(d.file_name || 'document').replace(/[^\w.\- ]/g, '_');
+        res.setHeader('Content-Disposition', `inline; filename="${safeName}"`);
+        stream.on('error', () => { if (!res.headersSent) res.status(404).end(); else res.end(); });
+        return stream.pipe(res);
+      } catch (e) { console.error('[maintenance] getDocument:', e); return send.serverErr(res); }
+    },
+
+    // DELETE /api/maintenance/documents/:id — admin only.
+    removeDocument: async (req, res) => {
+      try {
+        const id = Number(req.params.id);
+        const [[d]] = await pool.query('SELECT file_path FROM maintenance_documents WHERE id = ? LIMIT 1', [id]);
+        if (!d) return send.notFound(res, 'No such document');
+        await pool.query('DELETE FROM maintenance_documents WHERE id = ?', [id]);
+        await deleteDocument(d.file_path);
+        return send.ok(res, { success: true });
+      } catch (e) { console.error('[maintenance] removeDocument:', e); return send.serverErr(res); }
     },
 
     // GET /api/maintenance/visits?projectId=&status=&limit=

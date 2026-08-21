@@ -19,6 +19,14 @@ export function makeMaintenanceRouter(controller) {
   // view, as opposed to the per-attendance one.
   router.get("/submissions", controller.listSubmissions);
 
+  // A village as a thing: current condition of every component, its photos and
+  // history, plus the paperwork that belongs to the site.
+  router.get("/villages/:projectId/profile", controller.getVillageProfile);
+  router.post("/villages/:projectId/documents", controller.addDocument);
+  router.get("/documents/:id", controller.getDocument);
+  // Removing site paperwork is an admin action.
+  router.delete("/documents/:id", requireAdmin, controller.removeDocument);
+
   router.get("/visits", controller.listVisits);
   router.post("/visits", controller.createVisit);
   router.get("/visits/:id", controller.getVisit);

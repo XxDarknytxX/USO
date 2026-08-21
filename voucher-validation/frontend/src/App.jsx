@@ -20,6 +20,7 @@ const ManualAssistancePage = lazy(() => import("./pages/ManualAssistancePage"));
 const ProfilePage = lazy(() => import("./pages/ProfilePage"));
 const MpaisaMappingPage = lazy(() => import("./pages/MpaisaMappingPage"));
 const MaintenancePage = lazy(() => import("./pages/MaintenancePage"));
+const VillageProfilePage = lazy(() => import("./pages/VillageProfilePage"));
 
 function ProtectedRoute({ children }) {
   const token = localStorage.getItem("token");
@@ -69,6 +70,7 @@ export default function App() {
             <Route path="/mpaisa" element={<AdminRoute><MpaisaMappingPage /></AdminRoute>} />
             {/* Admins and engineers. The server enforces the same pair. */}
             <Route path="/maintenance" element={<MaintenanceRoute><MaintenancePage /></MaintenanceRoute>} />
+            <Route path="/maintenance/village/:projectId" element={<MaintenanceRoute><VillageProfilePage /></MaintenanceRoute>} />
             <Route path="/overview" element={<AdminRoute><OverviewPage /></AdminRoute>} />
             <Route path="/vouchers" element={<AdminRoute><VouchersPage /></AdminRoute>} />
             <Route path="/vouchers/:uuid" element={<AdminRoute><VouchersPage /></AdminRoute>} />

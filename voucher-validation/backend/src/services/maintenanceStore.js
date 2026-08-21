@@ -48,6 +48,66 @@ const MIME_EXT = {
 export const ALLOWED_MIME = Object.keys(MIME_EXT);
 export const MAX_BYTES = 8 * 1024 * 1024; // 8 MB per photo after client downscale
 
+// Documents are village-level paperwork — handover packs, as-builts, warranties.
+// Wider than photos (a handover pack is a PDF) but still an allow-list: an
+// arbitrary upload must not be able to become an arbitrary file on disk.
+const DOC_EXT = {
+  "application/pdf": "pdf",
+  "image/jpeg": "jpg",
+  "image/png": "png",
+  "image/webp": "webp",
+  "application/msword": "doc",
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document": "docx",
+  "application/vnd.ms-excel": "xls",
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": "xlsx",
+};
+export const ALLOWED_DOC_MIME = Object.keys(DOC_EXT);
+export const MAX_DOC_BYTES = 25 * 1024 * 1024; // 25 MB — a scanned handover pack
+
+export const DOC_CATEGORIES = [
+  { key: "handover", label: "Handover pack" },
+  { key: "asbuilt", label: "As-built / site drawing" },
+  { key: "warranty", label: "Warranty" },
+  { key: "permit", label: "Permit / approval" },
+  { key: "manual", label: "Manual / datasheet" },
+  { key: "other", label: "Other" },
+];
+export const DOC_CATEGORY_KEYS = new Set(DOC_CATEGORIES.map((c) => c.key));
+
+const DOC_ROOT = resolve(ROOT, "..", "maintenance-docs");
+
+/** Write one village document. Returns the DB-storable relative path. */
+export async function saveDocument(projectId, buffer, mimeType) {
+  const ext = DOC_EXT[mimeType];
+  if (!ext) throw new Error(`Unsupported file type: ${mimeType}`);
+  const dir = join(DOC_ROOT, String(Number(projectId)));
+  await mkdir(dir, { recursive: true });
+  const rel = join(String(Number(projectId)), `${randomUUID()}.${ext}`);
+  await writeFile(join(DOC_ROOT, rel), buffer);
+  return rel;
+}
+
+/** Same traversal guard as photos, against the documents root. */
+export function resolveDocument(relPath) {
+  const abs = resolve(DOC_ROOT, String(relPath || ""));
+  if (abs !== DOC_ROOT && !abs.startsWith(DOC_ROOT + sep)) return null;
+  return abs;
+}
+
+export function streamDocument(relPath) {
+  const abs = resolveDocument(relPath);
+  if (!abs) return null;
+  return createReadStream(abs);
+}
+
+export async function deleteDocument(relPath) {
+  const abs = resolveDocument(relPath);
+  if (!abs) return;
+  try { await unlink(abs); } catch { /* already gone */ }
+}
+
+export function docRoot() { return DOC_ROOT; }
+
 /**
  * Write one photo for a visit. Returns the DB-storable relative path.
  * The filename is a random UUID: a caller-supplied name could contain path

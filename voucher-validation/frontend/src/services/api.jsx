@@ -222,6 +222,11 @@ export const mpaisaApi = {
 // downscaled in the browser — see downscaleImage below.
 export const maintenanceApi = {
   components: () => api("/maintenance/components"),
+  villageProfile: (projectId) => api(`/maintenance/villages/${projectId}/profile`),
+  addDocument: (projectId, body) =>
+    api(`/maintenance/villages/${projectId}/documents`, { method: "POST", body }),
+  deleteDocument: (id) => api(`/maintenance/documents/${id}`, { method: "DELETE" }),
+  documentUrl: (id) => `${API_BASE_URL}/maintenance/documents/${id}`,
   schedule: () => api("/maintenance/schedule"),
   visits: (params = {}) => {
     const qs = new URLSearchParams(params).toString();
@@ -258,6 +263,30 @@ export async function fetchPhotoObjectUrl(photoId) {
   const res = await fetch(maintenanceApi.photoUrl(photoId), { headers: { ...authHeader() } });
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   return URL.createObjectURL(await res.blob());
+}
+
+/**
+ * Open an authenticated document in a new tab. Documents sit behind the API, so
+ * a plain link cannot carry the Bearer token — fetch it, then hand the browser
+ * a blob URL. Revoked on a timer rather than immediately: revoking straight
+ * away races the tab that is still loading it.
+ */
+export async function openDocument(documentId) {
+  const res = await fetch(maintenanceApi.documentUrl(documentId), { headers: { ...authHeader() } });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  const url = URL.createObjectURL(await res.blob());
+  window.open(url, "_blank", "noopener");
+  setTimeout(() => URL.revokeObjectURL(url), 60000);
+}
+
+/** Read a picked file as base64 without downscaling (documents are not images). */
+export function fileToBase64(file) {
+  return new Promise((resolve, reject) => {
+    const fr = new FileReader();
+    fr.onload = () => resolve(String(fr.result).split(",")[1]);
+    fr.onerror = () => reject(new Error("Could not read that file"));
+    fr.readAsDataURL(file);
+  });
 }
 
 /**

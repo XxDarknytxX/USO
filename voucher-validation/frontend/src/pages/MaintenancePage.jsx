@@ -8,6 +8,7 @@
 // is the question the feature exists to answer.
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import toast from "react-hot-toast";
 import {
   Wrench, RefreshCw, ClipboardCheck, AlertTriangle, Camera, Lock, Trash2, ListChecks,
@@ -49,6 +50,7 @@ function dueLabel(site) {
 
 export default function MaintenancePage() {
   const { isAdmin } = useAuth();
+  const navigate = useNavigate();
   // Follow the scope switcher and the "All Villages" set from Settings, the
   // same as Overview and Network. A village deselected there is not part of
   // the estate the operator is looking at, so it must not appear in the
@@ -208,7 +210,15 @@ export default function MaintenancePage() {
                 ) : (
                   sites.map((s) => (
                     <tr key={s.projectId} className="hover:bg-[var(--bg-surface)] transition-colors">
-                      <td className="px-5 py-3 font-medium text-[var(--fg-primary)]">{s.name}</td>
+                      <td className="px-5 py-3">
+                        <button
+                          onClick={() => navigate(`/maintenance/village/${s.projectId}`)}
+                          className="font-medium text-[var(--fg-primary)] hover:text-[var(--brand)] transition-colors text-left"
+                          title="Open the village profile"
+                        >
+                          {s.name}
+                        </button>
+                      </td>
                       <td className="px-5 py-3 text-[var(--fg-secondary)] whitespace-nowrap">{fmtDate(s.lastVisitDate)}</td>
                       <td className="px-5 py-3 text-[var(--fg-secondary)]">{s.lastEngineer || "—"}</td>
                       <td className="px-5 py-3">
@@ -228,11 +238,13 @@ export default function MaintenancePage() {
                       </td>
                       <td className="px-5 py-3 text-right">
                         <div className="flex items-center justify-end gap-2">
-                          {s.lastVisitId && (
-                            <Button variant="ghost" size="sm" onClick={() => setOpenVisit(s.lastVisitId)}>
-                              View last
-                            </Button>
-                          )}
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => navigate(`/maintenance/village/${s.projectId}`)}
+                          >
+                            Profile
+                          </Button>
                           <Button
                             variant="secondary"
                             size="sm"
