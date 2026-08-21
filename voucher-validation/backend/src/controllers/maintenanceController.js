@@ -154,6 +154,29 @@ export function makeMaintenanceController(pool) {
         const history = {};
         for (const r of rows) (history[r.component_key] ||= []).push(r);
 
+        // The caller's own open draft for this village, if any. The profile is
+        // where servicing happens now, so it has to show work in progress as
+        // well as what is filed — otherwise an engineer who photographed the
+        // gateway yesterday would come back and see no trace of it.
+        const [[openDraft]] = await pool.query(
+          `SELECT id, visit_date FROM maintenance_visits
+            WHERE project_id = ? AND status = 'draft' AND engineer_id = ?
+            ORDER BY id DESC LIMIT 1`,
+          [projectId, req.user?.id ?? 0]
+        );
+        let draftChecks = [], draftPhotos = [];
+        if (openDraft) {
+          [draftChecks] = await pool.query(
+            `SELECT component_key, condition_rating, notes, status
+               FROM maintenance_checks WHERE visit_id = ?`, [openDraft.id]
+          );
+          [draftPhotos] = await pool.query(
+            `SELECT id, component_key, caption FROM maintenance_photos
+              WHERE visit_id = ? ORDER BY id`, [openDraft.id]
+          );
+        }
+        const draftByKey = Object.fromEntries(draftChecks.map((c) => [c.component_key, c]));
+
         const components = COMPONENTS.map((c) => {
           const past = history[c.key] || [];
           const current = past[0] || null;
@@ -174,6 +197,20 @@ export function makeMaintenanceController(pool) {
               ? photos.filter((p) => p.visit_id === current.visit_id && p.component_key === c.key)
                       .map((p) => ({ id: p.id, caption: p.caption, uploadedAt: p.uploaded_at }))
               : [],
+            // Unfiled work on this component in the caller's open draft.
+            draft: openDraft
+              ? {
+                  visitId: openDraft.id,
+                  condition: draftByKey[c.key]?.condition_rating || null,
+                  notes: draftByKey[c.key]?.notes || '',
+                  // A submitted check inside the open draft is already filed;
+                  // it appears above as current state, not as pending work.
+                  pending: (draftByKey[c.key]?.status || 'draft') !== 'submitted',
+                  photos: draftPhotos
+                    .filter((p) => p.component_key === c.key)
+                    .map((p) => ({ id: p.id, caption: p.caption })),
+                }
+              : null,
             history: past.map((h) => ({
               visitId: h.visit_id,
               condition: h.condition_rating,
@@ -185,6 +222,7 @@ export function makeMaintenanceController(pool) {
             })),
           };
         });
+
 
         const [docs] = await pool.query(
           `SELECT id, category, title, notes, file_name, mime_type, bytes, uploaded_at
@@ -233,6 +271,7 @@ export function makeMaintenanceController(pool) {
             ok: rated.filter((c) => c.condition === 'ok').length,
           },
           components,
+          openDraftId: openDraft?.id || null,
           documents: docs.map((d) => ({
             id: d.id, category: d.category, title: d.title, notes: d.notes,
             fileName: d.file_name, mimeType: d.mime_type, bytes: d.bytes, uploadedAt: d.uploaded_at,

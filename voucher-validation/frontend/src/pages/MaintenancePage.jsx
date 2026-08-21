@@ -11,7 +11,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import toast from "react-hot-toast";
 import {
-  Wrench, RefreshCw, ClipboardCheck, AlertTriangle, Camera, Lock, Trash2, ListChecks,
+  Wrench, RefreshCw, ClipboardCheck, AlertTriangle, Lock, Trash2, ListChecks,
 } from "lucide-react";
 import { maintenanceApi } from "../services/api";
 import { useAuth } from "../hooks/useAuth";
@@ -59,7 +59,6 @@ export default function MaintenancePage() {
   const [schedule, setSchedule] = useState(null);
   const [visits, setVisits] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [starting, setStarting] = useState(null);
   const [openVisit, setOpenVisit] = useState(null);
   const [filterProject, setFilterProject] = useState("");
   const [tab, setTab] = useState("schedule"); // schedule | reports | submissions
@@ -120,25 +119,12 @@ export default function MaintenancePage() {
     }
   }
 
-  async function startReport(projectId) {
-    setStarting(projectId);
-    try {
-      const r = await maintenanceApi.createVisit({ projectId });
-      if (r.reused) toast("Reopened your existing draft for this village", { icon: "📝" });
-      setOpenVisit(r.visitId);
-    } catch (e) {
-      toast.error(e.message);
-    } finally {
-      setStarting(null);
-    }
-  }
-
   return (
     <div className="p-4 sm:p-6 lg:p-8">
       <PageHeader
         eyebrow="Field service"
         title="Maintenance"
-        subtitle={`Every village is inspected every ${schedule?.intervalMonths ?? 6} months. Reports are photographic evidence of what was found.`}
+        subtitle={`Every village is inspected every ${schedule?.intervalMonths ?? 6} months. Open a village to record what you found, component by component.`}
         icon={<Wrench size={20} />}
         actions={
           <Button variant="secondary" size="sm" onClick={load} disabled={loading} iconLeft={<RefreshCw size={14} />}>
@@ -239,20 +225,12 @@ export default function MaintenancePage() {
                       <td className="px-5 py-3 text-right">
                         <div className="flex items-center justify-end gap-2">
                           <Button
-                            variant="ghost"
+                            variant="primary"
                             size="sm"
+                            iconLeft={<Wrench size={13} />}
                             onClick={() => navigate(`/maintenance/village/${s.projectId}`)}
                           >
-                            Profile
-                          </Button>
-                          <Button
-                            variant="secondary"
-                            size="sm"
-                            loading={starting === s.projectId}
-                            iconLeft={starting !== s.projectId && <Camera size={13} />}
-                            onClick={() => startReport(s.projectId)}
-                          >
-                            Start report
+                            Service
                           </Button>
                         </div>
                       </td>
@@ -271,7 +249,7 @@ export default function MaintenancePage() {
         <Panel
           padding={false}
           title="Reports"
-          subtitle="Drafts you have open, and every filed report"
+          subtitle="The record behind the servicing — drafts you have open, and every filed report"
           icon={<ClipboardCheck size={15} />}
           actions={
             <Select value={filterProject} onChange={(e) => setFilterProject(e.target.value)} className="min-w-[190px]">

@@ -8,7 +8,7 @@
 // with the photographs from that same visit so the picture always matches the
 // condition beside it.
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import toast from "react-hot-toast";
 import {
@@ -39,7 +39,9 @@ const fmtBytes = (n) => {
 export default function VillageProfilePage() {
   const { projectId } = useParams();
   const navigate = useNavigate();
-  const { isAdmin } = useAuth();
+  const { isAdmin, isEngineer } = useAuth();
+  // Admins and engineers both service; nobody else reaches this route.
+  const canService = isAdmin || isEngineer;
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState("overview");
@@ -190,7 +192,13 @@ export default function VillageProfilePage() {
           setUploadOpen={setUploadOpen}
         />
       ) : active ? (
-        <ComponentTab component={active} onOpenPhoto={(url, caption) => setLightbox({ url, caption })} navigate={navigate} />
+        <ComponentTab
+          component={active}
+          projectId={projectId}
+          canService={canService}
+          onOpenPhoto={(url, caption) => setLightbox({ url, caption })}
+          onChanged={load}
+        />
       ) : null}
 
       {lightbox && (
@@ -202,8 +210,105 @@ export default function VillageProfilePage() {
   );
 }
 
-function ComponentTab({ component: c, onOpenPhoto, navigate }) {
+function ComponentTab({ component: c, projectId, canService, onOpenPhoto, onChanged }) {
   const C = COND[c.condition];
+  const draft = c.draft;
+  // Serviceable unless this component was already filed on the CURRENT open
+  // draft. No draft at all means nothing has been started, which is the most
+  // serviceable state there is — not a filed one.
+  const pending = !draft || draft.pending !== false;
+  const [condition, setCondition] = useState(draft?.condition || "");
+  const [notes, setNotes] = useState(draft?.notes || "");
+  const [busy, setBusy] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const fileRef = useRef(null);
+
+  // Re-seed when the tab switches to a different component.
+  useEffect(() => {
+    setCondition(c.draft?.condition || "");
+    setNotes(c.draft?.notes || "");
+  }, [c.key, c.draft?.condition, c.draft?.notes]);
+
+  const draftPhotos = draft?.photos || [];
+  const canFile = condition === "na" ? notes.trim().length > 0 : condition && draftPhotos.length > 0;
+
+  // Every action needs a visit to hang off. createVisit reuses the engineer's
+  // open draft for this village, so the visit stays an implementation detail —
+  // the engineer services components, not "reports".
+  async function ensureVisit() {
+    if (draft?.visitId) return draft.visitId;
+    const r = await maintenanceApi.createVisit({ projectId: Number(projectId) });
+    return r.visitId;
+  }
+
+  async function saveWork(visitId) {
+    await maintenanceApi.updateVisit(visitId, {
+      checks: [{ key: c.key, condition: condition || "na", notes }],
+    });
+  }
+
+  async function addPhotos(files) {
+    if (!files.length) return;
+    setUploading(true);
+    try {
+      const visitId = await ensureVisit();
+      // Save first so a brand-new draft has this component's row before the
+      // photos attach to it.
+      await saveWork(visitId);
+      for (const file of files) {
+        const { mimeType, dataBase64 } = await downscaleImage(file);
+        await maintenanceApi.addPhoto(visitId, { componentKey: c.key, mimeType, dataBase64 });
+      }
+      toast.success(files.length === 1 ? "Photo added" : `${files.length} photos added`);
+      onChanged();
+    } catch (e) {
+      toast.error("Upload failed: " + e.message);
+    } finally {
+      setUploading(false);
+    }
+  }
+
+  async function save() {
+    setBusy(true);
+    try {
+      await saveWork(await ensureVisit());
+      toast.success("Saved");
+      onChanged();
+    } catch (e) {
+      toast.error(e.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function file() {
+    setBusy(true);
+    try {
+      const visitId = await ensureVisit();
+      await saveWork(visitId);
+      const r = await maintenanceApi.submitCheck(visitId, c.key);
+      toast.success(
+        r.visitFinalised
+          ? "Filed — that was the last component, the service is complete."
+          : `Filed. ${r.submittedCount} of ${r.totalCount} components done.`,
+        { duration: 6000 }
+      );
+      onChanged();
+    } catch (e) {
+      toast.error(e.message, { duration: 7000 });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function removeDraftPhoto(id) {
+    try {
+      await maintenanceApi.deletePhoto(id);
+      onChanged();
+    } catch (e) {
+      toast.error(e.message);
+    }
+  }
   return (
     <div className="mt-5 space-y-4">
       <Panel
@@ -214,14 +319,7 @@ function ComponentTab({ component: c, onOpenPhoto, navigate }) {
           c.neverInspected ? (
             <Badge tone="neutral">Never inspected</Badge>
           ) : (
-            <div className="flex items-center gap-2">
-              <Badge tone={C?.tone || "neutral"}>{C?.label || c.condition}</Badge>
-              {c.visitId && (
-                <Button variant="ghost" size="sm" onClick={() => navigate(`/maintenance?visit=${c.visitId}`)}>
-                  Open report
-                </Button>
-              )}
-            </div>
+            <Badge tone={C?.tone || "neutral"}>{C?.label || c.condition}</Badge>
           )
         }
       >
@@ -229,7 +327,11 @@ function ComponentTab({ component: c, onOpenPhoto, navigate }) {
           <EmptyState
             icon={CircleDashed}
             title="No inspection on record"
-            description="This component has not been filed at this village yet. It will appear here once an engineer files it."
+            description={
+              canService
+                ? "Nothing filed for this component yet. Record it below."
+                : "This component has not been filed at this village yet."
+            }
           />
         ) : (
           <div className="space-y-4">
@@ -260,6 +362,94 @@ function ComponentTab({ component: c, onOpenPhoto, navigate }) {
           </div>
         )}
       </Panel>
+
+      {canService && pending && (
+        <Panel
+          title="Service this component"
+          subtitle="Record what you found and file it. Each component files on its own — you do not have to do them all in one go."
+          icon={<Camera size={15} />}
+        >
+          <input
+            ref={fileRef}
+            type="file"
+            accept="image/*"
+            capture="environment"
+            multiple
+            className="hidden"
+            onChange={(e) => { const f = [...(e.target.files || [])]; e.target.value = ""; addPhotos(f); }}
+          />
+          <div className="space-y-4">
+            <Field label="Condition">
+              <div className="inline-flex rounded-md p-0.5 bg-[var(--surface-sunken)] border border-[var(--border-default)]">
+                {["ok", "attention", "faulty", "na"].map((v) => (
+                  <button
+                    key={v}
+                    type="button"
+                    onClick={() => setCondition(v)}
+                    className={
+                      "h-8 px-3 text-[12px] font-medium rounded transition-colors " +
+                      (condition === v
+                        ? "bg-[var(--surface-hover)] text-[var(--text-primary)]"
+                        : "text-[var(--text-tertiary)] hover:text-[var(--text-primary)]")
+                    }
+                  >
+                    {COND[v].label}
+                  </button>
+                ))}
+              </div>
+            </Field>
+
+            <Field
+              label="Notes"
+              hint={condition === "na" ? "Required — say why this does not apply at this village." : "What did you find? Anything replaced or adjusted?"}
+            >
+              <Textarea rows={3} value={notes} onChange={(e) => setNotes(e.target.value)} />
+            </Field>
+
+            <Field label="Photos" hint="Taken on this visit. Required unless the component is N/A.">
+              <div className="flex flex-wrap items-center gap-2">
+                {draftPhotos.map((p) => (
+                  <PhotoThumb key={p.id} photoId={p.id} onRemove={removeDraftPhoto} onOpen={(url) => onOpenPhoto(url, c.label)} />
+                ))}
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => fileRef.current?.click()}
+                  loading={uploading}
+                  iconLeft={!uploading && <Camera size={13} />}
+                >
+                  Add photo
+                </Button>
+              </div>
+            </Field>
+
+            <div className="flex items-center justify-between gap-3 border-t border-[var(--border-default)] pt-4">
+              <span className="text-[11.5px] text-[var(--fg-muted)]">
+                {canFile
+                  ? "Ready to file. Filing locks this component as evidence."
+                  : condition === "na"
+                    ? "Say why it is not applicable before filing."
+                    : "Pick a condition and add at least one photo before filing."}
+              </span>
+              <div className="flex items-center gap-2">
+                <Button variant="secondary" onClick={save} loading={busy} disabled={busy} iconLeft={!busy && <Save size={14} />}>
+                  Save
+                </Button>
+                <Button variant="primary" onClick={file} loading={busy} disabled={busy || !canFile} iconLeft={!busy && <Send size={14} />}>
+                  File this component
+                </Button>
+              </div>
+            </div>
+          </div>
+        </Panel>
+      )}
+
+      {canService && draft && !pending && (
+        <div className="flex items-center gap-2 text-[12px] text-[var(--fg-muted)]">
+          <Lock size={12} className="text-[var(--success-fg)]" />
+          Filed on this visit. An admin can reopen it from the report if it needs revising.
+        </div>
+      )}
 
       {c.history.length > 1 && (
         <Panel title="History" subtitle="Every filed inspection of this component, newest first" icon={<History size={15} />} padding={false}>

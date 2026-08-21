@@ -31,7 +31,6 @@ const ROOT = resolve(
 export const COMPONENTS = [
   { key: "gateway",   label: "Gateway / router",            hint: "Power, LEDs, WAN link, mounting, ventilation" },
   { key: "aps",       label: "Access points",               hint: "Each AP: powered, associated, physically secure, clean" },
-  { key: "switch",    label: "Switch",                      hint: "Ports, PoE, link lights, heat, dust" },
   { key: "starlink",  label: "Starlink dish & mount",       hint: "Obstruction, alignment, mount integrity, cable strain" },
   { key: "power",     label: "Power (solar / battery / PSU)", hint: "Battery health, charge controller, solar panel condition" },
   { key: "enclosure", label: "Enclosure & cabling",         hint: "Weather seal, locks, cable dressing, labelling, rodent damage" },
