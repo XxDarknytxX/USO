@@ -14,8 +14,9 @@ import toast from "react-hot-toast";
 import {
   ArrowLeft, RefreshCw, FileText, Upload, Download, Trash2, Camera,
   AlertTriangle, CheckCircle2, CircleDashed, MapPin, Clock, History,
+  Send, Lock, Save,
 } from "lucide-react";
-import { maintenanceApi, openDocument } from "../services/api";
+import { maintenanceApi, openDocument, downscaleImage } from "../services/api";
 import { useAuth } from "../hooks/useAuth";
 import { PageHeader, Panel, Button, Badge, EmptyState, Field, Input, Select, Textarea, Modal } from "../components/ui";
 import PhotoThumb from "../components/maintenance/PhotoThumb";
