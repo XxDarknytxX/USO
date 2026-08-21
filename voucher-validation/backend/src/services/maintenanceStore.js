@@ -10,6 +10,9 @@
 // deploy root, so `git pull` + `npm ci` + `pm2 reload` never touches it.
 
 import { mkdir, writeFile, unlink, stat } from "node:fs/promises";
+import { createWriteStream } from "node:fs";
+import { pipeline } from "node:stream/promises";
+import { Transform } from "node:stream";
 import { createReadStream } from "node:fs";
 import { join, resolve, sep, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -62,7 +65,12 @@ const DOC_EXT = {
   "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": "xlsx",
 };
 export const ALLOWED_DOC_MIME = Object.keys(DOC_EXT);
-export const MAX_DOC_BYTES = 25 * 1024 * 1024; // 25 MB — a scanned handover pack
+export const MAX_DOC_BYTES = 100 * 1024 * 1024; // 100 MB — a scanned handover pack with photos
+
+// NOTE ON THE CEILING. This is only the innermost of three limits; nginx's
+// client_max_body_size and the proxy config are the outer ones, and the
+// smallest wins. See deploy/nginx.uso-stack.conf — a cap raised here alone
+// changes nothing except which error the operator sees.
 
 export const DOC_CATEGORIES = [
   { key: "handover", label: "Handover pack" },
@@ -76,7 +84,7 @@ export const DOC_CATEGORY_KEYS = new Set(DOC_CATEGORIES.map((c) => c.key));
 
 const DOC_ROOT = resolve(ROOT, "..", "maintenance-docs");
 
-/** Write one village document. Returns the DB-storable relative path. */
+/** Write one village document from a buffer. Returns the relative path. */
 export async function saveDocument(projectId, buffer, mimeType) {
   const ext = DOC_EXT[mimeType];
   if (!ext) throw new Error(`Unsupported file type: ${mimeType}`);
@@ -85,6 +93,53 @@ export async function saveDocument(projectId, buffer, mimeType) {
   const rel = join(String(Number(projectId)), `${randomUUID()}.${ext}`);
   await writeFile(join(DOC_ROOT, rel), buffer);
   return rel;
+}
+
+/**
+ * Stream a document straight from the request to disk.
+ *
+ * Documents are not photos. A 100 MB handover pack sent as base64 inside JSON
+ * would be a ~133 MB string held in memory (base64 costs 4/3) and then decoded
+ * into another ~100 MB buffer — a quarter of a gigabyte per upload, on a box
+ * already running 30-odd node processes. Streaming holds one chunk at a time
+ * regardless of file size, and skips the 4/3 inflation entirely.
+ *
+ * The size limit is enforced MID-STREAM rather than by checking afterwards, so
+ * an oversized upload stops early instead of filling the disk first; the
+ * partial file is removed on any failure.
+ */
+export async function saveDocumentStream(projectId, source, mimeType, maxBytes = MAX_DOC_BYTES) {
+  const ext = DOC_EXT[mimeType];
+  if (!ext) throw new Error(`Unsupported file type: ${mimeType}`);
+  const dir = join(DOC_ROOT, String(Number(projectId)));
+  await mkdir(dir, { recursive: true });
+  const rel = join(String(Number(projectId)), `${randomUUID()}.${ext}`);
+  const abs = join(DOC_ROOT, rel);
+
+  let bytes = 0;
+  const meter = new Transform({
+    transform(chunk, _enc, cb) {
+      bytes += chunk.length;
+      if (bytes > maxBytes) {
+        const err = new Error(`File is too large (max ${Math.round(maxBytes / 1048576)} MB)`);
+        err.code = "DOC_TOO_LARGE";
+        return cb(err);
+      }
+      cb(null, chunk);
+    },
+  });
+
+  try {
+    await pipeline(source, meter, createWriteStream(abs));
+  } catch (e) {
+    try { await unlink(abs); } catch { /* nothing written */ }
+    throw e;
+  }
+  if (bytes === 0) {
+    try { await unlink(abs); } catch { /* ignore */ }
+    throw Object.assign(new Error("File is empty"), { code: "DOC_EMPTY" });
+  }
+  return { rel, bytes };
 }
 
 /** Same traversal guard as photos, against the documents root. */

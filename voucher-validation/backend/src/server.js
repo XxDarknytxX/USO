@@ -55,8 +55,18 @@ app.use(
 // just that route a larger body limit. The global parser below then skips a body
 // already parsed here (body-parser marks req._body once parsed).
 app.use("/api/mpaisa/upload", express.json({ limit: "25mb" }));
-// Maintenance photos arrive base64 in the JSON body (browser-downscaled).
-app.use("/api/maintenance", express.json({ limit: "15mb" }));
+// Maintenance photos arrive base64 in the JSON body (browser-downscaled, a few
+// hundred KB each), hence the raised limit.
+//
+// Document uploads are explicitly exempted. express.json only parses bodies
+// whose Content-Type is application/json, so a PDF body would pass through
+// untouched regardless — but the exemption states the requirement rather than
+// leaving it resting on that default, because the body of a document upload
+// IS the file and must reach the route handler as an unread stream.
+app.use("/api/maintenance", (req, res, next) => {
+  const isDocUpload = req.method === "POST" && /\/documents\/?$/.test(req.path);
+  return isDocUpload ? next() : express.json({ limit: "15mb" })(req, res, next);
+});
 app.use(express.json());
 
 // Boot env check (presence only — never log secret values)

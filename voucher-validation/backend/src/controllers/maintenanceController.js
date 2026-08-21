@@ -14,7 +14,7 @@ import {
   savePhoto, streamPhoto, deletePhoto, resolvePhoto,
   ALLOWED_MIME, MAX_BYTES,
   DOC_CATEGORIES, DOC_CATEGORY_KEYS, ALLOWED_DOC_MIME, MAX_DOC_BYTES,
-  saveDocument, streamDocument, deleteDocument, resolveDocument,
+  saveDocument, saveDocumentStream, streamDocument, deleteDocument, resolveDocument,
 } from "../services/maintenanceStore.js";
 
 const send = {
@@ -243,7 +243,13 @@ export function makeMaintenanceController(pool) {
     },
 
     // POST /api/maintenance/villages/:projectId/documents
-    // { category, title, notes?, fileName, mimeType, dataBase64 }
+    //   ?title=&category=&notes=&fileName=   metadata in the query string
+    //   Content-Type: <the file's own type>  the body IS the file
+    //
+    // The body is streamed to disk, not parsed. Metadata rides in the query
+    // string precisely so the body can stay a raw byte stream — see
+    // saveDocumentStream for why base64-in-JSON was the wrong shape here.
+    // server.js deliberately does not mount express.json on this route.
     addDocument: async (req, res) => {
       try {
         const projectId = Number(req.params.projectId);
@@ -251,29 +257,34 @@ export function makeMaintenanceController(pool) {
         const [[project]] = await pool.query('SELECT id FROM network_projects WHERE id = ? LIMIT 1', [projectId]);
         if (!project) return send.notFound(res, 'No such village');
 
-        const title = String(req.body?.title || '').trim();
+        const q = req.query || {};
+        const fileName = String(q.fileName || '').slice(0, 255);
+        const title = (String(q.title || '').trim() || fileName.replace(/\.[^.]+$/, '')).slice(0, 255);
         if (!title) return send.bad(res, 'A title is required');
-        const category = DOC_CATEGORY_KEYS.has(req.body?.category) ? req.body.category : 'other';
-        const mimeType = String(req.body?.mimeType || '');
-        if (!ALLOWED_DOC_MIME.includes(mimeType)) return send.bad(res, `Unsupported file type: ${mimeType || 'unknown'}`);
+        const category = DOC_CATEGORY_KEYS.has(q.category) ? q.category : 'other';
 
-        const b64 = String(req.body?.dataBase64 || '').replace(/^data:[^;]+;base64,/, '');
-        if (!b64) return send.bad(res, 'No file data');
-        const buf = Buffer.from(b64, 'base64');
-        if (!buf.length) return send.bad(res, 'File is empty');
-        if (buf.length > MAX_DOC_BYTES) {
-          return send.bad(res, `File is too large (${Math.round(buf.length / 1048576)} MB, max ${MAX_DOC_BYTES / 1048576} MB)`);
+        // Content-Type carries parameters (";charset=") on some clients.
+        const mimeType = String(req.headers['content-type'] || '').split(';')[0].trim();
+        if (!ALLOWED_DOC_MIME.includes(mimeType)) {
+          return send.bad(res, `Unsupported file type: ${mimeType || 'unknown'}`);
         }
 
-        const rel = await saveDocument(projectId, buf, mimeType);
+        let saved;
+        try {
+          saved = await saveDocumentStream(projectId, req, mimeType);
+        } catch (e) {
+          if (e.code === 'DOC_TOO_LARGE' || e.code === 'DOC_EMPTY') return send.bad(res, e.message);
+          throw e;
+        }
+
         const [r] = await pool.query(
           `INSERT INTO maintenance_documents
              (project_id, category, title, notes, file_path, file_name, mime_type, bytes, uploaded_by)
            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-          [projectId, category, title.slice(0, 255), String(req.body?.notes || '').slice(0, 500) || null,
-           rel, String(req.body?.fileName || '').slice(0, 255) || null, mimeType, buf.length, req.user?.id ?? null]
+          [projectId, category, title, String(q.notes || '').slice(0, 500) || null,
+           saved.rel, fileName || null, mimeType, saved.bytes, req.user?.id ?? null]
         );
-        return send.created(res, { documentId: r.insertId, bytes: buf.length });
+        return send.created(res, { documentId: r.insertId, bytes: saved.bytes });
       } catch (e) { console.error('[maintenance] addDocument:', e); return send.serverErr(res, e.message); }
     },
 

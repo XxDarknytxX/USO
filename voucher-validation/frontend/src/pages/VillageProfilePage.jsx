@@ -15,7 +15,7 @@ import {
   ArrowLeft, RefreshCw, FileText, Upload, Download, Trash2, Camera,
   AlertTriangle, CheckCircle2, CircleDashed, MapPin, Clock, History,
 } from "lucide-react";
-import { maintenanceApi, openDocument, fileToBase64 } from "../services/api";
+import { maintenanceApi, openDocument } from "../services/api";
 import { useAuth } from "../hooks/useAuth";
 import { PageHeader, Panel, Button, Badge, EmptyState, Field, Input, Select, Textarea, Modal } from "../components/ui";
 import PhotoThumb from "../components/maintenance/PhotoThumb";
@@ -390,16 +390,12 @@ function UploadDocumentModal({ projectId, categories, onClose, onDone }) {
     if (!file) return toast.error("Choose a file first");
     setBusy(true);
     try {
-      const dataBase64 = await fileToBase64(file);
-      await maintenanceApi.addDocument(projectId, {
+      await maintenanceApi.addDocument(projectId, file, {
         category,
         // Default the title to the filename: forcing a title on someone
         // uploading "Handover_Vunisei.pdf" is friction for nothing.
         title: title.trim() || file.name.replace(/\.[^.]+$/, ""),
         notes: notes.trim(),
-        fileName: file.name,
-        mimeType: file.type || "application/octet-stream",
-        dataBase64,
       });
       toast.success("Document uploaded");
       onDone();
@@ -415,7 +411,7 @@ function UploadDocumentModal({ projectId, categories, onClose, onDone }) {
       <Modal.Header eyebrow="Site documents" title="Upload a document" icon={Upload} onClose={busy ? undefined : onClose} />
       <Modal.Body>
         <div className="space-y-4">
-          <Field label="File" hint="PDF, image, Word or Excel. Up to 25 MB.">
+          <Field label="File" hint="PDF, image, Word or Excel. Up to 100 MB.">
             <input
               type="file"
               accept=".pdf,.jpg,.jpeg,.png,.webp,.doc,.docx,.xls,.xlsx,application/pdf,image/*"

@@ -223,8 +223,8 @@ export const mpaisaApi = {
 export const maintenanceApi = {
   components: () => api("/maintenance/components"),
   villageProfile: (projectId) => api(`/maintenance/villages/${projectId}/profile`),
-  addDocument: (projectId, body) =>
-    api(`/maintenance/villages/${projectId}/documents`, { method: "POST", body }),
+  // Uploads the File itself as the request body — see uploadDocument.
+  addDocument: (projectId, file, meta = {}) => uploadDocument(projectId, file, meta),
   deleteDocument: (id) => api(`/maintenance/documents/${id}`, { method: "DELETE" }),
   documentUrl: (id) => `${API_BASE_URL}/maintenance/documents/${id}`,
   schedule: () => api("/maintenance/schedule"),
@@ -279,14 +279,43 @@ export async function openDocument(documentId) {
   setTimeout(() => URL.revokeObjectURL(url), 60000);
 }
 
-/** Read a picked file as base64 without downscaling (documents are not images). */
-export function fileToBase64(file) {
-  return new Promise((resolve, reject) => {
-    const fr = new FileReader();
-    fr.onload = () => resolve(String(fr.result).split(",")[1]);
-    fr.onerror = () => reject(new Error("Could not read that file"));
-    fr.readAsDataURL(file);
+/**
+ * Upload a site document. The File goes up as the raw request body with its own
+ * Content-Type; the metadata rides in the query string.
+ *
+ * Not base64-in-JSON like the photos: base64 costs 4/3, so a 100 MB handover
+ * pack would become a ~133 MB string in the browser AND a ~133 MB body the
+ * server holds in memory before decoding. Sending the File directly streams it
+ * on both ends.
+ */
+export async function uploadDocument(projectId, file, { title, category, notes } = {}) {
+  const qs = new URLSearchParams({
+    fileName: file.name,
+    title: title || "",
+    category: category || "other",
+    notes: notes || "",
   });
+  const res = await fetch(
+    `${API_BASE_URL}/maintenance/villages/${projectId}/documents?${qs}`,
+    {
+      method: "POST",
+      headers: {
+        ...authHeader(),
+        // The browser would otherwise guess; the server allow-lists this value.
+        "Content-Type": file.type || "application/octet-stream",
+      },
+      body: file,
+    }
+  );
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    // 413 comes from nginx, not the app, so it has no JSON body to explain itself.
+    if (res.status === 413) {
+      throw new Error("The server rejected the upload as too large (nginx client_max_body_size).");
+    }
+    throw new Error(data.error || `HTTP ${res.status}`);
+  }
+  return data;
 }
 
 /**
