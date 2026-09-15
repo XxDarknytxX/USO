@@ -1,169 +1,180 @@
 /**
- * StatCard / Panel — Service Desk card family (gradient surface, spotlight,
- * hover lift). Kept separate from the legacy Surface `Card` so existing pages
- * are untouched; dashboards use these.
+ * Card family — GlassCard / Panel / StatCard / ObjectTile.
+ *
+ * Modelled on Salesforce Lightning cards: a white surface on a soft diffuse
+ * shadow, a generous radius, and colour carried by a small object tile rather
+ * than by the card itself. The old build tinted whole cards and swept a
+ * spotlight gradient under the cursor; both are dropped, because a dashboard of
+ * twelve tinted panels has no visual hierarchy left to spend.
+ *
+ * The props are unchanged (tint, spotlight, accent, size…) so no page has to be
+ * touched — tint now selects the tile colour instead of washing the surface.
  */
 
-import { useRef, useState, useCallback } from "react";
 import { useTheme } from "../../contexts/theme";
 
 function cn(...parts) {
   return parts.filter(Boolean).join(" ");
 }
 
-const cardTints = {
-  default: "from-white/[0.03] to-transparent",
-  red: "from-red-500/[0.04] to-red-900/[0.02]",
-  rose: "from-rose-500/[0.04] to-rose-900/[0.02]",
-  amber: "from-amber-500/[0.04] to-amber-900/[0.02]",
-  emerald: "from-emerald-500/[0.04] to-emerald-900/[0.02]",
-  blue: "from-blue-500/[0.04] to-blue-900/[0.02]",
-  cyan: "from-cyan-500/[0.04] to-cyan-900/[0.02]",
-  violet: "from-violet-500/[0.04] to-violet-900/[0.02]",
-  indigo: "from-indigo-500/[0.04] to-indigo-900/[0.02]",
-  slate: "from-slate-500/[0.04] to-slate-900/[0.02]",
-};
-const spotlightColors = {
-  default: "rgba(255,255,255,0.04)",
-  red: "rgba(239,68,68,0.06)",
-  rose: "rgba(244,63,94,0.06)",
-  amber: "rgba(245,158,11,0.06)",
-  emerald: "rgba(16,185,129,0.06)",
-  blue: "rgba(59,130,246,0.06)",
-  cyan: "rgba(6,182,212,0.06)",
-  violet: "rgba(139,92,246,0.06)",
-  indigo: "rgba(99,102,241,0.06)",
-  slate: "rgba(100,116,139,0.06)",
+/* ---------------------------------------------------------------------------
+ * Object tiles. Salesforce's most recognisable device: every "thing" gets a
+ * rounded square in its own colour, which is what makes a dense admin scannable
+ * without resorting to a different layout per page.
+ * ------------------------------------------------------------------------- */
+export const TILE_TONES = {
+  brand:  { fg: "var(--tile-red)",    bg: "var(--tile-red-soft)" },
+  red:    { fg: "var(--tile-red)",    bg: "var(--tile-red-soft)" },
+  accent: { fg: "var(--tile-red)",    bg: "var(--tile-red-soft)" },
+  blue:   { fg: "var(--tile-blue)",   bg: "var(--tile-blue-soft)" },
+  navy:   { fg: "var(--tile-navy)",   bg: "var(--tile-navy-soft)" },
+  teal:   { fg: "var(--tile-teal)",   bg: "var(--tile-teal-soft)" },
+  cyan:   { fg: "var(--tile-teal)",   bg: "var(--tile-teal-soft)" },
+  violet: { fg: "var(--tile-violet)", bg: "var(--tile-violet-soft)" },
+  indigo: { fg: "var(--tile-indigo)", bg: "var(--tile-indigo-soft)" },
+  orange: { fg: "var(--tile-orange)", bg: "var(--tile-orange-soft)" },
+  amber:  { fg: "var(--tile-orange)", bg: "var(--tile-orange-soft)" },
+  green:  { fg: "var(--tile-green)",  bg: "var(--tile-green-soft)" },
+  emerald:{ fg: "var(--tile-green)",  bg: "var(--tile-green-soft)" },
+  pink:   { fg: "var(--tile-pink)",   bg: "var(--tile-pink-soft)" },
+  rose:   { fg: "var(--tile-pink)",   bg: "var(--tile-pink-soft)" },
+  slate:  { fg: "var(--fg-muted)",    bg: "var(--bg-surface)" },
+  default:{ fg: "var(--fg-muted)",    bg: "var(--bg-surface)" },
 };
 
+const TILE_SIZES = {
+  xs: "h-7 w-7 rounded-[8px]",
+  sm: "h-8 w-8 rounded-[9px]",
+  md: "h-10 w-10 rounded-[12px]",
+  lg: "h-12 w-12 rounded-[14px]",
+};
+
+/** A coloured glyph tile. `children` is the icon. */
+export function ObjectTile({ tone = "blue", size = "md", children, className }) {
+  const t = TILE_TONES[tone] || TILE_TONES.default;
+  return (
+    <span
+      className={cn("inline-flex items-center justify-center shrink-0", TILE_SIZES[size] || TILE_SIZES.md, className)}
+      style={{ background: t.bg, color: t.fg }}
+    >
+      {children}
+    </span>
+  );
+}
+
+/* ---------------------------------------------------------------------------
+ * GlassCard — the base surface everything else is built from.
+ * ------------------------------------------------------------------------- */
 export function GlassCard({
   children,
   className,
   padding = true,
   hover = true,
-  spotlight = false,
+  spotlight = false, // kept for API compatibility; no longer renders anything
   onClick,
   accent = false,
   size = "md",
-  tint = "default",
+  tint = "default", // eslint-disable-line no-unused-vars
 }) {
-  const { theme } = useTheme();
-  const isLight = theme === "light";
-  const cardRef = useRef(null);
-  const [pos, setPos] = useState({ x: 50, y: 50 });
-
-  const handleMouseMove = useCallback(
-    (e) => {
-      if (!spotlight || !cardRef.current) return;
-      const rect = cardRef.current.getBoundingClientRect();
-      setPos({
-        x: ((e.clientX - rect.left) / rect.width) * 100,
-        y: ((e.clientY - rect.top) / rect.height) * 100,
-      });
-    },
-    [spotlight]
-  );
-
-  const paddingSizes = { sm: "p-4", md: "p-6", lg: "p-8" };
-  const gradientTint = cardTints[tint] || cardTints.default;
-  const spotlightColor = spotlightColors[tint] || spotlightColors.default;
+  useTheme(); // re-render on theme change so token-derived styles stay in step
+  const paddingSizes = { sm: "p-4", md: "p-5", lg: "p-7" };
 
   return (
     <div
-      ref={cardRef}
       onClick={onClick}
-      onMouseMove={handleMouseMove}
       className={cn(
-        "relative overflow-hidden group rounded-xl border border-[var(--border-default)] transition-all duration-200",
-        isLight ? "bg-[var(--bg-elevated)]" : ["bg-gradient-to-br", gradientTint],
-        "shadow-[var(--shadow-card)]",
-        hover && ["hover:border-[var(--border-hover)]", "hover:shadow-[var(--shadow-card-hover)]", "hover:-translate-y-0.5"],
-        onClick && "cursor-pointer",
-        padding && paddingSizes[size],
-        accent && "surface-accent-top",
+        "relative rounded-xl border border-[var(--border-default)] bg-[var(--bg-elevated)]",
+        "shadow-[var(--shadow-card)] transition-[box-shadow,border-color,transform] duration-200",
+        hover && "hover:border-[var(--border-hover)] hover:shadow-[var(--shadow-card-hover)]",
+        onClick && "cursor-pointer hover:-translate-y-[2px]",
+        padding && (paddingSizes[size] || paddingSizes.md),
+        accent && "surface-accent-top overflow-hidden",
         className
       )}
     >
-      {!isLight && (
-        <div className="absolute top-0 left-[15%] right-[15%] h-px bg-gradient-to-r from-transparent via-white/[0.08] to-transparent" />
-      )}
-      {spotlight && (
-        <div
-          className="pointer-events-none absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity duration-300"
-          style={{ background: `radial-gradient(600px circle at ${pos.x}% ${pos.y}%, ${spotlightColor}, transparent 40%)` }}
-        />
-      )}
-      <div className="relative z-10 h-full flex-1 flex flex-col">{children}</div>
+      <div className="relative h-full flex-1 flex flex-col">{children}</div>
     </div>
   );
 }
 
-const statColors = {
-  accent:  { icon: "bg-[var(--accent)]/10 text-[var(--accent)]", value: "text-[var(--fg-primary)]", dot: "bg-[var(--accent)]",  tint: "red" },
-  red:     { icon: "bg-[var(--accent)]/10 text-[var(--accent)]", value: "text-[var(--fg-primary)]", dot: "bg-[var(--accent)]",  tint: "red" },
-  emerald: { icon: "bg-emerald-500/10 text-emerald-400",         value: "text-[var(--fg-primary)]", dot: "bg-emerald-500",     tint: "emerald" },
-  blue:    { icon: "bg-blue-500/10 text-blue-400",               value: "text-[var(--fg-primary)]", dot: "bg-blue-500",        tint: "blue" },
-  amber:   { icon: "bg-amber-500/10 text-amber-400",             value: "text-[var(--fg-primary)]", dot: "bg-amber-500",       tint: "amber" },
-  violet:  { icon: "bg-violet-500/10 text-violet-400",           value: "text-[var(--fg-primary)]", dot: "bg-violet-500",      tint: "violet" },
-  rose:    { icon: "bg-rose-500/10 text-rose-400",               value: "text-[var(--fg-primary)]", dot: "bg-rose-500",        tint: "rose" },
-  slate:   { icon: "bg-slate-500/10 text-slate-400",             value: "text-[var(--fg-primary)]", dot: "bg-slate-400",       tint: "slate" },
+/* ---------------------------------------------------------------------------
+ * StatCard — a KPI tile.
+ * ------------------------------------------------------------------------- */
+const STAT_TONE = {
+  accent: "red", red: "red", brand: "red",
+  emerald: "green", green: "green",
+  blue: "blue", navy: "navy", cyan: "teal", teal: "teal",
+  amber: "orange", orange: "orange",
+  violet: "violet", indigo: "indigo",
+  rose: "pink", pink: "pink",
+  slate: "slate",
 };
 
-/**
- * StatCard — KPI tile. onClick makes it interactive (dashboard drill-down).
- */
 export function StatCard({ label, value, sub, icon, color = "accent", trend, trendValue, onClick, className }) {
-  const c = statColors[color] || statColors.accent;
+  const tone = STAT_TONE[color] || "blue";
   return (
-    <GlassCard className={className} hover spotlight tint={c.tint} onClick={onClick}>
-      <div className="flex flex-col h-full">
-        <div className="flex items-center justify-between mb-4">
-          <div className="flex items-center gap-2.5 min-w-0">
-            <span className={cn("status-dot", c.dot)} />
-            <span className="text-label truncate">{label}</span>
-          </div>
-          {icon && (
-            <div className={cn("w-10 h-10 rounded-lg flex items-center justify-center border border-[var(--border-default)] shrink-0", c.icon)}>
-              {icon}
-            </div>
-          )}
+    <GlassCard className={className} onClick={onClick} size="md">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <p className="text-label truncate">{label}</p>
+          <p className="mt-2 text-[28px] leading-none font-semibold tracking-tight tabular-nums text-[var(--fg-primary)]">
+            {value}
+          </p>
         </div>
-        <p className={cn("text-[32px] leading-none font-semibold tracking-tight tabular-nums", c.value)}>{value}</p>
-        {(sub || trend) && (
-          <div className="mt-3 flex items-center gap-2">
-            {trend && (
-              <span
-                className={cn(
-                  "text-xs font-medium px-2 py-0.5 rounded-full",
-                  trend === "up" && "bg-emerald-500/10 text-emerald-400",
-                  trend === "down" && "bg-rose-500/10 text-rose-400",
-                  trend === "neutral" && "bg-slate-500/10 text-slate-400"
-                )}
-              >
-                {trend === "up" ? "↑ " : trend === "down" ? "↓ " : ""}{trendValue}
-              </span>
-            )}
-            {sub && <span className="text-xs text-[var(--fg-secondary)] truncate">{sub}</span>}
-          </div>
-        )}
+        {icon && <ObjectTile tone={tone}>{icon}</ObjectTile>}
       </div>
+      {(sub || trend) && (
+        <div className="mt-3 flex items-center gap-2 min-w-0">
+          {trend && (
+            <span
+              className={cn(
+                "text-[11px] font-semibold px-2 py-0.5 rounded-full shrink-0",
+                trend === "up" && "bg-[var(--success-soft)] text-[var(--success-fg)]",
+                trend === "down" && "bg-[var(--danger-soft)] text-[var(--danger-fg)]",
+                trend === "neutral" && "bg-[var(--bg-surface)] text-[var(--fg-muted)]"
+              )}
+            >
+              {trend === "up" ? "↑ " : trend === "down" ? "↓ " : ""}
+              {trendValue}
+            </span>
+          )}
+          {sub && <span className="text-[12px] text-[var(--fg-muted)] truncate">{sub}</span>}
+        </div>
+      )}
     </GlassCard>
   );
 }
 
-/**
- * Panel — titled card container for charts, tables and grouped content.
- */
-export function Panel({ title, subtitle, icon, actions, children, className, bodyClassName, padding = true, hover = false, tint = "default" }) {
+/* ---------------------------------------------------------------------------
+ * Panel — titled container for charts, tables and grouped content.
+ * ------------------------------------------------------------------------- */
+export function Panel({
+  title,
+  subtitle,
+  icon,
+  tone,                 // tile colour for the header icon
+  actions,
+  children,
+  className,
+  bodyClassName,
+  padding = true,
+  hover = false,
+  tint = "default",
+}) {
+  const tileTone = tone || (tint && tint !== "default" ? STAT_TONE[tint] || tint : "blue");
   return (
-    <GlassCard className={cn("flex flex-col", className)} hover={hover} padding={false} tint={tint}>
+    <GlassCard className={cn("flex flex-col", className)} hover={hover} padding={false}>
       {(title || actions) && (
-        <div className="flex items-center justify-between gap-3 px-5 py-4 border-b border-[var(--border-default)]">
-          <div className="flex items-center gap-2.5 min-w-0">
-            {icon && <span className="text-[var(--fg-muted)] shrink-0">{icon}</span>}
+        <div className="flex items-center justify-between gap-3 px-5 py-4 border-b border-[var(--border-subtle)]">
+          <div className="flex items-center gap-3 min-w-0">
+            {icon && <ObjectTile tone={tileTone} size="sm">{icon}</ObjectTile>}
             <div className="min-w-0">
-              {title && <h3 className="text-[15px] font-semibold text-[var(--fg-primary)] tracking-tight truncate">{title}</h3>}
-              {subtitle && <p className="text-xs text-[var(--fg-secondary)] mt-0.5 truncate">{subtitle}</p>}
+              {title && (
+                <h3 className="text-[14.5px] font-semibold text-[var(--fg-primary)] tracking-tight truncate">
+                  {title}
+                </h3>
+              )}
+              {subtitle && <p className="text-[12px] text-[var(--fg-muted)] mt-0.5 truncate">{subtitle}</p>}
             </div>
           </div>
           {actions && <div className="flex items-center gap-2 shrink-0">{actions}</div>}

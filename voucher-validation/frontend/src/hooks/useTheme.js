@@ -7,11 +7,12 @@ import { useCallback, useEffect, useState } from "react";
 const STORAGE_KEY = "vv:theme";
 
 function getInitialTheme() {
-  if (typeof window === "undefined") return "dark";
+  if (typeof window === "undefined") return "light";
   const saved = localStorage.getItem(STORAGE_KEY);
   if (saved === "light" || saved === "dark") return saved;
-  // Dark-first (Service Desk look). The toggle + saved preference still win.
-  return "dark";
+  // Light-first: the design system is modelled on Salesforce, whose canvas is
+  // light. Dark remains a first-class theme behind the toggle.
+  return "light";
 }
 
 function applyTheme(theme) {

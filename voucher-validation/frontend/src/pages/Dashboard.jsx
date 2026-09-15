@@ -1015,15 +1015,15 @@ function SiteCard({ name, hostname, stats, revenue, net, windowLabel, fmtMoney, 
       onClick={onOpen || undefined}
       disabled={!onOpen}
       className={
-        "text-left w-full p-4 rounded-lg bg-[var(--surface-raised)] border border-[var(--border-default)] shadow-[var(--elev-1)] " +
+        "text-left w-full p-4 rounded-xl bg-[var(--surface-raised)] border border-[var(--border-default)] shadow-[var(--shadow-card)] " +
         (onOpen
-          ? "hover:border-[var(--brand)] hover:bg-[var(--surface-hover)] transition-colors cursor-pointer"
+          ? "hover:border-[var(--border-hover)] hover:shadow-[var(--shadow-card-hover)] hover:-translate-y-[2px] transition-[box-shadow,border-color,transform] duration-200 cursor-pointer"
           : "cursor-default")
       }
     >
       <div className="flex items-center justify-between mb-3">
         <div className="flex items-center gap-2 min-w-0">
-          <span className="h-7 w-7 rounded-md inline-flex items-center justify-center bg-[var(--brand-soft)] text-[var(--brand-fg-on-soft)] shrink-0">
+          <span className="h-8 w-8 rounded-[10px] inline-flex items-center justify-center shrink-0" style={{ background: "var(--tile-navy-soft)", color: "var(--tile-navy)" }}>
             <MapPin size={14} />
           </span>
           <div className="flex flex-col min-w-0">
@@ -1040,20 +1040,20 @@ function SiteCard({ name, hostname, stats, revenue, net, windowLabel, fmtMoney, 
         <MiniStat label="Active" value={active} />
         <MiniStat label="Live" value={live} accent />
       </div>
-      <div className="flex items-center justify-between mb-3 px-2.5 py-2 rounded-md bg-[var(--brand-soft)]">
+      <div className="flex items-center justify-between mb-3 px-3 py-2.5 rounded-[10px] bg-[var(--bg-surface)] border border-[var(--border-subtle)]">
         <div className="flex flex-col">
-          <span className="text-[10px] font-medium uppercase tracking-wide text-[var(--brand-fg-on-soft)] opacity-80">
+          <span className="text-[10px] font-semibold uppercase tracking-[0.06em] text-[var(--fg-muted)]">
             Revenue
           </span>
-          <span className="text-[15px] font-semibold text-[var(--brand-fg-on-soft)] tracking-tight">
+          <span className="text-[16px] font-semibold text-[var(--fg-primary)] tracking-tight tabular-nums">
             {money(rev)}
           </span>
         </div>
         <div className="text-right">
-          <span className="block text-[10px] text-[var(--brand-fg-on-soft)] opacity-80">
+          <span className="block text-[10px] font-medium text-[var(--fg-muted)]">
             {windowLabel || "this month"}
           </span>
-          <span className="block text-[10px] text-[var(--brand-fg-on-soft)] opacity-70">
+          <span className="block text-[10px] text-[var(--fg-subtle)]">
             {revCount.toLocaleString()} sale{revCount === 1 ? "" : "s"}
           </span>
         </div>
@@ -1090,10 +1090,10 @@ function SiteCard({ name, hostname, stats, revenue, net, windowLabel, fmtMoney, 
             {Math.round(usedQ / 1024)} / {Math.round(totalQ / 1024)} GB
           </span>
         </div>
-        <div className="h-1.5 bg-[var(--surface-sunken)] rounded-full overflow-hidden">
+        <div className="h-1.5 bg-[var(--bg-surface-hover)] rounded-full overflow-hidden">
           <div
-            className="h-full bg-[var(--brand)] rounded-full transition-[width] duration-500"
-            style={{ width: `${Math.min(dataPct, 100)}%` }}
+            className="h-full rounded-full transition-[width] duration-500"
+            style={{ width: `${Math.min(dataPct, 100)}%`, background: dataPct >= 90 ? "var(--danger-fg)" : dataPct >= 70 ? "var(--tile-orange)" : "var(--tile-teal)" }}
           />
         </div>
       </div>

@@ -23,7 +23,7 @@ import { rangeLabel } from "../hooks/useMonthlyBreakdown";
 import {
   Panel, StatCard, EmptyState, Badge,
   SkeletonKpis, SkeletonCard,
-  CHART_COLORS, CHART_SERIES, ChartTooltip, useChartTheme,
+  CHART_COLORS, CHART_SERIES, ChartTooltip, ChartGradient, useChartTheme,
   ChartStat, LegendRow, axisX, axisY, gridProps, BAR_RADIUS, BAR_MAX_SIZE, BAR_CATEGORY_GAP,
 } from "./ui";
 
@@ -46,9 +46,9 @@ const OUTCOME_LABEL = {
   receipt_email_skipped: "Receipt skipped",
 };
 const outcomeTone = (t) =>
-  /fail|error/.test(t) ? CHART_COLORS.rose
-    : /success|claimed|sent/.test(t) ? CHART_COLORS.emerald
-    : /manual|skipped/.test(t) ? CHART_COLORS.amber
+  /fail|error/.test(t) ? CHART_COLORS.danger
+    : /success|claimed|sent/.test(t) ? CHART_COLORS.success
+    : /manual|skipped/.test(t) ? CHART_COLORS.warning
     : CHART_COLORS.slate;
 
 export default function MonthlyBreakdown({ state, groupId = null }) {
@@ -124,7 +124,8 @@ export default function MonthlyBreakdown({ state, groupId = null }) {
                 <XAxis dataKey="d" {...axisX(ct)} />
                 <YAxis {...axisY(ct, { width: 52 })} tickFormatter={(v) => "$" + Number(v).toLocaleString(undefined, { maximumFractionDigits: 0 })} />
                 <Tooltip content={<ChartTooltip valueFormatter={(v, e) => (e?.dataKey === "revenue" ? money(v) : num(v))} labelFormatter={barLabel} />} cursor={{ fill: ct.cursor }} />
-                <Bar dataKey="revenue" name="Revenue" fill={CHART_COLORS.accent} radius={BAR_RADIUS} maxBarSize={BAR_MAX_SIZE} isAnimationActive={false} />
+                <defs><ChartGradient id="revBar" color={CHART_COLORS.brand} from={0.95} to={0.45} /></defs>
+                <Bar dataKey="revenue" name="Revenue" fill="url(#revBar)" radius={BAR_RADIUS} maxBarSize={BAR_MAX_SIZE} isAnimationActive={false} />
               </BarChart>
             </ResponsiveContainer>
           </Panel>
@@ -170,7 +171,7 @@ export default function MonthlyBreakdown({ state, groupId = null }) {
                     <XAxis type="number" {...axisX(ct)} allowDecimals={false} />
                     <YAxis type="category" dataKey="name" {...axisY(ct, { width: 104 })} />
                     <Tooltip content={<ChartTooltip valueFormatter={num} />} cursor={{ fill: ct.cursor }} />
-                    <Bar dataKey="sold" name="Sold" fill={CHART_COLORS.blue} radius={BAR_RADIUS} maxBarSize={BAR_MAX_SIZE} isAnimationActive={false} />
+                    <Bar dataKey="sold" name="Sold" fill={CHART_COLORS.blue} radius={[0, 6, 6, 0]} maxBarSize={BAR_MAX_SIZE} isAnimationActive={false} />
                   </BarChart>
                 </ResponsiveContainer>
               )}
@@ -203,7 +204,8 @@ export default function MonthlyBreakdown({ state, groupId = null }) {
                       <XAxis type="number" {...axisX(ct)} tickFormatter={(v) => "$" + Number(v).toLocaleString(undefined, { maximumFractionDigits: 0 })} />
                       <YAxis type="category" dataKey="name" {...axisY(ct, { width: 104 })} />
                       <Tooltip content={<ChartTooltip valueFormatter={money} />} cursor={{ fill: ct.cursor }} />
-                      <Bar dataKey="revenue" name="Revenue" fill={CHART_COLORS.accent} radius={BAR_RADIUS} maxBarSize={BAR_MAX_SIZE} isAnimationActive={false} />
+                      <defs><ChartGradient id="revBar" color={CHART_COLORS.brand} from={0.95} to={0.45} /></defs>
+                <Bar dataKey="revenue" name="Revenue" fill="url(#revBar)" radius={BAR_RADIUS} maxBarSize={BAR_MAX_SIZE} isAnimationActive={false} />
                     </BarChart>
                   </ResponsiveContainer>
                 )}

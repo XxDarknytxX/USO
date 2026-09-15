@@ -45,28 +45,36 @@ export default function Login() {
 
   return (
     <div className="relative min-h-screen flex items-center justify-center overflow-hidden bg-[var(--bg-base)] text-[var(--fg-primary)] px-5 py-10">
-      {/* ===== Ambient backdrop ===== */}
-      {/* Breathing red aurora — drifts + pulses behind the card */}
+      {/* ===== Ambient backdrop =====
+          Built for a LIGHT canvas: a broad brand wash across the top that fades
+          into the page, rather than the old dark-theme aurora, which at 6% red
+          on white was invisible and left the screen looking unfinished. */}
       <div
         aria-hidden
-        className="pointer-events-none absolute left-1/2 -translate-x-1/2 -top-[22%] w-[min(920px,120vw)] h-[min(920px,120vw)] rounded-full blur-[130px] opacity-70 animate-float-slow"
-        style={{ background: "radial-gradient(circle, rgba(230,0,0,0.30), rgba(230,0,0,0.06) 45%, transparent 70%)" }}
+        className="pointer-events-none absolute inset-x-0 top-0 h-[46vh]"
+        style={{ background: "linear-gradient(180deg, rgba(230,0,0,0.16) 0%, rgba(230,0,0,0.06) 38%, transparent 100%)" }}
       />
       <div
         aria-hidden
-        className="pointer-events-none absolute -bottom-[28%] -right-[12%] w-[min(680px,90vw)] h-[min(680px,90vw)] rounded-full blur-[130px] opacity-45 animate-float"
-        style={{ background: "radial-gradient(circle, rgba(230,0,0,0.20), transparent 65%)" }}
+        className="pointer-events-none absolute left-1/2 -translate-x-1/2 -top-[26%] w-[min(1000px,130vw)] h-[min(1000px,130vw)] rounded-full blur-[120px] opacity-80 animate-float-slow"
+        style={{ background: "radial-gradient(circle, rgba(230,0,0,0.22), rgba(255,120,120,0.10) 45%, transparent 70%)" }}
       />
-      {/* Fine dot grid + focusing vignette */}
       <div
         aria-hidden
-        className="pointer-events-none absolute inset-0 opacity-[0.045]"
+        className="pointer-events-none absolute -bottom-[30%] -right-[14%] w-[min(700px,92vw)] h-[min(700px,92vw)] rounded-full blur-[130px] opacity-70 animate-float"
+        style={{ background: "radial-gradient(circle, rgba(27,150,255,0.16), transparent 66%)" }}
+      />
+      {/* Fine dot grid */}
+      <div
+        aria-hidden
+        className="pointer-events-none absolute inset-0 opacity-[0.05]"
         style={{ backgroundImage: "radial-gradient(circle at 1px 1px, var(--fg-primary) 1px, transparent 0)", backgroundSize: "34px 34px" }}
       />
+      {/* Vignette back to the canvas so the card sits in calm space */}
       <div
         aria-hidden
         className="pointer-events-none absolute inset-0"
-        style={{ background: "radial-gradient(ellipse at center, transparent 38%, var(--bg-base) 94%)" }}
+        style={{ background: "radial-gradient(ellipse at center, transparent 34%, var(--bg-base) 96%)" }}
       />
 
       {/* ===== Content ===== */}
@@ -80,7 +88,7 @@ export default function Login() {
 
         {/* Card */}
         <div
-          className="relative rounded-2xl border border-[var(--border-strong)] bg-[var(--bg-elevated)]/85 backdrop-blur-xl shadow-[var(--shadow-elevated)] overflow-hidden animate-fade-up"
+          className="relative rounded-2xl border border-[var(--border-default)] bg-[var(--bg-elevated)] shadow-[var(--shadow-elevated)] overflow-hidden animate-fade-up"
           style={{ animationDelay: "80ms", animationFillMode: "both" }}
         >
           {/* Living red accent line — the same pulse as the app chrome */}

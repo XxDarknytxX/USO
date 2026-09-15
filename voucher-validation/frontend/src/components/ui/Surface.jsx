@@ -9,7 +9,7 @@ export function Card({ className = "", children, ...props }) {
       {...props}
       className={
         "bg-[var(--surface-raised)] border border-[var(--border-default)] " +
-        "rounded-lg shadow-[var(--elev-1)] " +
+        "rounded-xl shadow-[var(--shadow-card)] " +
         className
       }
     >
@@ -38,22 +38,22 @@ export function CardBody({ className = "", children }) {
 
 /* ------------ Badge ------------------------------------------------------- */
 const badgeBase =
-  "inline-flex items-center gap-1 font-medium rounded text-[11px] tracking-tight " +
-  "px-1.5 py-0.5 leading-tight";
+  "inline-flex items-center gap-1.5 font-semibold rounded-full text-[11px] " +
+  "px-2 py-[3px] leading-tight whitespace-nowrap";
 
 const badgeTones = {
   neutral:
-    "bg-[var(--surface-hover)] text-[var(--text-secondary)] border border-[var(--border-subtle)]",
+    "bg-[var(--bg-surface)] text-[var(--text-secondary)] border border-[var(--border-default)]",
   brand:
     "bg-[var(--brand-soft)] text-[var(--brand-fg-on-soft)] border border-[var(--brand-soft-hover)]",
   success:
-    "bg-[var(--success-soft)] text-[var(--success-fg)] border border-transparent",
+    "bg-[var(--success-soft)] text-[var(--success-fg)] border border-[var(--success-border)]",
   warning:
-    "bg-[var(--warning-soft)] text-[var(--warning-fg)] border border-transparent",
+    "bg-[var(--warning-soft)] text-[var(--warning-fg)] border border-[var(--warning-border)]",
   danger:
-    "bg-[var(--danger-soft)] text-[var(--danger-fg)] border border-transparent",
+    "bg-[var(--danger-soft)] text-[var(--danger-fg)] border border-[var(--danger-border)]",
   info:
-    "bg-[var(--info-soft)] text-[var(--info-fg)] border border-transparent",
+    "bg-[var(--info-soft)] text-[var(--info-fg)] border border-[var(--info-border)]",
   outline:
     "bg-transparent text-[var(--text-secondary)] border border-[var(--border-default)]",
 };
@@ -65,7 +65,7 @@ export function Badge({
   icon = null,
   children,
 }) {
-  const sz = size === "md" ? "text-[12px] px-2 py-0.5" : "";
+  const sz = size === "md" ? "text-[12px] px-2.5 py-[4px]" : "";
   return (
     <span className={`${badgeBase} ${badgeTones[tone]} ${sz} ${className}`}>
       {icon && <span className="opacity-80">{icon}</span>}
@@ -106,17 +106,23 @@ export function EmptyState({
       }
     >
       {Icon && (
-        <div
-          className={
-            "w-12 h-12 rounded-lg flex items-center justify-center " +
-            "bg-[var(--surface-sunken)] border border-[var(--border-subtle)] " +
-            "text-[var(--text-quaternary)] mb-3"
-          }
-        >
-          <Icon size={22} strokeWidth={1.5} />
+        <div className="relative mb-4">
+          <span
+            className="absolute inset-0 -m-3 rounded-full opacity-70"
+            style={{ background: "radial-gradient(circle, var(--tile-blue-soft) 0%, transparent 70%)" }}
+            aria-hidden="true"
+          />
+          <div
+            className={
+              "relative w-14 h-14 rounded-2xl flex items-center justify-center " +
+              "bg-[var(--bg-surface)] border border-[var(--border-default)] text-[var(--tile-blue)]"
+            }
+          >
+            <Icon size={24} strokeWidth={1.5} />
+          </div>
         </div>
       )}
-      <p className="text-[14px] font-medium text-[var(--text-secondary)]">
+      <p className="text-[14.5px] font-semibold text-[var(--text-primary)]">
         {title}
       </p>
       {description && (

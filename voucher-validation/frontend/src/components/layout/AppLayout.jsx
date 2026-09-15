@@ -12,10 +12,11 @@ import {
   LayoutDashboard, Gauge, Network, Ticket, History, RefreshCw, Globe,
   FileText, GitBranch, Users, Settings, Menu, X, ChevronLeft, ChevronRight,
   ChevronDown, LogOut, Shield, Eye, LifeBuoy, UserCircle, Wallet,
-  Wrench,
+  Wrench, Sun, Moon,
 } from "lucide-react";
 
 import { useAuth } from "../../hooks/useAuth";
+import { useTheme } from "../../hooks/useTheme";
 import { SiteProvider, useSite } from "../../hooks/useSite";
 import VodafoneLogo from "../ui/VodafoneLogo";
 import FloatingBlobs from "../ui/FloatingBlobs";
@@ -81,6 +82,7 @@ function Shell() {
   const location = useLocation();
   const { email, name, role, isAdmin, isViewer, isEngineer, logout } = useAuth();
   const { loading: siteLoading } = useSite();
+  const { theme, toggle: toggleTheme } = useTheme();
 
   const [mobileOpen, setMobileOpen] = useState(false);
   const [collapsed, setCollapsed] = useState(() => localStorage.getItem("vv:sidebarCollapsed") === "1");
@@ -142,18 +144,8 @@ function Shell() {
     );
 
   return (
-    <div className="relative flex h-screen overflow-hidden bg-[var(--bg-base)] text-[var(--fg-primary)]">
+    <div className="relative flex h-screen overflow-hidden app-canvas text-[var(--fg-primary)]">
       <FloatingBlobs variant="minimal" />
-
-      {/* Full-width flowing accent line at y=64, across sidebar + header */}
-      <div
-        className="pointer-events-none absolute left-0 right-0 top-16 h-[2px] z-30 lg:z-[55] animate-header-wave"
-        style={{
-          background:
-            "linear-gradient(90deg, rgba(230,0,0,0.04) 0%, rgba(230,0,0,0.55) 22%, #E60000 50%, rgba(230,0,0,0.55) 78%, rgba(230,0,0,0.04) 100%)",
-          backgroundSize: "200% 100%",
-        }}
-      />
 
       {/* Mobile overlay */}
       {mobileOpen && (
@@ -168,16 +160,13 @@ function Shell() {
       <aside
         className={cn(
           "fixed inset-y-0 left-0 z-50 flex flex-col",
-          "bg-[var(--bg-elevated)] border-r border-[var(--border-default)]",
+          "sidebar-bg border-r border-[var(--border-default)]",
           "transition-[width,transform] duration-300 ease-[cubic-bezier(0.16,1,0.3,1)]",
           "lg:relative lg:translate-x-0",
           mobileOpen ? "translate-x-0" : "-translate-x-full"
         )}
         style={{ width: sidebarWidth }}
       >
-        {/* Accent glow line at top */}
-        <div className="absolute top-0 left-[20%] right-[20%] h-px bg-gradient-to-r from-transparent via-[var(--accent)] to-transparent opacity-30 pointer-events-none" />
-
         {/* Floating collapse toggle (desktop) */}
         <button
           onClick={toggleCollapsed}
@@ -236,25 +225,19 @@ function Shell() {
                       title={!expanded ? label : undefined}
                       className={({ isActive }) =>
                         cn(
-                          "group relative flex items-center h-10 rounded-lg overflow-hidden transition-colors duration-150",
+                          "group relative flex items-center h-10 rounded-[12px] overflow-hidden transition-colors duration-150",
                           isActive
-                            ? "bg-[var(--accent)]/[0.08] text-[var(--fg-primary)]"
+                            ? "bg-[var(--brand-soft)] text-[var(--brand-fg-on-soft)] font-semibold"
                             : "text-[var(--fg-secondary)] hover:bg-[var(--bg-surface)] hover:text-[var(--fg-primary)]"
                         )
                       }
                     >
                       {({ isActive }) => (
                         <>
-                          <span
-                            className={cn(
-                              "absolute left-0 top-1/2 -translate-y-1/2 w-[3px] rounded-r-full bg-[var(--accent)] transition-all duration-200",
-                              isActive ? "h-5 opacity-100" : "h-0 opacity-0"
-                            )}
-                          />
-                          <span className={cn("w-10 shrink-0 flex items-center justify-center transition-colors duration-150", isActive ? "text-[var(--accent)]" : "text-[var(--fg-muted)] group-hover:text-[var(--fg-secondary)]")}>
+                          <span className={cn("w-10 shrink-0 flex items-center justify-center transition-colors duration-150", isActive ? "text-[var(--brand)]" : "text-[var(--fg-muted)] group-hover:text-[var(--fg-secondary)]")}>
                             <Icon size={18} />
                           </span>
-                          <span className={labelCls("text-sm font-medium")} aria-hidden={!expanded}>{label}</span>
+                          <span className={labelCls("text-[13.5px]")} aria-hidden={!expanded}>{label}</span>
                         </>
                       )}
                     </NavLink>
@@ -278,7 +261,7 @@ function Shell() {
             )}
           >
             <div className="w-10 shrink-0 flex items-center justify-center">
-              <div className="relative h-10 w-10 rounded-xl flex items-center justify-center bg-[var(--accent)]/10 text-[var(--accent)] border border-[var(--accent)]/15 text-sm font-semibold">
+              <div className="relative h-10 w-10 rounded-[12px] flex items-center justify-center bg-[var(--brand-soft)] text-[var(--brand-fg-on-soft)] text-[13px] font-semibold">
                 {initial}
                 <span className="absolute bottom-0 right-0 h-3 w-3 rounded-full bg-emerald-500 border-2 border-[var(--bg-elevated)]" />
               </div>
@@ -319,6 +302,17 @@ function Shell() {
             </div>
 
             <div className="flex items-center gap-2 shrink-0">
+              {/* Light/dark. The design is light-first; dark is a full theme,
+                  not a dimmed copy, so it is worth being one click away. */}
+              <button
+                onClick={toggleTheme}
+                title={theme === "dark" ? "Switch to light" : "Switch to dark"}
+                aria-label={theme === "dark" ? "Switch to light theme" : "Switch to dark theme"}
+                className="h-9 w-9 rounded-full flex items-center justify-center text-[var(--fg-muted)] hover:text-[var(--fg-primary)] hover:bg-[var(--surface-hover)] transition-colors duration-150"
+              >
+                {theme === "dark" ? <Sun size={17} /> : <Moon size={17} />}
+              </button>
+
               {/* User menu */}
               <div className="relative" ref={userMenuRef}>
                 <button
@@ -326,7 +320,7 @@ function Shell() {
                   className="flex items-center gap-2.5 p-1.5 pr-3 rounded-lg border border-[var(--border-default)] hover:bg-[var(--bg-surface)] hover:border-[var(--border-hover)] transition-all duration-150"
                   aria-expanded={showUserMenu}
                 >
-                  <div className="h-8 w-8 rounded-lg flex items-center justify-center bg-[var(--accent)]/10 text-[var(--accent)] text-sm font-semibold">
+                  <div className="h-8 w-8 rounded-[10px] flex items-center justify-center bg-[var(--brand-soft)] text-[var(--brand-fg-on-soft)] text-[13px] font-semibold">
                     {initial}
                   </div>
                   <span className="hidden md:block text-sm font-medium text-[var(--fg-primary)] truncate max-w-[140px]">

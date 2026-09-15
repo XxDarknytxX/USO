@@ -55,7 +55,7 @@ export function Field({
 
 /* ------------ Input ------------------------------------------------------- */
 const inputBase =
-  "w-full h-9 px-3 text-[13px] rounded-md " +
+  "w-full h-10 px-3.5 text-[13px] rounded-md " +
   "bg-[var(--input-bg)] text-[var(--text-primary)] " +
   "border border-[var(--input-border)] " +
   "placeholder:text-[var(--text-quaternary)] " +

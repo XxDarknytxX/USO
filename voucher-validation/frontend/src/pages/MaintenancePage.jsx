@@ -30,7 +30,6 @@ const CONDITION_LABEL = { ok: "OK", attention: "Needs attention", faulty: "Fault
 const COMPONENT_FILTERS = [
   { key: "gateway", label: "Gateway / router" },
   { key: "aps", label: "Access points" },
-  { key: "switch", label: "Switch" },
   { key: "starlink", label: "Starlink dish & mount" },
   { key: "power", label: "Power (solar / battery / PSU)" },
   { key: "enclosure", label: "Enclosure & cabling" },

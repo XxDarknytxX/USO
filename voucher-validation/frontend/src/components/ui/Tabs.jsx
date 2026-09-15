@@ -21,7 +21,7 @@ export default function Tabs({
     return (
       <div
         className={cn(
-          "inline-flex items-center gap-1 p-1 rounded-xl bg-[var(--bg-surface)] border border-[var(--border-default)]",
+          "inline-flex items-center gap-1 p-1 rounded-full bg-[var(--bg-surface)] border border-[var(--border-default)]",
           className
         )}
       >
@@ -33,10 +33,10 @@ export default function Tabs({
               type="button"
               onClick={() => onChange?.(tab.value)}
               className={cn(
-                "relative inline-flex items-center gap-2 rounded-lg font-medium transition-all duration-200",
-                size === "sm" ? "px-3 py-1.5 text-xs" : "px-3.5 py-2 text-sm",
+                "relative inline-flex items-center gap-2 rounded-full font-semibold transition-all duration-200",
+                size === "sm" ? "px-3.5 py-1.5 text-[12.5px]" : "px-4 py-2 text-[13px]",
                 active
-                  ? "bg-[var(--bg-elevated)] text-[var(--fg-primary)] shadow-[var(--shadow-sm)]"
+                  ? "bg-[var(--surface)] text-[var(--fg-primary)] shadow-[var(--shadow-sm)]"
                   : "text-[var(--fg-secondary)] hover:text-[var(--fg-primary)]"
               )}
             >
@@ -73,8 +73,8 @@ export default function Tabs({
               type="button"
               onClick={() => onChange?.(tab.value)}
               className={cn(
-                "group relative inline-flex items-center gap-2 whitespace-nowrap font-medium transition-colors duration-150",
-                size === "sm" ? "px-3 py-2.5 text-[13px]" : "px-4 py-3 text-sm",
+                "group relative inline-flex items-center gap-2 whitespace-nowrap font-semibold transition-colors duration-150",
+                size === "sm" ? "px-3.5 py-2.5 text-[13px]" : "px-4 py-3 text-[13.5px]",
                 active
                   ? "text-[var(--fg-primary)]"
                   : "text-[var(--fg-secondary)] hover:text-[var(--fg-primary)]"
@@ -106,7 +106,7 @@ export default function Tabs({
               )}
               <span
                 className={cn(
-                  "absolute -bottom-px left-2 right-2 h-0.5 rounded-full bg-[var(--accent)] transition-all duration-300",
+                  "absolute -bottom-px left-2 right-2 h-[3px] rounded-t-full bg-[var(--accent)] transition-all duration-300",
                   active ? "opacity-100 scale-x-100" : "opacity-0 scale-x-50"
                 )}
               />

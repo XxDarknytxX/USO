@@ -69,7 +69,7 @@ export default function Modal({
               `relative w-full ${widths[width]} max-h-[88vh] flex flex-col ` +
               `bg-[var(--surface-raised)] ` +
               `border border-[var(--border-default)] ` +
-              `rounded-xl shadow-[var(--elev-4)] ` +
+              `rounded-2xl shadow-[var(--shadow-elevated)] ` +
               `overflow-hidden grain ${className}`
             }
             initial={{ scale: 0.98, opacity: 0, y: 12 }}
@@ -115,7 +115,7 @@ function Header({
         {Icon && (
           <span
             className={
-              "shrink-0 w-10 h-10 rounded-lg flex items-center justify-center " +
+              "shrink-0 w-11 h-11 rounded-[13px] flex items-center justify-center " +
               "bg-[var(--brand-soft)] text-[var(--brand)] " +
               "border border-[var(--brand-soft-hover)]"
             }
