@@ -1,5 +1,6 @@
 // src/controllers/adminController.js
 import bcrypt from "bcryptjs";
+import crypto from "node:crypto";
 import jwt from "jsonwebtoken";
 import {
   isTwoFactorRequired, setTwoFactorRequired, beginEnrolment, verifyEnrolment,
@@ -11,7 +12,7 @@ import {
 import {
   issueInvite, consumeInvite, findInvitee, revokeInvite, unusablePasswordHash, INVITE_TTL_DAYS,
 } from "../services/invites.js";
-import { makeAttemptLimiter, clientIp } from "../services/attemptLimiter.js";
+import { makeAttemptLimiter, clientIp, pause } from "../services/attemptLimiter.js";
 import { validationResult } from "express-validator";
 
 /** Local response helpers */
@@ -26,6 +27,14 @@ const send = {
   notFound: (res, msg = "Not found") => res.status(404).json({ error: msg }),
   serverErr: (res, msg = "Internal server error") => res.status(500).json({ error: msg }),
 };
+
+/**
+ * A bcrypt hash of nothing anyone knows, compared against when the email is
+ * unrecognised. Without it an unknown address returns in microseconds while a
+ * known one costs a full bcrypt — which answers "is this person a user here"
+ * to anyone with a stopwatch. Computed once at module load.
+ */
+const DUMMY_HASH = bcrypt.hashSync(crypto.randomBytes(32).toString("hex"), 10);
 
 /** Thin data-access helpers */
 /**
@@ -117,6 +126,17 @@ async function sendAccountMail(pool, user, kind, { password, inviteToken } = {})
 // to switch to another and start again with a fresh allowance.
 const limiter = makeAttemptLimiter();
 
+/**
+ * Answers one failed attempt: records it, waits out any distributed-guessing
+ * penalty, and reports whether this caller is now cut off entirely. Returning
+ * the 429 is the caller's job, so the message stays specific to the endpoint.
+ */
+async function penalise(ip, acct) {
+  const { blockedFor, delayMs } = limiter.fail(ip, acct);
+  await pause(delayMs);
+  return blockedFor;
+}
+
 const tooMany = (res, seconds) => {
   res.setHeader("Retry-After", String(seconds));
   return res.status(429).json({
@@ -159,20 +179,21 @@ export function makeAdminController(pool) {
       const ip = clientIp(req);
       const acct = String(email || "").toLowerCase();
       try {
-        // Checked BEFORE the lookup and before bcrypt, so a blocked caller
-        // costs nothing and learns nothing about whether the account exists.
+        // Only the per-(ip, account) block refuses up front. The per-account
+        // counter must never be able to stop a correct password — that is how
+        // a throttle becomes a way to lock somebody out of their own console.
         const wait = limiter.retryAfter(ip, acct);
         if (wait) return tooMany(res, wait);
 
         const user = await findUserByEmail(pool, email);
-        if (!user) {
-          limiter.fail(ip, acct);
-          return send.bad(res, "Invalid credentials");
-        }
+        // An unknown address takes the same work and the same wait as a known
+        // one, so response time does not answer "does this account exist".
+        const hash = user ? user.password_hash : DUMMY_HASH;
+        const ok = await bcrypt.compare(String(password || ""), hash);
 
-        const ok = await bcrypt.compare(password, user.password_hash);
-        if (!ok) {
-          limiter.fail(ip, acct);
+        if (!user || !ok) {
+          const blockedFor = await penalise(ip, acct);
+          if (blockedFor) return tooMany(res, blockedFor);
           return send.bad(res, "Invalid credentials");
         }
         // The password was right. The code steps below keep their own count,
@@ -249,6 +270,19 @@ export function makeAdminController(pool) {
         const [rows] = await pool.query("SELECT id, email, name, totp_enabled FROM users WHERE id = ?", [req.params.id]);
         const user = rows[0];
         if (!user) return send.notFound(res, "User not found");
+
+        // Resetting your OWN second factor with nothing but the session token
+        // is a way around /2fa/disable, which asks for the password and refuses
+        // outright while the estate policy requires 2FA. A borrowed session
+        // could otherwise strip the factor protecting the account it came from.
+        // This endpoint is for helping SOMEONE ELSE who lost their phone; your
+        // own goes through the path that asks who you are.
+        if (Number(user.id) === Number(req.user.id)) {
+          return send.bad(
+            res,
+            "Use Profile → Security to change two-factor on your own account — it asks for your password."
+          );
+        }
 
         await clearTwoFactor(pool, user.id);
         const mail = await sendAccountMail(pool, user, "2fa-reset", {});
@@ -367,7 +401,16 @@ export function makeAdminController(pool) {
       if (!newPassword || String(newPassword).length < 8) {
         return send.bad(res, "Choose a password of at least 8 characters");
       }
+      // This checks the current password against the same hash that disable2FA
+      // and the backup-code endpoint check, so it is the same guessing oracle
+      // and needs the same brake. Unthrottled, a stolen 2-hour token could be
+      // ground into the password itself — and with the password, the second
+      // factor comes off.
+      const ip = clientIp(req);
+      const acct = `pw:${req.user.id}`;
       try {
+        const wait = limiter.retryAfter(ip, acct);
+        if (wait) return tooMany(res, wait);
         const [rows] = await pool.query(
           "SELECT password_hash, must_change_password FROM users WHERE id = ?",
           [req.user.id]
@@ -379,8 +422,11 @@ export function makeAdminController(pool) {
         // credential from the email.
         if (!rows[0].must_change_password) {
           if (!currentPassword || !(await bcrypt.compare(currentPassword, rows[0].password_hash))) {
+            const blockedFor = await penalise(ip, acct);
+            if (blockedFor) return tooMany(res, blockedFor);
             return send.bad(res, "Your current password is not right");
           }
+          limiter.succeed(ip, acct);
         }
         await pool.query(
           "UPDATE users SET password_hash = ?, must_change_password = 0, password_changed_at = NOW() WHERE id = ?",
@@ -416,7 +462,8 @@ export function makeAdminController(pool) {
 
         const r = await verifyCode(pool, decoded.id, code);
         if (!r.ok) {
-          limiter.fail(ip, acct);
+          const blockedFor = await penalise(ip, acct);
+          if (blockedFor) return tooMany(res, blockedFor);
           return send.bad(res, r.error || "That code is not right.");
         }
         limiter.succeed(ip, acct);
@@ -462,7 +509,8 @@ export function makeAdminController(pool) {
         if (wait) return tooMany(res, wait);
         const r = await verifyEnrolment(pool, req.user.id, code);
         if (!r.ok) {
-          limiter.fail(ip, acct);
+          const blockedFor = await penalise(ip, acct);
+          if (blockedFor) return tooMany(res, blockedFor);
           return send.bad(res, r.error);
         }
         limiter.succeed(ip, acct);
@@ -498,7 +546,8 @@ export function makeAdminController(pool) {
         const [rows] = await pool.query("SELECT password_hash FROM users WHERE id = ?", [req.user.id]);
         if (!rows[0]) return send.notFound(res, "User not found");
         if (!password || !(await bcrypt.compare(password, rows[0].password_hash))) {
-          limiter.fail(ip, acct);
+          const blockedFor = await penalise(ip, acct);
+          if (blockedFor) return tooMany(res, blockedFor);
           return send.bad(res, "Enter your current password to turn two-factor off.");
         }
         limiter.succeed(ip, acct);
@@ -547,7 +596,8 @@ export function makeAdminController(pool) {
         const [rows] = await pool.query("SELECT password_hash FROM users WHERE id = ?", [req.user.id]);
         if (!rows[0]) return send.notFound(res, "User not found");
         if (!password || !(await bcrypt.compare(password, rows[0].password_hash))) {
-          limiter.fail(ip, acct);
+          const blockedFor = await penalise(ip, acct);
+          if (blockedFor) return tooMany(res, blockedFor);
           return send.bad(res, "Enter your current password to replace your backup codes.");
         }
         limiter.succeed(ip, acct);

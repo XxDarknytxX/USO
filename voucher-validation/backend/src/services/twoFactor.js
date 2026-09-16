@@ -31,16 +31,27 @@ export const ISSUER = "Vodafone Fiji USO";
  * an estate that has never seen it. Anyone can still enrol individually while
  * it is off; the switch only decides whether it is compulsory.
  */
+let lastKnownPolicy = false;
+
 export async function isTwoFactorRequired(pool) {
   try {
     const [rows] = await pool.query(
       "SELECT setting_value FROM app_settings WHERE setting_key = 'require_2fa'"
     );
     const v = rows[0]?.setting_value;
-    if (v == null) return false;
-    return String(v).toLowerCase() === "true" || String(v) === "1";
-  } catch {
-    return false;
+    if (v == null) { lastKnownPolicy = false; return false; }
+    lastKnownPolicy = String(v).toLowerCase() === "true" || String(v) === "1";
+    return lastKnownPolicy;
+  } catch (e) {
+    // A read failure used to answer "not required", which fails OPEN: a
+    // database hiccup, or a query an attacker can make fail, turns enforcement
+    // off estate-wide and every account signs in on a password alone. Cached
+    // instead — the last answer the database actually gave — so an outage
+    // holds the policy steady rather than lifting it. Only a process that has
+    // never managed one read falls back to off, and that process cannot serve
+    // logins anyway.
+    console.error("[2fa] policy read failed, using last known value:", e.message);
+    return lastKnownPolicy;
   }
 }
 
@@ -117,23 +128,53 @@ async function makeBackupCodes() {
  * earlier locks the account out of its own login.
  */
 export async function verifyEnrolment(pool, userId, code) {
-  const [rows] = await pool.query("SELECT totp_secret FROM users WHERE id = ?", [userId]);
+  const [rows] = await pool.query(
+    "SELECT totp_secret, totp_enabled FROM users WHERE id = ?",
+    [userId]
+  );
   const secret = rows[0]?.totp_secret;
   if (!secret) return { ok: false, error: "Start the setup again — no pending secret for this account." };
 
+  // Enrolment is for accounts that have no second factor. Without this, anyone
+  // holding a session could call it against the LIVE secret and be handed a
+  // fresh set of backup codes — replacing every code the owner holds, with no
+  // password, going round the endpoint that exists to ask for one.
+  if (rows[0].totp_enabled) {
+    return { ok: false, error: "Two-factor is already on for this account." };
+  }
+
   // window: 1 accepts the adjacent 30s step either side, which covers ordinary
   // clock drift on a phone without meaningfully widening the guess space.
-  const valid = speakeasy.totp.verify({ secret, encoding: "base32", token: String(code), window: 1 });
-  if (!valid) return { ok: false, error: "That code is not right. Check the clock on your phone and try the current code." };
+  // verifyDelta rather than verify, because the step has to be RECORDED.
+  const delta = speakeasy.totp.verifyDelta({
+    secret,
+    encoding: "base32",
+    token: String(code),
+    window: 1,
+  });
+  if (!delta) return { ok: false, error: "That code is not right. Check the clock on your phone and try the current code." };
 
   const { plain, hashed } = await makeBackupCodes();
-  await pool.query(
+  // The enrolment code is SPENT, and is recorded as spent.
+  //
+  // Writing NULL here — which this did — says "nothing has been used yet" at
+  // the exact moment something has. Someone who read those six digits off the
+  // screen during setup had the ~90 seconds of the window to sign in with
+  // them, which is the replay the single-use rule exists to stop, reopened by
+  // the one code an onlooker is most likely to have seen.
+  const step = Math.floor(Date.now() / 30000) + delta.delta;
+  const [res] = await pool.query(
     `UPDATE users
         SET totp_enabled = 1, totp_backup_codes = ?, totp_enrolled_at = NOW(),
-            totp_last_step = NULL
-      WHERE id = ?`,
-    [JSON.stringify(hashed), userId]
+            totp_last_step = ?
+      WHERE id = ? AND totp_enabled = 0`,
+    [JSON.stringify(hashed), step, userId]
   );
+  // Conditional on still being un-enrolled, so two setups racing cannot both
+  // enable — the loser would otherwise leave codes nobody was shown.
+  if (res.affectedRows !== 1) {
+    return { ok: false, error: "Two-factor is already on for this account." };
+  }
   return { ok: true, backupCodes: plain };
 }
 

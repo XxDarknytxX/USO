@@ -9,16 +9,27 @@
 // hundred thousand requests, which is seconds of scripted traffic. The whole
 // point of the second factor is that holding the password is not enough.
 //
-// TWO counters, because they defend against different things and one of them
-// can be turned against the user:
+// TWO counters, and they are applied DIFFERENTLY, because a throttle that can
+// refuse a correct credential is a denial of service wearing a security badge.
 //
-//   per (ip, account) — strict. This is the actual attack: one attacker,
-//     hammering one account. Blocking it costs nobody anything.
+//   per (ip, account) — REFUSES. This is the actual attack: one host hammering
+//     one account. Blocking it up front costs the attacker everything and a
+//     real user nothing, because a real user is not the one failing ten times
+//     from that address.
 //
-//   per account — generous, and deliberately so. It catches a distributed
-//     attempt, but it can also be used to lock a real person out of their own
-//     console by failing on purpose from somewhere else. The threshold is set
-//     high enough that normal use, and normal fumbling, never reaches it.
+//   per account — DELAYS, and never refuses. It exists for the distributed
+//     case, where the attacker has many addresses and the per-pair counter
+//     never trips. Refusing on it was the obvious design and it was wrong: an
+//     account key is just an email address, so anyone who knows one could send
+//     fifty bad passwords and hold the owner out — permanently, by repeating
+//     it — and because the check ran before the password was verified, even
+//     the correct password could not clear it. One admin, one script, no
+//     console.
+//
+//     So the account counter now only slows down FAILURES. A correct password
+//     or a correct code is never delayed and never refused, whatever anyone
+//     else has been doing to that account. Guessing still costs the attacker
+//     real time; knowing the credential still costs the owner nothing.
 //
 // IN-PROCESS. State is a Map, so it resets on restart and is not shared across
 // PM2 workers — with N workers an attacker gets N times the allowance. That is
@@ -83,9 +94,12 @@ export function makeAttemptLimiter({
   max = 10,
   windowMs = 15 * MINUTE,
   blockMs = 15 * MINUTE,
-  accountMax = 50,
+  accountMax = 25,
   accountWindowMs = 60 * MINUTE,
-  accountBlockMs = 30 * MINUTE,
+  accountBlockMs = 60 * MINUTE,
+  // Long enough to make scripted guessing expensive, short enough that a
+  // person who has genuinely mistyped does not think the console has hung.
+  accountPenaltyMs = 2000,
 } = {}) {
   const perPair = bucket({ max, windowMs, blockMs });
   const perAccount = bucket({ max: accountMax, windowMs: accountWindowMs, blockMs: accountBlockMs });
@@ -100,22 +114,42 @@ export function makeAttemptLimiter({
   const pairKey = (ip, account) => `${ip}|${account}`;
 
   return {
-    /** Seconds to wait, or 0 to proceed. Checked BEFORE any password compare. */
+    /**
+     * Seconds to wait before this caller may even be checked, or 0 to proceed.
+     *
+     * Reads the per-PAIR counter ONLY. The per-account counter is deliberately
+     * not consulted here: letting it refuse means somebody else's failures can
+     * stop you signing in with the right password.
+     */
     retryAfter(ip, account) {
-      return Math.max(perPair.retryAfter(pairKey(ip, account)), perAccount.retryAfter(account));
+      return perPair.retryAfter(pairKey(ip, account));
     },
+
+    /**
+     * Records one failed attempt.
+     * @returns {{ blockedFor: number, delayMs: number }}
+     *   blockedFor — seconds, non-zero once this pair is cut off entirely.
+     *   delayMs    — how long the caller should wait before ANSWERING this
+     *                failure. The distributed-guessing brake: it costs an
+     *                attacker time per guess without ever refusing anybody.
+     */
     fail(ip, account) {
-      const a = perPair.fail(pairKey(ip, account));
-      const b = perAccount.fail(account);
-      return Math.max(a, b);
+      const blockedFor = perPair.fail(pairKey(ip, account));
+      const overAccount = perAccount.fail(account) > 0;
+      return { blockedFor, delayMs: overAccount ? accountPenaltyMs : 0 };
     },
+
     succeed(ip, account) {
       perPair.clear(pairKey(ip, account));
       perAccount.clear(account);
     },
+
     _sizes: () => ({ pairs: perPair.size, accounts: perAccount.size }),
   };
 }
+
+/** Waits, without burning CPU. Used to slow a failed attempt, never a good one. */
+export const pause = (ms) => (ms > 0 ? new Promise((r) => setTimeout(r, ms)) : Promise.resolve());
 
 /**
  * The client's address, as Express resolved it.
