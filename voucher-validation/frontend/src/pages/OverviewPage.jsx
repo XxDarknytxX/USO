@@ -283,26 +283,29 @@ export default function OverviewPage() {
           <thead>
             <tr>
               <Th>Village</Th>
-              {/* Three different layers, which used to read as one. Status is
-                  the village's actual internet, from the Starlink dish. Local
-                  link is the Ruijie gateway's own view of its WAN, one layer
-                  down — it can disagree, and when it does that disagreement is
-                  the useful part. Gateway is whether we can reach the box. */}
+              {/* Two layers, each carrying its own uptime beneath its state.
+                  Status is the village's actual internet, measured from the
+                  Starlink dish. Gateway is the Ruijie box on the ground. They
+                  can disagree, and when they do that disagreement is the useful
+                  part — a dish up behind a dead gateway is a site visit, a
+                  gateway up behind a dark dish is a Starlink problem.
+
+                  The old "Local link" column was the gateway's own opinion of
+                  its WAN, which is a third answer to a question the other two
+                  already cover, and mostly just tracked Gateway. */}
               <Th>Status</Th>
-              <Th>Local link</Th>
               <Th>Gateway</Th>
-              <Th align="right">Starlink</Th>
+              <Th align="right">Starlink GB</Th>
               <Th align="right">Link quality</Th>
               <Th align="right">APs</Th>
               <Th align="right">Clients</Th>
-              <Th align="right">Gateway uptime</Th>
             </tr>
           </thead>
           <tbody>
             {loading ? (
-              <TableMessage colSpan={9}>Loading…</TableMessage>
+              <TableMessage colSpan={7}>Loading…</TableMessage>
             ) : rows.length === 0 ? (
-              <TableMessage colSpan={9}>
+              <TableMessage colSpan={7}>
                 <span className="block font-semibold text-[var(--fg-primary)] text-[13.5px]">
                   {filtered
                     ? "No village matches these filters"
@@ -341,16 +344,26 @@ export default function OverviewPage() {
                       mono
                     />
                   </Td>
-                  <Td><OnlineState site={v} /></Td>
-                  <Td><State state={v.internetUp} up="Up" down="Down" /></Td>
-                  <Td><State state={v.gatewayOnline} up="Online" down="Offline" /></Td>
+                  <Td>
+                    <StateWithUptime
+                      pill={<OnlineState site={v} />}
+                      pct={v.starlink?.uptimePct}
+                      title="Share of the time the Starlink dish was reporting"
+                    />
+                  </Td>
+                  <Td>
+                    <StateWithUptime
+                      pill={<State state={v.gatewayOnline} up="Online" down="Offline" />}
+                      pct={v.uptimePct}
+                      title="Share of collector samples with the gateway's WAN up"
+                    />
+                  </Td>
                   <Td align="right" nowrap className="tabular-nums"><SlData sl={v.starlink} /></Td>
                   <Td align="right" nowrap><LinkQuality sl={v.starlink} /></Td>
                   <Td align="right" nowrap className="tabular-nums">
                     {v.apsTotal ? `${v.apsOnline}/${v.apsTotal}` : "—"}
                   </Td>
                   <Td align="right" nowrap className="tabular-nums">{v.clients ?? 0}</Td>
-                  <Td align="right" nowrap><Uptime pct={v.uptimePct} /></Td>
                 </tr>
               ))
             )}
@@ -361,8 +374,9 @@ export default function OverviewPage() {
             where it read as an unrelated aside. */}
         {!loading && sites.some((v) => v.uptimePct == null) && (
           <p className="px-5 py-3 border-t border-[var(--border-subtle)] text-[12px] text-[var(--fg-muted)]">
-            Uptime fills in as the background monitor collects samples (every ~5 min) — give it a little while
-            after the first deploy.
+            Each state carries its own uptime: Status is the share of time the Starlink dish was
+            reporting, Gateway the share of collector samples with the gateway's WAN up. Both read
+            "no history" until their collector has run for a while.
           </p>
         )}
       </Panel>
@@ -374,6 +388,34 @@ export default function OverviewPage() {
 function State({ state, up = "Up", down = "Down" }) {
   if (state == null) return <StatusPill tone="neutral">No data</StatusPill>;
   return <StatusPill tone={state ? "success" : "danger"}>{state ? up : down}</StatusPill>;
+}
+
+/**
+ * A state and the share of time it has held, stacked.
+ *
+ * The two live together because apart they invite the wrong reading: "Online"
+ * over "71%" is a village that is up right now and has not been reliably, which
+ * is a different and more actionable fact than either line alone. Keeping each
+ * uptime under the thing it measures also stops the page having one uptime
+ * column that quietly belongs to only one of two layers.
+ */
+function StateWithUptime({ pill, pct, title }) {
+  const color =
+    pct == null
+      ? "var(--fg-muted)"
+      : pct >= 99
+        ? "var(--success-fg)"
+        : pct >= 90
+          ? "var(--warning-fg)"
+          : "var(--danger-fg)";
+  return (
+    <span className="flex flex-col items-start gap-1">
+      {pill}
+      <span className="text-[11px] tabular-nums" style={{ color }} title={title}>
+        {pct == null ? "no history" : `${pct}%`}
+      </span>
+    </span>
+  );
 }
 
 /**
@@ -462,17 +504,3 @@ function LinkQuality({ sl }) {
   );
 }
 
-function Uptime({ pct }) {
-  if (pct == null) return <span className="text-[12px] text-[var(--fg-muted)]">collecting…</span>;
-  const color = pct >= 99 ? "var(--success-fg)" : pct >= 90 ? "var(--warning-fg)" : "var(--danger-fg)";
-  return (
-    <span className="inline-flex items-center justify-end gap-2">
-      {/* A bar as well as the figure: 97% and 99.9% are hard to tell apart as
-          numbers when you are scanning thirty rows for the bad one. */}
-      <span className="hidden lg:block w-14 h-1.5 rounded-full bg-[var(--bg-surface)] overflow-hidden">
-        <span className="block h-full rounded-full" style={{ width: `${Math.max(0, Math.min(100, pct))}%`, background: color }} />
-      </span>
-      <span className="text-[13px] font-semibold tabular-nums" style={{ color }}>{pct}%</span>
-    </span>
-  );
-}

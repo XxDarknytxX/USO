@@ -94,7 +94,7 @@ function deriveOnline({ telemetryEnabled, tel, ruijieUp, nowMs }) {
 }
 
 /** The per-village Starlink block: live link quality, plus cycle consumption. */
-function buildStarlink({ project, devId, tel, use, nowMs }) {
+function buildStarlink({ project, devId, tel, use, nowMs, uptimePct = null }) {
   const allowance =
     use && use.allowance_gb != null && Number(use.allowance_gb) > 0
       ? Number(use.allowance_gb)
@@ -116,6 +116,9 @@ function buildStarlink({ project, devId, tel, use, nowMs }) {
     uptimeSeconds: numOrNull(tel?.uptime_seconds),
     usedGb: numOrNull(use?.total_used_gb),
     allowanceGb: allowance,
+    // Share of the minutes the poller was listening in which this dish was
+    // heard from. Null when there is no telemetry history to measure against.
+    uptimePct,
   };
 }
 
@@ -738,6 +741,53 @@ export function makeNetworkController(pool) {
         const upByProject = {};
         for (const u of uptimeRows) upByProject[u.project_id] = u;
 
+        // Starlink uptime, from the telemetry the poller has been storing.
+        //
+        // THE DENOMINATOR IS NOT WALL-CLOCK TIME. Measuring a dish against the
+        // whole window would count every minute the poller itself was stopped —
+        // a deploy, a restart, telemetry switched off — as estate-wide
+        // downtime, which is a lie about the dishes. So the denominator is the
+        // minutes in which ANY device reported: proof the poller was alive and
+        // listening. A dish silent through a minute when eight others were
+        // heard from was genuinely silent.
+        //
+        // Minute buckets rather than raw rows, because the poll interval is not
+        // exact and counting rows would let a fast minute compensate for a
+        // missed one.
+        let starlinkUptimeByDevice = {};
+        let pollerMinutes = 0;
+        try {
+          const [[alive]] = await pool.query(
+            `SELECT COUNT(DISTINCT FLOOR(UNIX_TIMESTAMP(recorded_at) / 60)) AS minutes
+               FROM starlink_telemetry
+              WHERE recorded_at >= DATE_SUB(NOW(), INTERVAL ? HOUR)`,
+            [uptimeHours]
+          );
+          pollerMinutes = Number(alive?.minutes || 0);
+          if (pollerMinutes > 0) {
+            const [perDevice] = await pool.query(
+              `SELECT device_id,
+                      COUNT(DISTINCT FLOOR(UNIX_TIMESTAMP(recorded_at) / 60)) AS minutes
+                 FROM starlink_telemetry
+                WHERE recorded_at >= DATE_SUB(NOW(), INTERVAL ? HOUR)
+                GROUP BY device_id`,
+              [uptimeHours]
+            );
+            for (const d of perDevice) {
+              const key = normalizeDeviceId(d.device_id) || d.device_id;
+              // Clamped: a device polled slightly out of step can land in one
+              // more minute bucket than the estate-wide count, which would read
+              // as 101%.
+              starlinkUptimeByDevice[key] = Math.min(
+                100,
+                Math.round((Number(d.minutes) / pollerMinutes) * 1000) / 10
+              );
+            }
+          }
+        } catch {
+          // No telemetry table yet — uptime simply comes back null per village.
+        }
+
         // Starlink telemetry — the newest sample per device, which is what
         // decides whether a village counts as online. One indexed read for the
         // whole estate; no Starlink call is made here, the poller owns that.
@@ -796,7 +846,10 @@ export function makeNetworkController(pool) {
             // which the topology view still needs.
             online: verdict.online,
             onlineSource: verdict.source,
-            starlink: buildStarlink({ project: p, devId, tel, use, nowMs }),
+            starlink: buildStarlink({
+            project: p, devId, tel, use, nowMs,
+            uptimePct: devId ? starlinkUptimeByDevice[devId] ?? null : null,
+          }),
             gatewayOnline: s.gateway_online == null ? null : !!s.gateway_online,
             internetUp: ruijieUp,
             apsOnline: Number(s.aps_online ?? 0),
