@@ -132,7 +132,7 @@ async function getHistoricalStats(pool) {
   return rows;
 }
 
-async function getVoucherList(pool, { page = 1, limit = 10, status, packageName, userGroupId, groupId, groupIds, phone, includeHistorical = false }) {
+async function getVoucherList(pool, { page = 1, limit = 10, status, packageName, userGroupId, groupId, groupIds, phone, includeHistorical = false, soldFrom, soldTo }) {
   const offset = (page - 1) * limit;
   const params = [];
   const where = [];
@@ -152,6 +152,36 @@ async function getVoucherList(pool, { page = 1, limit = 10, status, packageName,
   if (userGroupId) { where.push('v.user_group_id = ?'); params.push(userGroupId); }
   // Search by the M-PAiSA payer phone bound from portal_audit_logs (see phoneJoin).
   if (phone) { where.push('ph.payer_phone LIKE ?'); params.push(`%${phone}%`); }
+
+  // SOLD WITHIN A WINDOW — the exact vouchers behind a dashboard figure.
+  //
+  // The vouchers table records when a voucher was GENERATED, not when it was
+  // bought, so it cannot answer "what was sold in September" on its own. The
+  // purchase date lives in the audit log, so the codes are resolved from there
+  // and the list is narrowed to them. That makes the drill-down show the very
+  // vouchers the total was summed from, rather than every voucher that happens
+  // to share the plan.
+  //
+  // A window that sold nothing yields an impossible predicate rather than no
+  // predicate: dropping it would silently widen the list to everything, which
+  // is the opposite of what was asked for.
+  if (soldFrom || soldTo) {
+    const sql = [
+      "SELECT DISTINCT voucher_code FROM portal_audit_logs",
+      "WHERE event_type = 'voucher_claimed' AND voucher_code IS NOT NULL",
+    ];
+    const sp = [];
+    if (soldFrom) { sql.push('AND event_timestamp >= ?'); sp.push(soldFrom); }
+    if (soldTo) { sql.push('AND event_timestamp < ?'); sp.push(soldTo); }
+    const [codeRows] = await pool.query(sql.join(' '), sp);
+    const codes = codeRows.map((r) => r.voucher_code).filter(Boolean);
+    if (codes.length) {
+      where.push(`v.voucher_code IN (${codes.map(() => '?').join(',')})`);
+      params.push(...codes);
+    } else {
+      where.push('1 = 0');
+    }
+  }
 
   const whereClause = where.length ? `WHERE ${where.join(' AND ')}` : '';
   const tableName = includeHistorical ? 'vouchers_combined' : 'vouchers';
@@ -717,7 +747,7 @@ export function makeVoucherController(pool) {
 
     getVouchers: async (req, res) => {
       try {
-        const { page, limit, status, packageName, userGroupId, includeHistorical, groupId, groupIds, phone } = req.query;
+        const { page, limit, status, packageName, userGroupId, includeHistorical, groupId, groupIds, phone, soldFrom, soldTo } = req.query;
         const scope = req.scope || { isViewer: false };
         const pg = parseInt(page) || 1;
         const lim = parseInt(limit) || 10;
@@ -741,6 +771,7 @@ export function makeVoucherController(pool) {
         const result = await getVoucherList(pool, {
           page: pg, limit: lim,
           status, packageName, userGroupId, groupId: effGroupId, groupIds: effGroupIds, phone,
+          soldFrom, soldTo,
           includeHistorical: effIncludeHistorical,
         });
         return send.ok(res, result);

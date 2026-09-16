@@ -77,10 +77,22 @@ export default function SiteDashboard({ groupId, site }) {
   // itself to the village in the switcher, so only the plan has to travel —
   // and it arrives as a filter the operator can see and widen, rather than a
   // hidden query they cannot undo.
-  const openPlanVouchers = useCallback(
-    (plan) => navigate(`/vouchers?package=${encodeURIComponent(plan.name)}`),
-    [navigate]
+  // Carries the WINDOW as well as the plan, so the list shows the exact
+  // vouchers the figure was summed from rather than every voucher that happens
+  // to share the plan name. The server resolves which codes those are from the
+  // audit log, because the vouchers table records when a voucher was generated,
+  // not when it was bought.
+  const openVouchers = useCallback(
+    (plan) => {
+      const q = new URLSearchParams();
+      if (plan?.name) q.set("package", plan.name);
+      if (mb.fromDate) q.set("soldFrom", mb.fromDate);
+      if (mb.toDate) q.set("soldTo", mb.toDate);
+      navigate(`/vouchers?${q.toString()}`);
+    },
+    [navigate, mb.fromDate, mb.toDate]
   );
+  const openPlanVouchers = openVouchers;
 
   const load = useCallback(
     async (isRefresh = false) => {
@@ -326,7 +338,7 @@ export default function SiteDashboard({ groupId, site }) {
               ? `${fmtNum(purchased.sales)} sale${purchased.sales === 1 ? "" : "s"} · ${mb.label || "this month"}`
               : `nothing sold · ${mb.label || "this month"}`
           }
-          onClick={() => navigate("/vouchers")}
+          onClick={() => openVouchers(null)}
         />
       </KpiGrid>
 

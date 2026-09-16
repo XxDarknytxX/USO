@@ -99,6 +99,11 @@ export default function VouchersPage() {
   // control rather than as a hidden query, so the operator can see why the list
   // is narrowed and widen it.
   const [packageFilter, setPackageFilter] = useState(() => searchParams.get("package") || "");
+  // The sold-window a dashboard drilled in with. Held as state so the banner
+  // below can show it and offer to clear it — an invisible filter that silently
+  // shrinks a list is how someone concludes vouchers are missing.
+  const [soldFrom, setSoldFrom] = useState(() => searchParams.get("soldFrom") || "");
+  const [soldTo, setSoldTo] = useState(() => searchParams.get("soldTo") || "");
   const [phoneInput, setPhoneInput] = useState("");
   const [phoneFilter, setPhoneFilter] = useState("");
   const [packages, setPackages] = useState([]);
@@ -133,6 +138,8 @@ export default function VouchersPage() {
       const params = { page: String(page), limit: String(limit), ...scopeParams };
       if (statusFilter) params.status = statusFilter;
       if (packageFilter) params.packageName = packageFilter;
+      if (soldFrom) params.soldFrom = soldFrom;
+      if (soldTo) params.soldTo = soldTo;
 
       let data;
       if (searchQuery.trim()) {
@@ -152,7 +159,7 @@ export default function VouchersPage() {
     } finally {
       setLoading(false);
     }
-  }, [page, limit, statusFilter, packageFilter, searchQuery, phoneFilter, viewMode, scopeParams]);
+  }, [page, limit, statusFilter, packageFilter, searchQuery, phoneFilter, viewMode, scopeParams, soldFrom, soldTo]);
 
   useEffect(() => {
     fetchVouchers();
@@ -334,6 +341,28 @@ export default function VouchersPage() {
       </KpiGrid>
 
       {/* ----- Filters ----- */}
+      {/* A drilled-in window narrows this list to the vouchers sold in it —
+          which is the point, but silently is how someone decides vouchers have
+          gone missing. Say it, and offer the way out. */}
+      {(soldFrom || soldTo) && (
+        <div className="flex flex-wrap items-center gap-3 rounded-xl border border-[var(--info-border,var(--border-default))] bg-[var(--bg-elevated)] px-4 py-2.5">
+          <span className="text-[13px] text-[var(--fg-primary)]">
+            Showing only vouchers <strong>sold</strong>
+            {soldFrom ? ` from ${new Date(soldFrom).toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" })}` : ""}
+            {soldTo ? ` to ${new Date(new Date(soldTo).getTime() - 1).toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" })}` : ""}
+            {packageFilter ? ` on ${packageFilter}` : ""}.
+          </span>
+          <Button
+            variant="secondary"
+            size="xs"
+            className="ml-auto"
+            onClick={() => { setSoldFrom(""); setSoldTo(""); setPage(1); }}
+          >
+            Show all vouchers
+          </Button>
+        </div>
+      )}
+
       <Toolbar>
         <SearchInput
           value={searchInput}
