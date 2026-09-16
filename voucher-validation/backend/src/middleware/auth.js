@@ -70,11 +70,32 @@ export function requireNotViewer(req, res, next) {
   next();
 }
 
-// Maintenance: admins and engineers. Engineers are scoped to nothing else.
-export function requireMaintainer(req, res, next) {
+/**
+ * Maintenance access, decided by what the request DOES.
+ *
+ *   read  (GET, HEAD)  — admin, engineer, viewer
+ *   write (everything else) — admin, engineer
+ *
+ * Viewers may look at the maintenance record — schedules, filed reports, site
+ * photos — for the villages they can see, but may not start, edit, photograph
+ * or file anything.
+ *
+ * Gated on the METHOD rather than listed route by route on purpose. A list of
+ * write routes is a list someone forgets to update: the next endpoint added
+ * would be open to viewers by default. Keyed on the method, a new POST is
+ * closed to them unless someone deliberately says otherwise.
+ */
+const MAINTENANCE_READERS = new Set(["admin", "engineer", "viewer"]);
+const MAINTENANCE_WRITERS = new Set(["admin", "engineer"]);
+
+export function requireMaintenanceAccess(req, res, next) {
   const role = req.user?.role;
-  if (role !== "admin" && role !== "engineer") {
-    return res.status(403).json({ error: "Maintenance access required" });
+  const reading = req.method === "GET" || req.method === "HEAD";
+  const allowed = reading ? MAINTENANCE_READERS : MAINTENANCE_WRITERS;
+  if (!allowed.has(role)) {
+    return res.status(403).json({
+      error: reading ? "Maintenance access required" : "Your account can view maintenance but not change it",
+    });
   }
   next();
 }

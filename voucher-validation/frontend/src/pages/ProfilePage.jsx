@@ -115,11 +115,14 @@ export default function ProfilePage() {
   const initial = displayName[0].toUpperCase();
   const roleLabel = role ? role.charAt(0).toUpperCase() + role.slice(1) : "User";
   const RoleIcon = isAdmin ? Shield : isEngineer ? Wrench : Eye;
+  // Stale twice over until now: engineers have not been "maintenance only" since
+  // they gained the dashboard, and scope is the estate default, not a per-person
+  // assignment.
   const roleBlurb = isAdmin
     ? "Full administrative access to every village, setting and account."
     : isEngineer
-      ? "Files maintenance reports for any village; nothing else in the console."
-      : "Read-only access to the villages an administrator has assigned to you.";
+      ? "The dashboard, overview and maintenance for the estate's villages — and you can file maintenance reports."
+      : "Read-only access to the dashboard, overview and maintenance record for the estate's villages.";
 
   return (
     <PageShell width="narrow">

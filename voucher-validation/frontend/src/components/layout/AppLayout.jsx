@@ -9,7 +9,7 @@ import { NavLink, Outlet, useNavigate, useLocation } from "react-router-dom";
 import { useState, useEffect, useRef } from "react";
 import { Toaster } from "react-hot-toast";
 import {
-  LayoutDashboard, Gauge, Network, Ticket, History, RefreshCw, Globe,
+  LayoutDashboard, Gauge, Network, Ticket, Receipt, History, RefreshCw, Globe,
   FileText, GitBranch, Users, Settings, Menu, X, ChevronLeft, ChevronRight,
   ChevronDown, LogOut, Shield, Eye, LifeBuoy, UserCircle, Wallet,
   Wrench, Sun, Moon, Server,
@@ -41,13 +41,16 @@ const navSections = [
       { to: "/dashboard", label: "Dashboard", Icon: LayoutDashboard, end: true, viewerOk: true, engineerOk: true },
       { to: "/overview", label: "Overview", Icon: Gauge, viewerOk: true, engineerOk: true },
       { to: "/network", label: "Network", Icon: Network },
-      { to: "/maintenance", label: "Maintenance", Icon: Wrench, engineerOk: true },
+      // Viewers read the maintenance record; engineers and admins also file it.
+      { to: "/maintenance", label: "Maintenance", Icon: Wrench, viewerOk: true, engineerOk: true },
     ],
   },
   {
     title: "Vouchers",
     items: [
       { to: "/vouchers", label: "Vouchers", Icon: Ticket },
+      // Admin only: no viewerOk / engineerOk, so the role filter drops it.
+      { to: "/billing", label: "Billing", Icon: Receipt },
       { to: "/activity", label: "Activity", Icon: History },
     ],
   },

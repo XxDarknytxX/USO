@@ -289,6 +289,7 @@ export default function VillageProfilePage() {
           documents={data?.documents || []}
           categories={data?.documentCategories || []}
           isAdmin={isAdmin}
+          canUpload={canService}
           onChanged={load}
           uploadOpen={uploadOpen}
           setUploadOpen={setUploadOpen}
@@ -668,7 +669,7 @@ function ServiceComponentModal({ component: c, projectId, onClose, onChanged, on
   );
 }
 
-function DocumentsTab({ projectId, documents, categories, isAdmin, onChanged, uploadOpen, setUploadOpen }) {
+function DocumentsTab({ projectId, documents, categories, isAdmin, canUpload, onChanged, uploadOpen, setUploadOpen }) {
   const grouped = useMemo(() => {
     const m = {};
     for (const d of documents) (m[d.category] ||= []).push(d);
@@ -697,14 +698,26 @@ function DocumentsTab({ projectId, documents, categories, isAdmin, onChanged, up
         subtitle="Handover packs, as-builts, warranties and permits — the paperwork that belongs to the village rather than to any one visit."
         icon={<FileText size={15} />}
         tone="navy"
+        // Viewers read site paperwork but cannot add to it — the server refuses
+        // the upload, so the button is not offered.
         actions={
-          <Button variant="primary" size="sm" onClick={() => setUploadOpen(true)} iconLeft={<Upload size={14} />}>
-            Upload document
-          </Button>
+          canUpload ? (
+            <Button variant="primary" size="sm" onClick={() => setUploadOpen(true)} iconLeft={<Upload size={14} />}>
+              Upload document
+            </Button>
+          ) : null
         }
       >
         {documents.length === 0 ? (
-          <EmptyState icon={FileText} title="No documents yet" description="Upload the handover pack, as-built drawings, warranties or permits for this village." />
+          <EmptyState
+            icon={FileText}
+            title="No documents yet"
+            description={
+              canUpload
+                ? "Upload the handover pack, as-built drawings, warranties or permits for this village."
+                : "Nothing has been filed for this village yet."
+            }
+          />
         ) : (
           /* Grouped by category rather than listed flat: the paperwork is looked
              for by kind ("where is the handover pack"), never by date. */

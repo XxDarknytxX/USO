@@ -22,6 +22,7 @@ const ManualAssistancePage = lazy(() => import("./pages/ManualAssistancePage"));
 const ProfilePage = lazy(() => import("./pages/ProfilePage"));
 const MpaisaMappingPage = lazy(() => import("./pages/MpaisaMappingPage"));
 const MaintenancePage = lazy(() => import("./pages/MaintenancePage"));
+const BillingPage = lazy(() => import("./pages/BillingPage"));
 const VillageProfilePage = lazy(() => import("./pages/VillageProfilePage"));
 
 function ProtectedRoute({ children }) {
@@ -33,9 +34,11 @@ function AdminRoute({ children }) {
   return getAuthRole() === "admin" ? children : <Navigate to="/dashboard" replace />;
 }
 
+// Every role reaches Maintenance: admins and engineers to work in it, viewers to
+// read it. What each may DO is enforced on the server by HTTP method.
 function MaintenanceRoute({ children }) {
   const role = getAuthRole();
-  return role === "admin" || role === "engineer" ? children : <Navigate to="/dashboard" replace />;
+  return ["admin", "engineer", "viewer"].includes(role) ? children : <Navigate to="/dashboard" replace />;
 }
 
 // The monitoring pages: every signed-in role reaches them, and the SERVER
@@ -81,6 +84,7 @@ export default function App() {
             {/* Profile: every signed-in user (incl. viewers) — not admin-gated. */}
             <Route path="/profile" element={<ProfilePage />} />
             <Route path="/mpaisa" element={<AdminRoute><MpaisaMappingPage /></AdminRoute>} />
+            <Route path="/billing" element={<AdminRoute><BillingPage /></AdminRoute>} />
             {/* Admins and engineers. The server enforces the same pair. */}
             <Route path="/maintenance" element={<MaintenanceRoute><MaintenancePage /></MaintenanceRoute>} />
             <Route path="/maintenance/village/:projectId" element={<MaintenanceRoute><VillageProfilePage /></MaintenanceRoute>} />

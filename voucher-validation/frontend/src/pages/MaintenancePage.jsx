@@ -67,7 +67,7 @@ export default function MaintenancePage() {
   // own list to everyone else. Telling someone who can see two villages of
   // thirty-one that "every village is in window" is a compliance claim they
   // are not in a position to make.
-  const { isAdmin } = useAuth();
+  const { isAdmin, isViewer } = useAuth();
   const navigate = useNavigate();
   // Follow the scope switcher and the "All Villages" set from Settings, the
   // same as Overview and Network. A village deselected there is not part of
@@ -168,7 +168,10 @@ export default function MaintenancePage() {
         title="Maintenance"
         subtitle={
           `${isAdmin ? "Every village" : "Each village assigned to you"} is inspected every ` +
-          `${schedule?.intervalMonths ?? 6} months. Open one to record what you found, component by component.`
+          `${schedule?.intervalMonths ?? 6} months. ` +
+          (isViewer
+            ? "Open one to see what was found, component by component."
+            : "Open one to record what you found, component by component.")
         }
         icon={<Wrench size={22} />}
         tone="orange"

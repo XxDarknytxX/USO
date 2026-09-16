@@ -1,11 +1,11 @@
 // src/routes/maintenance.js
 import { Router } from "express";
-import { requireAuth, requireAdmin, requireMaintainer } from "../middleware/auth.js";
+import { requireAuth, requireAdmin, requireMaintenanceAccess } from "../middleware/auth.js";
 
 export function makeMaintenanceRouter(controller, attachScope) {
   const router = Router();
 
-  // Admins and engineers.
+  // Admins and engineers, and viewers read-only.
   //
   // Engineers are no longer maintenance-only: they also read the dashboard and
   // the all-villages overview, limited to the villages an admin assigned them
@@ -22,7 +22,10 @@ export function makeMaintenanceRouter(controller, attachScope) {
   //
   // Admins are unrestricted, so the admin-only routes below (reopen, document
   // removal) are unaffected by this.
-  router.use(requireAuth, requireMaintainer);
+  // Viewers read; admins and engineers read and write. Decided by HTTP method
+  // in requireMaintenanceAccess, so a write route added here later is closed to
+  // viewers without anyone having to remember.
+  router.use(requireAuth, requireMaintenanceAccess);
   if (attachScope) router.use(attachScope);
 
   // The checklist itself, so the UI never drifts from server validation.
