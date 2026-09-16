@@ -10,12 +10,20 @@ function authHeader() {
   return token ? { Authorization: `Bearer ${token}` } : {};
 }
 
-export async function api(path, { method = "GET", body, auth = true } = {}) {
+/**
+ * `headers` exists for one case: two-factor enrolment during login, which holds
+ * a short-lived setup token that has deliberately NOT been stored as the
+ * session. Passing it explicitly is the only way to use it — anything spread
+ * after the default auth header wins, so the caller's Authorization replaces
+ * the stored one rather than being quietly ignored.
+ */
+export async function api(path, { method = "GET", body, auth = true, headers } = {}) {
   const res = await fetch(`${API_BASE_URL}${path}`, {
     method,
     headers: {
       "Content-Type": "application/json",
       ...(auth ? authHeader() : {}),
+      ...(headers || {}),
     },
     body: body ? JSON.stringify(body) : undefined,
   });

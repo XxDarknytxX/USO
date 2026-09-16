@@ -12,11 +12,13 @@
 
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Mail, Lock, ArrowRight, Eye, EyeOff, ShieldCheck, Wifi, Ticket, Wrench } from "lucide-react";
+import { Mail, Lock, ArrowRight, Eye, EyeOff, ShieldCheck, Wifi, Ticket, Wrench, KeyRound } from "lucide-react";
+import toast from "react-hot-toast";
 
 import { api } from "../services/api";
 import { Field, Input, Button } from "../components/ui";
 import VodafoneLogo from "../components/ui/VodafoneLogo";
+import TwoFactorEnrol from "../components/TwoFactorEnrol";
 
 const HIGHLIGHTS = [
   { Icon: Wifi, title: "Village connectivity", copy: "Live health for every USO site, in one place." },
@@ -27,25 +29,83 @@ const HIGHLIGHTS = [
 export default function Login() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  // "password" | "verify" | "enrol". The whole sign-in lives on this one screen
+  // rather than across routes, because every intermediate state holds a token
+  // that must not outlive the attempt — and a route can be navigated back to.
+  const [stage, setStage] = useState("password");
+  const [tempToken, setTempToken] = useState("");
+  const [setupToken, setSetupToken] = useState("");
+  const [code, setCode] = useState("");
   const [err, setErr] = useState("");
   const [loading, setLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const navigate = useNavigate();
+
+  /**
+   * Stores a finished session. Kept in one place because a token written
+   * without its role leaves the SPA guessing what the account may see.
+   */
+  function completeLogin(token, mustChangePassword) {
+    localStorage.setItem("token", token);
+    try {
+      const payload = JSON.parse(atob(token.split(".")[1]));
+      if (payload.role) localStorage.setItem("role", payload.role);
+    } catch {
+      /* token will still be validated server-side */
+    }
+    navigate(mustChangePassword ? "/profile?changePassword=1" : "/dashboard");
+  }
+
+  async function onVerify(e) {
+    e.preventDefault();
+    setErr("");
+    setLoading(true);
+    try {
+      const r = await api("/2fa/login-verify", {
+        method: "POST",
+        body: { tempToken, code: code.replace(/\s+/g, "") },
+      });
+      if (r.usedBackupCode) {
+        // Said now rather than discovered later: someone down to their last
+        // codes should know while they are still able to generate more.
+        toast(
+          r.backupCodesRemaining === 0
+            ? "That was your last backup code. Set up two-factor again to get a new set."
+            : `Backup code used — ${r.backupCodesRemaining} left.`,
+          { icon: "🔑", duration: 8000 }
+        );
+      }
+      completeLogin(r.token, r.mustChangePassword);
+    } catch (e) {
+      setErr(e.message);
+    } finally {
+      setLoading(false);
+    }
+  }
 
   async function onSubmit(e) {
     e.preventDefault();
     setErr("");
     setLoading(true);
     try {
-      const { token } = await api("/login", { method: "POST", body: { email, password } });
-      localStorage.setItem("token", token);
-      try {
-        const payload = JSON.parse(atob(token.split(".")[1]));
-        if (payload.role) localStorage.setItem("role", payload.role);
-      } catch {
-        /* token will still be validated server-side */
+      const r = await api("/login", { method: "POST", body: { email, password } });
+
+      // Three outcomes, decided entirely by the server. The page never chooses
+      // which one it is in — it only renders what it was told.
+      if (r.requires2FA) {
+        setTempToken(r.tempToken);
+        setStage("verify");
+        return;
       }
-      navigate("/dashboard");
+      if (r.requires2FASetup) {
+        // A setup token. Held in state, NOT written as the session token:
+        // storing it would let the rest of the app treat a half-finished login
+        // as a real one.
+        setSetupToken(r.token);
+        setStage("enrol");
+        return;
+      }
+      completeLogin(r.token, r.mustChangePassword);
     } catch (e) {
       setErr(e.message);
     } finally {
@@ -129,12 +189,69 @@ export default function Login() {
           </div>
 
           <div className="mb-8">
-            <h1 className="text-h1 text-[var(--fg-primary)]">Sign in</h1>
+            <h1 className="text-h1 text-[var(--fg-primary)]">
+              {stage === "verify" ? "Two-factor check" : stage === "enrol" ? "Set up two-factor" : "Sign in"}
+            </h1>
             <p className="text-[13.5px] text-[var(--fg-secondary)] mt-2">
-              Use your Vodafone Fiji account to continue to the operations console.
+              {stage === "verify"
+                ? "Enter the six-digit code from your authenticator app, or one of your backup codes."
+                : stage === "enrol"
+                  ? "This console requires two-factor authentication. It takes a minute and only has to be done once."
+                  : "Use your Vodafone Fiji account to continue to the operations console."}
             </p>
           </div>
 
+          {/* ENROL — the account has no second factor and the estate requires
+              one. Rendered here rather than behind a route because the setup
+              token must not outlive the attempt, and a route can be navigated
+              back to with a stale one. */}
+          {stage === "enrol" && (
+            <TwoFactorEnrol
+              token={setupToken}
+              onDone={(token) => completeLogin(token, false)}
+              onCancel={() => { setStage("password"); setSetupToken(""); setPassword(""); }}
+            />
+          )}
+
+          {/* VERIFY — enrolled already; one code away from a session. */}
+          {stage === "verify" && (
+            <form onSubmit={onVerify} className="flex flex-col gap-5">
+              <Field label="Authentication code" required>
+                <div className="relative">
+                  <KeyRound size={15} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-[var(--fg-muted)] pointer-events-none" />
+                  <Input
+                    value={code}
+                    onChange={(e) => setCode(e.target.value)}
+                    placeholder="123456"
+                    required
+                    autoFocus
+                    // one-time-code lets a phone offer the code from the
+                    // notification instead of making someone switch apps.
+                    autoComplete="one-time-code"
+                    inputMode="text"
+                    className="pl-10 font-mono tracking-[0.2em]"
+                  />
+                </div>
+              </Field>
+              {err && (
+                <p className="text-[13px] text-[var(--danger-fg)] bg-[var(--danger-soft)] border border-[var(--danger-border)] rounded-lg px-3.5 py-2.5">
+                  {err}
+                </p>
+              )}
+              <Button type="submit" loading={loading} iconRight={!loading && <ArrowRight size={16} />}>
+                Verify
+              </Button>
+              <button
+                type="button"
+                onClick={() => { setStage("password"); setTempToken(""); setCode(""); setErr(""); }}
+                className="text-[12.5px] text-[var(--fg-muted)] hover:text-[var(--fg-primary)] transition-colors"
+              >
+                Use a different account
+              </button>
+            </form>
+          )}
+
+          {stage === "password" && (
           <form onSubmit={onSubmit} className="flex flex-col gap-5">
             <Field label="Email" required>
               <div className="relative">
@@ -196,6 +313,7 @@ export default function Login() {
               {loading ? "Signing in…" : "Sign in"}
             </Button>
           </form>
+          )}
 
           <div className="mt-8 pt-6 border-t border-[var(--border-subtle)] flex items-center justify-center gap-2 text-[11.5px] text-[var(--fg-muted)]">
             <ShieldCheck size={13} />

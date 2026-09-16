@@ -75,7 +75,10 @@ async function sendAccountMail(pool, user, kind, { password } = {}) {
   try {
     const smtp = await loadSmtpTransport(pool);
     if (!smtp) return { sent: false, error: "SMTP is not configured in Settings" };
-    const url = process.env.CONSOLE_URL || process.env.APP_URL || "the operations console";
+    // Falls back to the live console rather than to prose: a welcome mail whose
+    // "sign in at" line reads "the operations console" is a mail that cannot be
+    // acted on. CONSOLE_URL overrides it for staging.
+    const url = process.env.CONSOLE_URL || process.env.APP_URL || "https://admin.vodafonefiji.cloud";
     const args = { name: user.name, email: user.email, password, url };
     const mail =
       kind === "onboarding" ? buildOnboarding(args)

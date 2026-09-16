@@ -23,14 +23,25 @@ import crypto from "node:crypto";
 
 export const ISSUER = "Vodafone Fiji USO";
 
-/** Global enforcement, owned by an admin in Settings. Absent means off. */
+/**
+ * Global enforcement, owned by an admin in Settings.
+ *
+ * DEFAULTS TO ON. An absent row means the setting has never been touched, and
+ * for a console that can move money and read customer data the safe reading of
+ * "nobody has decided yet" is the strict one. An admin can turn it off in
+ * Settings; the absence of a decision is not consent to run without it.
+ *
+ * Only a read failure returns false, and only so a database hiccup locks
+ * nobody out of their own console.
+ */
 export async function isTwoFactorRequired(pool) {
   try {
     const [rows] = await pool.query(
       "SELECT setting_value FROM app_settings WHERE setting_key = 'require_2fa'"
     );
     const v = rows[0]?.setting_value;
-    return v != null && (String(v).toLowerCase() === "true" || String(v) === "1");
+    if (v == null) return true;
+    return String(v).toLowerCase() === "true" || String(v) === "1";
   } catch {
     return false;
   }
