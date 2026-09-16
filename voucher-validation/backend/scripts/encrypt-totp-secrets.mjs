@@ -62,14 +62,28 @@ for (const r of rows) {
 
   const wrapped = seal(plain);
   if (apply) {
-    // Guarded on the value we read, so a sign-in that re-sealed the row
-    // underneath us is not overwritten with a stale read.
-    const [res] = await pool.query(
-      "UPDATE users SET totp_secret = ? WHERE id = ? AND totp_secret = ?",
-      [wrapped, r.id, r.totp_secret]
-    );
-    if (res.affectedRows !== 1) {
-      problems.push(`  #${r.id} ${r.email}: changed while running, left alone — run again`);
+    try {
+      // Guarded on the value we read, so a sign-in that re-sealed the row
+      // underneath us is not overwritten with a stale read.
+      const [res] = await pool.query(
+        "UPDATE users SET totp_secret = ? WHERE id = ? AND totp_secret = ?",
+        [wrapped, r.id, r.totp_secret]
+      );
+      if (res.affectedRows !== 1) {
+        problems.push(`  #${r.id} ${r.email}: changed while running, left alone — run again`);
+        continue;
+      }
+    } catch (e) {
+      // One bad row must not abandon the rest half-done. The most likely
+      // cause is a totp_secret column still too narrow for the envelope,
+      // which a restart applies the migration for.
+      failed++;
+      problems.push(
+        `  #${r.id} ${r.email}: ${e.code === "ER_DATA_TOO_LONG"
+          ? "the totp_secret column is too narrow for an encrypted value — " +
+            "restart the backend so the widening migration runs, then try again"
+          : e.message}`
+      );
       continue;
     }
   }

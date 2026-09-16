@@ -43,6 +43,14 @@ export async function getPool() {
     // Backup codes are bcrypt hashes, never the codes themselves: a leaked
     // database should not hand over a way past 2FA.
     `ALTER TABLE users ADD COLUMN totp_secret VARCHAR(64) NULL`,
+    // Widened for the encryption envelope. VARCHAR(64) fitted a bare 32-char
+    // base32 secret exactly and nothing else; sealed, the same secret is ~98
+    // characters (prefix + key id + nonce + tag + ciphertext, all base64), and
+    // MySQL refuses the write outright — which is how this was found, on a
+    // production migration. 255 leaves room for a longer secret or a future
+    // envelope without a second round of this.
+    // MODIFY, not ADD, so it also widens a column the line above created.
+    `ALTER TABLE users MODIFY COLUMN totp_secret VARCHAR(255) NULL`,
     `ALTER TABLE users ADD COLUMN totp_enabled BOOLEAN NOT NULL DEFAULT 0`,
     `ALTER TABLE users ADD COLUMN totp_backup_codes JSON NULL`,
     `ALTER TABLE users ADD COLUMN totp_enrolled_at TIMESTAMP NULL`,
