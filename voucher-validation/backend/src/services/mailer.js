@@ -728,3 +728,96 @@ export function renderTemplate(id) {
       return buildConnectionTest();
   }
 }
+
+
+/* ══════════════════════════ Account emails ══════════════════════════
+ * Onboarding, password reset and 2FA reset. All three hand someone a way into
+ * the console, so all three say plainly what to do with it and that it must be
+ * changed — a temporary credential nobody is told to replace is a permanent
+ * one.
+ *
+ * Deliberately plain: an operations console mail that looks like marketing is
+ * the kind people learn to ignore, and these are the ones they must not.
+ */
+
+function accountShell(title, lead, blocks, footer) {
+  const rows = blocks
+    .map(
+      (b) => `<tr><td style="padding:10px 0;border-bottom:1px solid #eceff1;">
+        <div style="font-size:12px;color:#6b7580;text-transform:uppercase;letter-spacing:.06em;">${b.label}</div>
+        <div style="font-size:${b.mono ? "18px" : "15px"};color:#11161b;font-weight:600;${b.mono ? "font-family:ui-monospace,SFMono-Regular,Menlo,monospace;letter-spacing:.04em;" : ""}margin-top:4px;">${b.value}</div>
+      </td></tr>`
+    )
+    .join("");
+  return `<!doctype html><html><body style="margin:0;background:#f4f6f8;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;">
+  <table width="100%" cellpadding="0" cellspacing="0"><tr><td align="center" style="padding:28px 16px;">
+    <table width="100%" style="max-width:520px;background:#ffffff;border-radius:14px;overflow:hidden;border:1px solid #e3e7ea;">
+      <tr><td style="background:#e60000;padding:18px 24px;">
+        <div style="color:#fff;font-size:16px;font-weight:700;">Vodafone Fiji</div>
+        <div style="color:#ffd9d9;font-size:12px;margin-top:2px;">Universal Service Obligation \u00b7 Operations console</div>
+      </td></tr>
+      <tr><td style="padding:24px;">
+        <h1 style="margin:0 0 8px;font-size:19px;color:#11161b;">${title}</h1>
+        <p style="margin:0 0 18px;font-size:14px;line-height:1.55;color:#4a5560;">${lead}</p>
+        <table width="100%" cellpadding="0" cellspacing="0">${rows}</table>
+        <p style="margin:18px 0 0;font-size:13px;line-height:1.55;color:#4a5560;">${footer}</p>
+      </td></tr>
+      <tr><td style="padding:14px 24px;background:#fafbfc;color:#8a929b;font-size:11px;">
+        This is an automated message from the USO operations console. If you were not expecting it, tell your administrator.
+      </td></tr>
+    </table>
+  </td></tr></table></body></html>`;
+}
+
+export function buildOnboarding({ name, email, password, url }) {
+  const subject = "Your Vodafone Fiji USO console account";
+  const footer =
+    "You will be asked to set your own password the first time you sign in. If two-factor authentication is switched on, you will also be walked through setting it up.";
+  return {
+    subject,
+    text: `An account has been created for you on the Vodafone Fiji USO operations console.\n\nSign in at: ${url}\nEmail: ${email}\nTemporary password: ${password}\n\nYou will be asked to change this password when you first sign in.`,
+    html: accountShell(
+      `Welcome${name ? `, ${name}` : ""}`,
+      "An account has been created for you on the USO operations console. Use the temporary password below to sign in.",
+      [
+        { label: "Sign in at", value: url },
+        { label: "Email", value: email },
+        { label: "Temporary password", value: password, mono: true },
+      ],
+      footer
+    ),
+  };
+}
+
+export function buildPasswordReset({ name, email, password, url }) {
+  return {
+    subject: "Your USO console password has been reset",
+    text: `Your password for the Vodafone Fiji USO operations console has been reset by an administrator.\n\nSign in at: ${url}\nEmail: ${email}\nTemporary password: ${password}\n\nYou will be asked to set a new password when you sign in. If you did not ask for this, contact your administrator now.`,
+    html: accountShell(
+      "Your password has been reset",
+      `An administrator reset the password on this account${name ? ` for ${name}` : ""}. Use the temporary password below, then set your own.`,
+      [
+        { label: "Sign in at", value: url },
+        { label: "Email", value: email },
+        { label: "Temporary password", value: password, mono: true },
+      ],
+      "You will be asked to set a new password as soon as you sign in. <strong>If you did not ask for this reset, contact your administrator now</strong> \u2014 someone else may have requested it."
+    ),
+  };
+}
+
+export function buildTwoFactorReset({ name, email, url }) {
+  return {
+    subject: "Two-factor authentication was reset on your USO console account",
+    text: `Two-factor authentication has been reset on your Vodafone Fiji USO console account.\n\nThe next time you sign in at ${url} you will be asked to set it up again with your authenticator app. Your old codes and backup codes no longer work.\n\nIf you did not ask for this, contact your administrator now.`,
+    html: accountShell(
+      "Two-factor authentication was reset",
+      `An administrator reset two-factor authentication on this account${name ? ` for ${name}` : ""}. Your previous authenticator entry and backup codes no longer work.`,
+      [
+        { label: "Sign in at", value: url },
+        { label: "Email", value: email },
+      ],
+      "You will be asked to set up your authenticator app again the next time you sign in. <strong>If you did not ask for this, contact your administrator now.</strong>"
+    ),
+  };
+}

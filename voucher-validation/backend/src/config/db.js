@@ -35,6 +35,24 @@ export async function getPool() {
     // 'engineer' = field contractor: files maintenance reports, nothing else.
     // MODIFY (not ADD) so it also widens an enum created by the line above.
     `ALTER TABLE users MODIFY COLUMN role ENUM('admin','viewer','engineer') NOT NULL DEFAULT 'viewer'`,
+
+    // TWO-FACTOR AUTHENTICATION.
+    // The secret is stored the moment setup begins but 2FA is NOT enabled until
+    // a code from the authenticator proves the user actually scanned it —
+    // otherwise a half-finished setup locks the account out of its own login.
+    // Backup codes are bcrypt hashes, never the codes themselves: a leaked
+    // database should not hand over a way past 2FA.
+    `ALTER TABLE users ADD COLUMN totp_secret VARCHAR(64) NULL`,
+    `ALTER TABLE users ADD COLUMN totp_enabled BOOLEAN NOT NULL DEFAULT 0`,
+    `ALTER TABLE users ADD COLUMN totp_backup_codes JSON NULL`,
+    `ALTER TABLE users ADD COLUMN totp_enrolled_at TIMESTAMP NULL`,
+
+    // Password lifecycle. must_change_password is what makes an onboarding or
+    // reset mail safe to send: the temporary credential in it is single-use in
+    // practice, because the first thing the account can do is change it.
+    `ALTER TABLE users ADD COLUMN must_change_password BOOLEAN NOT NULL DEFAULT 0`,
+    `ALTER TABLE users ADD COLUMN password_changed_at TIMESTAMP NULL`,
+    `ALTER TABLE users ADD COLUMN last_login_at TIMESTAMP NULL`,
   ];
   for (const sql of migrations) {
     try { await pool.query(sql); console.log(`Migration OK: ${sql.slice(0, 60)}...`); }

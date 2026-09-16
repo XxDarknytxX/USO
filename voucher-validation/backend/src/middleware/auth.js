@@ -7,7 +7,40 @@ export function requireAuth(req, res, next) {
   if (!token) return res.status(401).json({ error: "Missing token" });
 
   try {
-    req.user = jwt.verify(token, process.env.JWT_SECRET); // { id, email, role }
+    const claims = jwt.verify(token, process.env.JWT_SECRET); // { id, email, role }
+    // A half-finished login is not a login. These tokens exist only to be
+    // exchanged — pending2FA for a code, pending2FASetup for enrolment — and
+    // must not open anything else, or the second factor is decorative.
+    if (claims.pending2FA || claims.pending2FASetup) {
+      return res.status(403).json({
+        error: claims.pending2FA
+          ? "Two-factor verification required"
+          : "Two-factor setup required",
+        requires2FA: !!claims.pending2FA,
+        requires2FASetup: !!claims.pending2FASetup,
+      });
+    }
+    req.user = claims;
+    next();
+  } catch {
+    return res.status(401).json({ error: "Invalid or expired token" });
+  }
+}
+
+/**
+ * For the enrolment endpoints only: accepts the short-lived setup token as well
+ * as a full one, so somebody who has been told to turn 2FA on can actually
+ * reach the page that turns it on. Still rejects a pending2FA token, which has
+ * a different job.
+ */
+export function requireAuthAllowing2FASetup(req, res, next) {
+  const header = req.headers.authorization || "";
+  const token = header.startsWith("Bearer ") ? header.slice(7) : null;
+  if (!token) return res.status(401).json({ error: "Missing token" });
+  try {
+    const claims = jwt.verify(token, process.env.JWT_SECRET);
+    if (claims.pending2FA) return res.status(403).json({ error: "Two-factor verification required" });
+    req.user = claims;
     next();
   } catch {
     return res.status(401).json({ error: "Invalid or expired token" });

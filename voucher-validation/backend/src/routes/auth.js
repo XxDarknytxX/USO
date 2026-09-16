@@ -1,7 +1,7 @@
 // src/routes/auth.js
 import { Router } from "express";
 import { body } from "express-validator";
-import { requireAuth, requireAdmin } from "../middleware/auth.js";
+import { requireAuth, requireAdmin, requireAuthAllowing2FASetup } from "../middleware/auth.js";
 
 export function makeAuthRouter(controller) {
   const router = Router();
@@ -29,6 +29,29 @@ export function makeAuthRouter(controller) {
     ],
     controller.login
   );
+
+  /* ── Two-factor ───────────────────────────────────────────────────────
+     login-verify is UNAUTHENTICATED by design: the caller holds only a
+     pending2FA token, which requireAuth rejects on purpose. The token itself
+     is the credential and is verified inside the handler. */
+  router.post("/2fa/login-verify", controller.loginVerify2FA);
+
+  // Enrolment accepts the short-lived setup token as well as a full one, so a
+  // user told to turn 2FA on can reach the endpoints that turn it on.
+  router.post("/2fa/setup", requireAuthAllowing2FASetup, controller.setup2FA);
+  router.post("/2fa/verify", requireAuthAllowing2FASetup, controller.verify2FA);
+  router.get("/2fa/status", requireAuth, controller.twoFactorStatus);
+  // Disabling needs a FULL session — a setup token must never be able to.
+  router.post("/2fa/disable", requireAuth, controller.disable2FA);
+
+  // The estate-wide switch.
+  router.get("/2fa/policy", requireAuth, requireAdmin, controller.getTwoFactorPolicy);
+  router.put("/2fa/policy", requireAuth, requireAdmin, controller.setTwoFactorPolicy);
+
+  // Changing your own password. Allows the setup token too: an account on a
+  // temporary password under a 2FA-required policy would otherwise have no way
+  // to change it before enrolling.
+  router.post("/me/password", requireAuthAllowing2FASetup, controller.changeOwnPassword  );
 
   router.get("/me", requireAuth, controller.me);
   // Per-user UI preferences — synced across the user's devices.

@@ -13,6 +13,12 @@ export function makeUserRouter(controller) {
   // GET /api/users
   router.get("/", controller.listUsers);
 
+  // Admin rescue. All three change the account first and report whether the
+  // mail went, rather than failing the whole request when SMTP is down.
+  router.post("/:id/reset-password", controller.resetUserPassword);
+  router.post("/:id/reset-2fa", controller.resetUserTwoFactor);
+  router.post("/:id/resend-onboarding", controller.resendOnboarding);
+
   // POST /api/users
   router.post(
     "/",
