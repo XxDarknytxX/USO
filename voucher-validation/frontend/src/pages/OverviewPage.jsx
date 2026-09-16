@@ -20,6 +20,7 @@ import {
   PageHeader,
   KpiGrid,
   StatCard,
+  MeterCard,
   Panel,
   Button,
   Toolbar,
@@ -34,13 +35,6 @@ import {
 } from "../components/ui";
 import { useSite } from "../hooks/useSite";
 
-const fmtBytes = (b) => {
-  if (b == null) return "—";
-  const u = ["B", "KB", "MB", "GB", "TB"];
-  let n = Number(b), i = 0;
-  while (n >= 1024 && i < u.length - 1) { n /= 1024; i++; }
-  return `${n.toFixed(n >= 10 || i === 0 ? 0 : 1)} ${u[i]}`;
-};
 const timeAgo = (ts) => {
   if (!ts) return "never";
   const s = Math.max(0, (Date.now() - new Date(ts).getTime()) / 1000);
@@ -130,6 +124,19 @@ export default function OverviewPage() {
         apsTotal: sum((v) => v.apsTotal),
         clients: sum((v) => v.clients),
         usageBytes: sum((v) => v.usageBytes),
+        // Computed from the scoped subset like everything else here, NOT taken
+        // from the server summary — otherwise the meter would keep reporting
+        // the whole estate while every figure beside it followed the scope.
+        starlinkUsedGb: sum((v) => v.starlink?.usedGb),
+        // Villages Starlink publishes no cap for are SKIPPED rather than added
+        // as zero: counting them would inflate the denominator's credibility
+        // and make the estate look further from its limit than it is. Null when
+        // nothing in scope has a cap, so the card says so instead of showing a
+        // meter against nothing.
+        starlinkAllowanceGb: sites.some((v) => v.starlink?.allowanceGb != null)
+          ? sum((v) => v.starlink?.allowanceGb)
+          : null,
+        villagesWithTelemetry: sites.filter((v) => v.starlink?.configured).length,
       }
     : null;
 
@@ -203,12 +210,27 @@ export default function OverviewPage() {
           color="indigo"
           sub="connected right now"
         />
-        <StatCard
+        {/* Starlink data for the cycle, against the plan. Replaced a Ruijie
+            "usage today" byte counter: the dish meters the actual backhaul and
+            is the figure the villages are billed on, and unlike the Ruijie
+            number it still works where a gateway does not report flow.
+            The allowance total deliberately skips villages Starlink publishes
+            no cap for rather than counting them as zero, which would make the
+            estate look closer to its limit than it is. */}
+        <MeterCard
           icon={<Activity size={18} />}
-          label="Usage today"
-          value={s ? fmtBytes(s.usageBytes) : "—"}
+          label="Starlink data · this cycle"
+          used={s?.starlinkUsedGb ?? 0}
+          total={s?.starlinkAllowanceGb ?? null}
+          unit="GB"
+          format={(n) => Math.round(Number(n || 0)).toLocaleString()}
           color="violet"
-          sub="all villages combined"
+          sub={
+            s?.villagesWithTelemetry != null
+              ? `across ${s.villagesWithTelemetry} linked ${s.villagesWithTelemetry === 1 ? "kit" : "kits"}`
+              : "all villages combined"
+          }
+          noTotalNote="Starlink publishes no plan cap"
         />
       </KpiGrid>
 

@@ -19,7 +19,7 @@ export {
 /* --- Service Desk primitives (dashboards + reskin) --- */
 export { default as PageHeader, SectionHeader } from "./PageHeader";
 export { default as Tabs } from "./Tabs";
-export { GlassCard, StatCard, Panel, ObjectTile, TILE_TONES } from "./StatCard";
+export { GlassCard, StatCard, MeterCard, Panel, ObjectTile, TILE_TONES } from "./StatCard";
 export {
   default as Skeleton,
   SkeletonText,
