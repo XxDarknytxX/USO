@@ -90,7 +90,15 @@ function KitFact({ label, children }) {
   );
 }
 
-export default function StarlinkPanel({ projectId }) {
+/**
+ * `compact` is for the half-width slot beside the link-quality charts: the kit
+ * identifiers drop out of the header and the plot loses a third of its height,
+ * because at ~540px the three reference facts wrap into a block taller than
+ * the figure they sit beside. Nothing is lost — the service line and device id
+ * are reference detail, available under Network, and not what anyone opens this
+ * panel to read.
+ */
+export default function StarlinkPanel({ projectId, compact = false }) {
   const [data, setData] = useState(null);
   const [cycle, setCycle] = useState("A");
   const [loading, setLoading] = useState(true);
@@ -148,7 +156,7 @@ export default function StarlinkPanel({ projectId }) {
         value={t ? gb1(t.totalUsed) : "—"}
         unit="GB used"
         caption={dateRange(data?.cycle) || "This billing cycle"}
-        right={
+        right={compact ? null : (
           <div className="grid grid-cols-2 sm:flex sm:items-end gap-4 sm:gap-7">
             <KitFact label="Service line">
               <span className="font-mono text-[11.5px]">{kit.serviceLineNumber || "—"}</span>
@@ -162,7 +170,7 @@ export default function StarlinkPanel({ projectId }) {
                 : <Badge tone={kit.active ? "success" : "neutral"}>{kit.active ? "Active" : "Inactive"}</Badge>}
             </KitFact>
           </div>
-        }
+        )}
       />
 
       {days.length === 0 ? (
@@ -177,7 +185,7 @@ export default function StarlinkPanel({ projectId }) {
         />
       ) : (
         <>
-          <ResponsiveContainer width="100%" height={300}>
+          <ResponsiveContainer width="100%" height={compact ? 200 : 300}>
             <BarChart data={days} margin={{ top: 8, right: 4, left: -8, bottom: 0 }} barCategoryGap={BAR_CATEGORY_GAP}>
               <CartesianGrid {...gridProps(ct)} />
               <XAxis dataKey="d" {...axisX(ct)} />

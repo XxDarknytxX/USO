@@ -309,10 +309,21 @@ export default function SiteDashboard({ groupId, site }) {
           Both are self-fetching and self-hiding, so a village with no kit
           recorded renders neither. */}
       {site?.id && (
-        <>
-          <StarlinkPanel projectId={site.id} />
-          <StarlinkTelemetry projectId={site.id} />
-        </>
+        // Half and half, the way the Starlink console arranges the same pair:
+        // how much the village consumed on one side, what the link was like
+        // while they consumed it on the other, both in one view. Full width
+        // each was a lot of scrolling to compare two things that only mean
+        // something together.
+        //
+        // Stacks below xl. At 1280px and under, two half-width charts are
+        // narrower than the data in them, and a cramped chart answers nothing.
+        //
+        // items-start so the shorter panel keeps its own height instead of
+        // stretching to match the taller one and padding itself with space.
+        <div className="grid grid-cols-1 xl:grid-cols-2 gap-5 items-start">
+          <StarlinkPanel projectId={site.id} compact />
+          <StarlinkTelemetry projectId={site.id} compact />
+        </div>
       )}
 
       <div className="flex flex-col gap-5">

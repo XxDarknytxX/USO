@@ -53,7 +53,7 @@ const clockLabel = (iso, range) => {
     : d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: range === "A" ? "2-digit" : undefined });
 };
 
-export default function StarlinkTelemetry({ projectId, className }) {
+export default function StarlinkTelemetry({ projectId, className, compact = false }) {
   const [range, setRange] = useState("B");
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -129,9 +129,13 @@ export default function StarlinkTelemetry({ projectId, className }) {
           }
         />
       ) : (
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+        // Two across either way, as the Starlink console has it — six single
+        // -file cards would make this column twice the height of the usage
+        // panel beside it. In the half-width slot the gutters and plots tighten
+        // instead of the layout changing shape.
+        <div className={`grid grid-cols-1 ${compact ? "sm:grid-cols-2 gap-3" : "lg:grid-cols-2 gap-5"}`}>
           {SERIES.map((s) => (
-            <MetricChart key={s.key} spec={s} points={points} stats={data?.stats?.[s.key]} />
+            <MetricChart key={s.key} spec={s} points={points} stats={data?.stats?.[s.key]} compact={compact} />
           ))}
         </div>
       )}
@@ -140,7 +144,7 @@ export default function StarlinkTelemetry({ projectId, className }) {
 }
 
 /** One measure: its headline reading, its range, and its shape over time. */
-function MetricChart({ spec, points, stats }) {
+function MetricChart({ spec, points, stats, compact = false }) {
   const ct = useChartTheme();
   const gradId = `tel-${spec.key}`;
 
@@ -158,7 +162,7 @@ function MetricChart({ spec, points, stats }) {
       : "var(--fg-primary)";
 
   return (
-    <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-surface)] p-4">
+    <div className={`rounded-xl border border-[var(--border-default)] bg-[var(--bg-surface)] ${compact ? "p-3" : "p-4"}`}>
       <div className="flex items-start justify-between gap-3">
         <span className="flex items-center gap-2 min-w-0">
           <spec.Icon size={14} style={{ color: spec.color }} className="shrink-0" />
@@ -181,14 +185,14 @@ function MetricChart({ spec, points, stats }) {
         <span>max {fmt(stats?.max, spec.decimals)}</span>
       </div>
 
-      <div className="mt-3 h-[120px]">
+      <div className={compact ? "mt-2.5 h-[92px]" : "mt-3 h-[120px]"}>
         <ResponsiveContainer width="100%" height="100%">
           <AreaChart data={points} margin={{ top: 4, right: 4, bottom: 0, left: -18 }}>
             <defs>
               <ChartGradient id={gradId} color={spec.color} />
             </defs>
             <CartesianGrid {...gridProps(ct)} vertical={false} />
-            <XAxis dataKey="label" {...axisX(ct)} minTickGap={40} />
+            <XAxis dataKey="label" {...axisX(ct)} minTickGap={compact ? 64 : 40} />
             <YAxis
               {...axisY(ct)}
               width={44}
