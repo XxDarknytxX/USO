@@ -18,6 +18,7 @@
 
 import speakeasy from "speakeasy";
 import QRCode from "qrcode";
+import { seal, open as unseal, needsReseal } from "./secretBox.js";
 import bcrypt from "bcryptjs";
 import crypto from "node:crypto";
 
@@ -104,7 +105,9 @@ export async function beginEnrolment(pool, user) {
     `otpauth://totp/${encodeURIComponent(`${ISSUER}:${user.email}`)}?secret=${secret}&issuer=${encodeURIComponent(ISSUER)}`;
   const qrCode = await QRCode.toDataURL(otpauth, { errorCorrectionLevel: "L", margin: 1, width: 256 });
 
-  await pool.query("UPDATE users SET totp_secret = ? WHERE id = ?", [secret, user.id]);
+  // Sealed on the way in. A no-key deployment gets the plaintext back from
+  // seal(), so this is safe to land before the key is configured.
+  await pool.query("UPDATE users SET totp_secret = ? WHERE id = ?", [seal(secret), user.id]);
   return { secret, qrCode, manualEntryKey: secret };
 }
 
@@ -132,8 +135,18 @@ export async function verifyEnrolment(pool, userId, code) {
     "SELECT totp_secret, totp_enabled FROM users WHERE id = ?",
     [userId]
   );
-  const secret = rows[0]?.totp_secret;
-  if (!secret) return { ok: false, error: "Start the setup again — no pending secret for this account." };
+  const stored = rows[0]?.totp_secret;
+  if (!stored) return { ok: false, error: "Start the setup again — no pending secret for this account." };
+  let secret;
+  try {
+    secret = unseal(stored);
+  } catch (e) {
+    // The key that sealed this is not configured. Say so rather than treating
+    // the ciphertext as a secret, which would fail every code forever with a
+    // message about the clock on their phone.
+    console.error("[2fa] cannot read pending secret:", e.message);
+    return { ok: false, error: "Two-factor setup is not available right now. Tell your administrator." };
+  }
 
   // Enrolment is for accounts that have no second factor. Without this, anyone
   // holding a session could call it against the LIVE secret and be handed a
@@ -213,8 +226,26 @@ export async function verifyCode(pool, userId, code) {
     "SELECT totp_secret, totp_backup_codes, totp_last_step FROM users WHERE id = ?",
     [userId]
   );
-  const secret = rows[0]?.totp_secret;
-  if (!secret) return { ok: false, error: "Two-factor authentication is not set up for this account." };
+  const stored = rows[0]?.totp_secret;
+  if (!stored) return { ok: false, error: "Two-factor authentication is not set up for this account." };
+  let secret;
+  try {
+    secret = unseal(stored);
+  } catch (e) {
+    // Better a clear refusal than a confident "wrong code" against something
+    // that was never the secret.
+    console.error("[2fa] cannot read secret at login:", e.message);
+    return { ok: false, error: "Two-factor is not available right now. Tell your administrator." };
+  }
+
+  // Turning the key on does not require a migration to have run first: the
+  // next successful sign-in upgrades the row. The script covers accounts that
+  // do not sign in often.
+  if (needsReseal(stored)) {
+    pool
+      .query("UPDATE users SET totp_secret = ? WHERE id = ? AND totp_secret = ?", [seal(secret), userId, stored])
+      .catch((e) => console.error("[2fa] reseal failed (harmless, will retry):", e.message));
+  }
 
   // speakeasy.totp.verifyDelta returns WHICH step matched, which is what makes
   // single-use possible: the code alone cannot be compared against anything,

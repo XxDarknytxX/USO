@@ -237,6 +237,12 @@ export const twoFactorApi = {
   regenerateBackupCodes: (password) =>
     api("/2fa/backup-codes", { method: "POST", body: { password } }),
   policy: () => api("/2fa/policy"),
+  // The audit trail. An admin gets the estate; anyone else gets their own rows
+  // — the server decides, not the caller.
+  events: (params = {}) => {
+    const qs = new URLSearchParams(params).toString();
+    return api(`/2fa/events${qs ? `?${qs}` : ""}`);
+  },
   setPolicy: (required) => api("/2fa/policy", { method: "PUT", body: { required } }),
   changePassword: (currentPassword, newPassword) =>
     api("/me/password", { method: "POST", body: { currentPassword, newPassword } }),

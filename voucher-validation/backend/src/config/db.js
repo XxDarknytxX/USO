@@ -262,6 +262,35 @@ export async function getPool() {
     // AFTER network_projects so the FK target exists. ON DELETE CASCADE cleans up when
     // a user or a project is removed. This is the server-side scope store — the SPA's
     // client-side site filter is advisory only.
+    // Two-factor events. The record of who proved a second factor, from where,
+    // and every time somebody failed to — which is the only way a slow guessing
+    // attempt, or a reset nobody asked for, is visible after the fact.
+    //
+    // user_id is ON DELETE SET NULL rather than CASCADE: deleting an account
+    // must not erase the evidence of what was done to it, which is exactly
+    // what an attacker who reached user management would want. The email is
+    // copied in for the same reason — so a row still names someone once the
+    // account is gone.
+    //
+    // No IP index: this is read newest-first, per user or estate-wide, and an
+    // index on a column only used for display costs writes on the login path.
+    `CREATE TABLE IF NOT EXISTS two_factor_events (
+      id BIGINT AUTO_INCREMENT PRIMARY KEY,
+      user_id INT NULL,
+      user_email VARCHAR(255) NULL,
+      event VARCHAR(32) NOT NULL,
+      success BOOLEAN NOT NULL DEFAULT 1,
+      actor_id INT NULL,
+      actor_email VARCHAR(255) NULL,
+      ip_address VARCHAR(64) NULL,
+      user_agent VARCHAR(512) NULL,
+      detail VARCHAR(255) NULL,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      INDEX idx_tfe_user (user_id, created_at),
+      INDEX idx_tfe_time (created_at),
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
+
     // RETAINED BUT NO LONGER READ. Village scope is a single estate-wide
     // setting (app_settings.global_visible_villages) that attachScope resolves
     // for every non-admin — there is no per-account village list any more.

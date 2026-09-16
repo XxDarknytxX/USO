@@ -13,6 +13,7 @@ import {
   issueInvite, consumeInvite, findInvitee, revokeInvite, unusablePasswordHash, INVITE_TTL_DAYS,
 } from "../services/invites.js";
 import { makeAttemptLimiter, clientIp, pause } from "../services/attemptLimiter.js";
+import { logTwoFactorEvent, readTwoFactorEvents } from "../services/twoFactorLog.js";
 import { validationResult } from "express-validator";
 
 /** Local response helpers */
@@ -285,6 +286,12 @@ export function makeAdminController(pool) {
         }
 
         await clearTwoFactor(pool, user.id);
+        // Names both parties: whose factor was cleared, and who cleared it.
+        logTwoFactorEvent(pool, {
+          userId: user.id, userEmail: user.email, actor: req.user, req,
+          event: "admin_reset",
+          detail: user.totp_enabled ? "was enrolled" : "was not enrolled",
+        });
         const mail = await sendAccountMail(pool, user, "2fa-reset", {});
         return send.ok(res, { success: true, wasEnabled: !!user.totp_enabled, emailed: mail.sent, emailError: mail.error });
       } catch (e) {
@@ -463,10 +470,20 @@ export function makeAdminController(pool) {
         const r = await verifyCode(pool, decoded.id, code);
         if (!r.ok) {
           const blockedFor = await penalise(ip, acct);
+          logTwoFactorEvent(pool, {
+            userId: decoded.id, userEmail: decoded.email, req,
+            event: blockedFor ? "throttled" : "verify_failed", success: false,
+            detail: blockedFor ? `refused for ${blockedFor}s` : null,
+          });
           if (blockedFor) return tooMany(res, blockedFor);
           return send.bad(res, r.error || "That code is not right.");
         }
         limiter.succeed(ip, acct);
+        logTwoFactorEvent(pool, {
+          userId: decoded.id, userEmail: decoded.email, req,
+          event: r.usedBackupCode ? "backup_used" : "verify_ok",
+          detail: r.usedBackupCode ? `${r.backupCodesRemaining} backup code(s) left` : null,
+        });
 
         const { pending2FA, iat, exp, ...claims } = decoded;
         await pool.query("UPDATE users SET last_login_at = NOW() WHERE id = ?", [decoded.id]).catch(() => {});
@@ -487,7 +504,11 @@ export function makeAdminController(pool) {
     // POST /api/2fa/setup — secret + QR. Does NOT enable anything yet.
     setup2FA: async (req, res) => {
       try {
-        return send.ok(res, await beginEnrolment(pool, req.user));
+        const setup = await beginEnrolment(pool, req.user);
+        logTwoFactorEvent(pool, {
+          userId: req.user.id, userEmail: req.user.email, req, event: "enrol_started",
+        });
+        return send.ok(res, setup);
       } catch (e) {
         // "Already on" is the caller's situation, not a server fault — say so
         // rather than answering 500 to something the person can act on.
@@ -510,10 +531,18 @@ export function makeAdminController(pool) {
         const r = await verifyEnrolment(pool, req.user.id, code);
         if (!r.ok) {
           const blockedFor = await penalise(ip, acct);
+          logTwoFactorEvent(pool, {
+            userId: req.user.id, userEmail: req.user.email, req,
+            event: blockedFor ? "throttled" : "verify_failed", success: false,
+            detail: blockedFor ? `refused for ${blockedFor}s` : "during enrolment",
+          });
           if (blockedFor) return tooMany(res, blockedFor);
           return send.bad(res, r.error);
         }
         limiter.succeed(ip, acct);
+        logTwoFactorEvent(pool, {
+          userId: req.user.id, userEmail: req.user.email, req, event: "enrolled",
+        });
         const { pending2FASetup, iat, exp, ...claims } = req.user;
         // A setup token brought them here; hand back a real one so enrolling
         // lands them in the app rather than back at the login screen.
@@ -552,6 +581,9 @@ export function makeAdminController(pool) {
         }
         limiter.succeed(ip, acct);
         await clearTwoFactor(pool, req.user.id);
+        logTwoFactorEvent(pool, {
+          userId: req.user.id, userEmail: req.user.email, req, event: "disabled",
+        });
         return send.ok(res, { enabled: false });
       } catch (e) {
         console.error("[2fa] disable failed:", e.message);
@@ -604,9 +636,32 @@ export function makeAdminController(pool) {
 
         const r = await regenerateBackupCodes(pool, req.user.id);
         if (!r.ok) return send.bad(res, r.error);
+        logTwoFactorEvent(pool, {
+          userId: req.user.id, userEmail: req.user.email, req, event: "backup_regenerated",
+        });
         return send.ok(res, { backupCodes: r.backupCodes });
       } catch (e) {
         console.error("[2fa] backup code regeneration failed:", e.message);
+        return send.serverErr(res);
+      }
+    },
+
+    // GET /api/2fa/events — the audit trail.
+    //
+    // An admin gets the estate-wide view; anybody else gets their own account
+    // and only their own. That second case is not a courtesy: the person best
+    // placed to notice "I did not do that" is the account holder, and they
+    // cannot notice it if they cannot see it.
+    twoFactorEvents: async (req, res) => {
+      try {
+        const mine = req.user.role !== "admin";
+        const events = await readTwoFactorEvents(pool, {
+          userId: mine ? req.user.id : req.query.userId ? Number(req.query.userId) : null,
+          limit: req.query.limit,
+        });
+        return send.ok(res, { events, scope: mine ? "self" : "estate" });
+      } catch (e) {
+        console.error("[2fa] event read failed:", e.message);
         return send.serverErr(res);
       }
     },
@@ -636,6 +691,12 @@ export function makeAdminController(pool) {
         // Existing sessions keep working until they expire, which is the
         // difference between a policy change and an outage.
         await setTwoFactorRequired(pool, on);
+        // An estate-wide switch is the single most consequential 2FA action
+        // there is, and the one most worth being able to attribute later.
+        logTwoFactorEvent(pool, {
+          userId: req.user.id, userEmail: req.user.email, req,
+          event: on ? "policy_on" : "policy_off",
+        });
         return send.ok(res, { required: on });
       } catch (e) {
         console.error(e);

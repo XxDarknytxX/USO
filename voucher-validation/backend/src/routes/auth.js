@@ -61,6 +61,10 @@ export function makeAuthRouter(controller, attachScope) {
   // because the estate policy forbids it. Full session + password.
   router.post("/2fa/backup-codes", requireAuth, controller.regenerateBackupCodes);
 
+  // The audit trail. Any signed-in account may read it; the handler decides
+  // whether that means the estate or just their own row.
+  router.get("/2fa/events", requireAuth, controller.twoFactorEvents);
+
   // The estate-wide switch.
   router.get("/2fa/policy", requireAuth, requireAdmin, controller.getTwoFactorPolicy);
   router.put("/2fa/policy", requireAuth, requireAdmin, controller.setTwoFactorPolicy);

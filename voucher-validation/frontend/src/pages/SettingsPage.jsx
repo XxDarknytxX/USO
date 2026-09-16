@@ -12,7 +12,8 @@
 import { useEffect, useState , useCallback} from "react";
 import {
   Settings, Server, Eye, EyeOff, MapPin, Check, Globe2, RefreshCw, Mail,
-  Satellite, Send, Receipt, KeyRound, ShieldCheck,
+  Satellite, Send, Receipt, KeyRound, ShieldCheck, ShieldOff, Shield,
+  AlertTriangle, History,
 } from "lucide-react";
 import toast from "react-hot-toast";
 
@@ -21,6 +22,7 @@ import { useSite } from "../hooks/useSite";
 import { useAuth } from "../hooks/useAuth";
 import {
   PageShell, PageHeader, Panel, Badge, Toggle, Select, Field, Input, Button, Tabs, Section, SkeletonCard,
+  StatusPill,
 } from "../components/ui";
 
 // Sync-frequency presets. Floor is 5 min to protect the Ruijie account-wide rate
@@ -1362,6 +1364,119 @@ export default function SettingsPage() {
  * saying on the screen, because "require 2FA for everyone" reads like
  * something that locks people out this afternoon.
  */
+/* ============================================================================
+   Two-factor audit trail.
+
+   A second factor that works leaves no trace of having worked, so without this
+   the only 2FA events anyone can see are the ones that changed something
+   visible. The value of the table is entirely in being readable when somebody
+   finally asks "when did this start" — which is never at the time.
+   ========================================================================= */
+
+const EVENT_COPY = {
+  enrol_started:      { label: "Setup started",      tone: "neutral", Icon: ShieldCheck },
+  enrolled:           { label: "Two-factor on",      tone: "success", Icon: ShieldCheck },
+  verify_ok:          { label: "Code accepted",      tone: "success", Icon: Check },
+  verify_failed:      { label: "Code rejected",      tone: "warning", Icon: AlertTriangle },
+  backup_used:        { label: "Backup code used",   tone: "warning", Icon: KeyRound },
+  backup_regenerated: { label: "Backup codes replaced", tone: "info", Icon: KeyRound },
+  disabled:           { label: "Two-factor off",     tone: "danger",  Icon: ShieldOff },
+  admin_reset:        { label: "Reset by admin",     tone: "danger",  Icon: ShieldOff },
+  policy_on:          { label: "Policy switched on", tone: "brand",   Icon: Shield },
+  policy_off:         { label: "Policy switched off", tone: "danger", Icon: Shield },
+  throttled:          { label: "Too many attempts",  tone: "danger",  Icon: AlertTriangle },
+};
+
+function TwoFactorLog() {
+  const [events, setEvents] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [onlyProblems, setOnlyProblems] = useState(false);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const r = await twoFactorApi.events({ limit: 200 });
+      setEvents(r.events || []);
+    } catch (e) {
+      toast.error("Could not read the two-factor log: " + e.message);
+      setEvents([]);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => { load(); }, [load]);
+
+  // The filter people actually want: everything that did not go smoothly.
+  const shown = (events || []).filter(
+    (e) => !onlyProblems || !e.success || e.event === "admin_reset" || e.event === "disabled" || e.event === "policy_off"
+  );
+
+  return (
+    <Panel
+      title="Two-factor activity"
+      subtitle="Every code accepted or rejected, every reset, and every change to the policy. Kept for a year."
+      icon={<History size={15} />}
+      tone="slate"
+      padding={false}
+      actions={
+        <div className="flex items-center gap-1">
+          <Button
+            variant={onlyProblems ? "brand-ghost" : "ghost"}
+            size="xs"
+            onClick={() => setOnlyProblems((v) => !v)}
+          >
+            {onlyProblems ? "Showing problems" : "Problems only"}
+          </Button>
+          <Button variant="ghost" size="xs" onClick={load} disabled={loading} iconLeft={<RefreshCw size={11} />}>
+            Refresh
+          </Button>
+        </div>
+      }
+    >
+      {loading ? (
+        <div className="px-5 py-8 text-center text-[12.5px] text-[var(--fg-muted)]">Loading…</div>
+      ) : shown.length === 0 ? (
+        <div className="px-5 py-8 text-center text-[12.5px] text-[var(--fg-muted)]">
+          {events?.length ? "Nothing but ordinary activity." : "No two-factor activity recorded yet."}
+        </div>
+      ) : (
+        <div className="max-h-[420px] divide-y divide-[var(--border-subtle)] overflow-y-auto">
+          {shown.map((e) => {
+            const c = EVENT_COPY[e.event] || { label: e.event, tone: "neutral", Icon: History };
+            return (
+              <div key={e.id} className="flex items-start gap-3 px-5 py-3">
+                <span className="mt-0.5 shrink-0">
+                  <StatusPill tone={e.success ? c.tone : "danger"} dot={false}>
+                    <c.Icon size={11} />
+                    {c.label}
+                  </StatusPill>
+                </span>
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-[12.5px] text-[var(--fg-primary)]">
+                    {e.userEmail || (e.userId ? `account #${e.userId}` : "an account since deleted")}
+                    {e.actorEmail && (
+                      <span className="text-[var(--fg-muted)]"> · by {e.actorEmail}</span>
+                    )}
+                  </p>
+                  <p className="mt-0.5 truncate text-[11.5px] text-[var(--fg-muted)]">
+                    {new Date(e.at).toLocaleString("en-AU", {
+                      day: "numeric", month: "short", year: "numeric",
+                      hour: "2-digit", minute: "2-digit",
+                    })}
+                    {e.ip && <span className="font-mono"> · {e.ip}</span>}
+                    {e.detail && <span> · {e.detail}</span>}
+                  </p>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </Panel>
+  );
+}
+
 function SecurityTab() {
   const [policy, setPolicy] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -1440,6 +1555,8 @@ function SecurityTab() {
           </p>
         )}
       </Panel>
+
+      <TwoFactorLog />
     </div>
   );
 }

@@ -27,6 +27,8 @@ import { makeStarlinkUsageScheduler } from "./services/starlinkUsageCollector.js
 import RuijieService from "./services/ruijieService.js";
 import { makeSyncScheduler } from "./services/syncScheduler.js";
 import { makeAttachScope } from "./middleware/auth.js";
+import { reportEncryptionStatus } from "./services/secretBox.js";
+import { pruneTwoFactorEvents } from "./services/twoFactorLog.js";
 
 const app = express();
 
@@ -88,6 +90,9 @@ for (const k of [
 ]) {
   console.log(`  - ${k}: ${process.env[k] ? "SET" : "MISSING"}`);
 }
+// States plainly whether two-factor secrets are encrypted at rest. A key that
+// is silently absent is the failure this line exists to make impossible.
+reportEncryptionStatus(console);
 console.log("=========================\n");
 
 // DB + controllers
@@ -147,6 +152,18 @@ if (_isSchedulerPrimary) {
   syncScheduler.start().catch((e) => console.error("Sync scheduler failed to start:", e.message));
 } else {
   console.log(`[SyncScheduler] instance ${_instanceId} is not primary — scheduler not started`);
+}
+
+// Keep the two-factor audit trail from growing forever. It takes a row on every
+// sign-in, so on a long-lived deployment it is the fastest-growing table here.
+// A year is long enough to answer "when did this start" about something noticed
+// late; the same primary-instance gate as the schedulers, so N forks do not run
+// N deletes over the same rows.
+if (_isSchedulerPrimary) {
+  const pruneDays = Number(process.env.TWO_FACTOR_LOG_DAYS) || 365;
+  pruneTwoFactorEvents(pool, pruneDays);
+  const _pruneTimer = setInterval(() => pruneTwoFactorEvents(pool, pruneDays), 24 * 60 * 60 * 1000);
+  _pruneTimer.unref?.();
 }
 
 // Periodic all-villages network-health collection. This was disabled outright
