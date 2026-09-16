@@ -57,6 +57,9 @@ export function makeAuthRouter(controller, attachScope) {
   router.get("/2fa/status", requireAuth, controller.twoFactorStatus);
   // Disabling needs a FULL session — a setup token must never be able to.
   router.post("/2fa/disable", requireAuth, controller.disable2FA);
+  // Replacing backup codes, for an account that cannot disable and re-enrol
+  // because the estate policy forbids it. Full session + password.
+  router.post("/2fa/backup-codes", requireAuth, controller.regenerateBackupCodes);
 
   // The estate-wide switch.
   router.get("/2fa/policy", requireAuth, requireAdmin, controller.getTwoFactorPolicy);

@@ -3,7 +3,7 @@ import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import {
   isTwoFactorRequired, setTwoFactorRequired, beginEnrolment, verifyEnrolment,
-  verifyCode, clearTwoFactor, generateTempPassword,
+  verifyCode, clearTwoFactor, generateTempPassword, regenerateBackupCodes,
 } from "../services/twoFactor.js";
 import {
   loadSmtpTransport, buildOnboarding, buildPasswordReset, buildTwoFactorReset, buildInvite,
@@ -11,6 +11,7 @@ import {
 import {
   issueInvite, consumeInvite, findInvitee, revokeInvite, unusablePasswordHash, INVITE_TTL_DAYS,
 } from "../services/invites.js";
+import { makeAttemptLimiter, clientIp } from "../services/attemptLimiter.js";
 import { validationResult } from "express-validator";
 
 /** Local response helpers */
@@ -110,6 +111,19 @@ async function sendAccountMail(pool, user, kind, { password, inviteToken } = {})
   }
 }
 
+// Guessing at credentials is throttled per (ip, account) with a slower
+// per-account backstop. Shared across the password step and both code steps on
+// purpose: an attacker who is being slowed down at one of them must not be able
+// to switch to another and start again with a fresh allowance.
+const limiter = makeAttemptLimiter();
+
+const tooMany = (res, seconds) => {
+  res.setHeader("Retry-After", String(seconds));
+  return res.status(429).json({
+    error: `Too many attempts. Try again in ${seconds < 60 ? `${seconds} seconds` : `${Math.ceil(seconds / 60)} minutes`}.`,
+  });
+};
+
 export function makeAdminController(pool) {
   return {
     // POST /api/register (admin-only — see routes/auth.js). NEVER trusts a
@@ -142,12 +156,28 @@ export function makeAdminController(pool) {
       if (!errors.isEmpty()) return send.bad(res, errors.array()[0].msg);
 
       const { email, password } = req.body;
+      const ip = clientIp(req);
+      const acct = String(email || "").toLowerCase();
       try {
+        // Checked BEFORE the lookup and before bcrypt, so a blocked caller
+        // costs nothing and learns nothing about whether the account exists.
+        const wait = limiter.retryAfter(ip, acct);
+        if (wait) return tooMany(res, wait);
+
         const user = await findUserByEmail(pool, email);
-        if (!user) return send.bad(res, "Invalid credentials");
+        if (!user) {
+          limiter.fail(ip, acct);
+          return send.bad(res, "Invalid credentials");
+        }
 
         const ok = await bcrypt.compare(password, user.password_hash);
-        if (!ok) return send.bad(res, "Invalid credentials");
+        if (!ok) {
+          limiter.fail(ip, acct);
+          return send.bad(res, "Invalid credentials");
+        }
+        // The password was right. The code steps below keep their own count,
+        // so clearing here cannot hand anyone a fresh allowance at those.
+        limiter.succeed(ip, acct);
 
         const claims = { id: user.id, email: user.email, name: user.name, role: user.role };
 
@@ -375,8 +405,21 @@ export function makeAdminController(pool) {
         // here would otherwise let anyone with a session mint another.
         if (!decoded.pending2FA) return send.bad(res, "Invalid session token");
 
+        // THE step that has to be throttled. Six digits is 10^6, three of them
+        // are valid at any instant, and the token that lets you try lives five
+        // minutes — unthrottled, someone holding the password walks in.
+        // Keyed on the account from the TOKEN, which the caller cannot forge.
+        const ip = clientIp(req);
+        const acct = `2fa:${decoded.id}`;
+        const wait = limiter.retryAfter(ip, acct);
+        if (wait) return tooMany(res, wait);
+
         const r = await verifyCode(pool, decoded.id, code);
-        if (!r.ok) return send.bad(res, r.error || "That code is not right.");
+        if (!r.ok) {
+          limiter.fail(ip, acct);
+          return send.bad(res, r.error || "That code is not right.");
+        }
+        limiter.succeed(ip, acct);
 
         const { pending2FA, iat, exp, ...claims } = decoded;
         await pool.query("UPDATE users SET last_login_at = NOW() WHERE id = ?", [decoded.id]).catch(() => {});
@@ -412,9 +455,17 @@ export function makeAdminController(pool) {
     verify2FA: async (req, res) => {
       const { code } = req.body || {};
       if (!code) return send.bad(res, "Enter the code from your authenticator app");
+      const ip = clientIp(req);
+      const acct = `enrol:${req.user.id}`;
       try {
+        const wait = limiter.retryAfter(ip, acct);
+        if (wait) return tooMany(res, wait);
         const r = await verifyEnrolment(pool, req.user.id, code);
-        if (!r.ok) return send.bad(res, r.error);
+        if (!r.ok) {
+          limiter.fail(ip, acct);
+          return send.bad(res, r.error);
+        }
+        limiter.succeed(ip, acct);
         const { pending2FASetup, iat, exp, ...claims } = req.user;
         // A setup token brought them here; hand back a real one so enrolling
         // lands them in the app rather than back at the login screen.
@@ -434,15 +485,23 @@ export function makeAdminController(pool) {
     // second factor off the account.
     disable2FA: async (req, res) => {
       const { password } = req.body || {};
+      // Turning the second factor OFF is a password guess like any other, and
+      // it is reachable from a session someone walked away from.
+      const ip = clientIp(req);
+      const acct = `disable:${req.user.id}`;
       try {
+        const wait = limiter.retryAfter(ip, acct);
+        if (wait) return tooMany(res, wait);
         if (await isTwoFactorRequired(pool)) {
           return send.bad(res, "Two-factor authentication is required for every account and cannot be turned off.");
         }
         const [rows] = await pool.query("SELECT password_hash FROM users WHERE id = ?", [req.user.id]);
         if (!rows[0]) return send.notFound(res, "User not found");
         if (!password || !(await bcrypt.compare(password, rows[0].password_hash))) {
+          limiter.fail(ip, acct);
           return send.bad(res, "Enter your current password to turn two-factor off.");
         }
+        limiter.succeed(ip, acct);
         await clearTwoFactor(pool, req.user.id);
         return send.ok(res, { enabled: false });
       } catch (e) {
@@ -468,6 +527,36 @@ export function makeAdminController(pool) {
         });
       } catch (e) {
         console.error(e);
+        return send.serverErr(res);
+      }
+    },
+
+    // POST /api/2fa/backup-codes — a fresh set of ten, shown once.
+    //
+    // Needs the password, like disabling does: this invalidates every code the
+    // account currently holds, so a session left unattended must not be enough
+    // to strand somebody's only way back in.
+    regenerateBackupCodes: async (req, res) => {
+      const { password } = req.body || {};
+      const ip = clientIp(req);
+      const acct = `backup:${req.user.id}`;
+      try {
+        const wait = limiter.retryAfter(ip, acct);
+        if (wait) return tooMany(res, wait);
+
+        const [rows] = await pool.query("SELECT password_hash FROM users WHERE id = ?", [req.user.id]);
+        if (!rows[0]) return send.notFound(res, "User not found");
+        if (!password || !(await bcrypt.compare(password, rows[0].password_hash))) {
+          limiter.fail(ip, acct);
+          return send.bad(res, "Enter your current password to replace your backup codes.");
+        }
+        limiter.succeed(ip, acct);
+
+        const r = await regenerateBackupCodes(pool, req.user.id);
+        if (!r.ok) return send.bad(res, r.error);
+        return send.ok(res, { backupCodes: r.backupCodes });
+      } catch (e) {
+        console.error("[2fa] backup code regeneration failed:", e.message);
         return send.serverErr(res);
       }
     },

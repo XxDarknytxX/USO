@@ -232,6 +232,10 @@ export const inviteApi = {
 export const twoFactorApi = {
   status: () => api("/2fa/status"),
   disable: (password) => api("/2fa/disable", { method: "POST", body: { password } }),
+  // A fresh set of ten, replacing whatever the account holds. The way back for
+  // someone low on codes when the policy forbids disabling and re-enrolling.
+  regenerateBackupCodes: (password) =>
+    api("/2fa/backup-codes", { method: "POST", body: { password } }),
   policy: () => api("/2fa/policy"),
   setPolicy: (required) => api("/2fa/policy", { method: "PUT", body: { required } }),
   changePassword: (currentPassword, newPassword) =>

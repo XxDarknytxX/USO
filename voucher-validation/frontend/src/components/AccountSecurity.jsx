@@ -16,7 +16,7 @@
 import { useCallback, useEffect, useState } from "react";
 import toast from "react-hot-toast";
 import {
-  ShieldCheck, ShieldOff, KeyRound, Lock, Eye, EyeOff, AlertTriangle, Check,
+  ShieldCheck, ShieldOff, KeyRound, Lock, Eye, EyeOff, AlertTriangle, Check, Copy,
 } from "lucide-react";
 
 import { twoFactorApi } from "../services/api";
@@ -230,6 +230,138 @@ function DisableModal({ open, required, onClose, onDone }) {
   );
 }
 
+/* ──────────────────── replace the backup codes ──────────────────── */
+
+function BackupCodesModal({ open, onClose, onDone }) {
+  const [password, setPassword] = useState("");
+  const [codes, setCodes] = useState(null);
+  const [saved, setSaved] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+
+  useEffect(() => {
+    if (open) return;
+    setPassword(""); setCodes(null); setSaved(false); setErr("");
+  }, [open]);
+
+  async function submit(e) {
+    e?.preventDefault();
+    if (!password) return;
+    setErr("");
+    setBusy(true);
+    try {
+      const r = await twoFactorApi.regenerateBackupCodes(password);
+      setCodes(r.backupCodes || []);
+    } catch (e) {
+      setErr(e.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const text = (codes || []).join("\n");
+
+  return (
+    <Modal open={open} onClose={busy ? undefined : onClose} width="sm" closeOnBackdrop={!codes}>
+      <Modal.Header
+        icon={codes ? Check : KeyRound}
+        eyebrow="Your account"
+        title={codes ? "Your new backup codes" : "Replace your backup codes"}
+        subtitle={
+          codes
+            ? "The old ones stopped working the moment these were made. Your authenticator app is unchanged."
+            : "Ten fresh codes, and every code you have now stops working. Your authenticator app is not affected."
+        }
+        onClose={busy ? undefined : onClose}
+      />
+      <Modal.Body>
+        {codes ? (
+          <div className="flex flex-col gap-5">
+            <div className="rounded-xl border border-[var(--warning-border)] bg-[var(--warning-soft)] px-4 py-3">
+              <p className="text-[13px] font-semibold text-[var(--warning-fg)]">
+                Save these now — they are not shown again
+              </p>
+              <p className="mt-1 text-[12.5px] text-[var(--warning-fg)] opacity-90">
+                Only hashes are kept on the server, so nobody can show them to you later.
+              </p>
+            </div>
+            <div className="grid grid-cols-2 gap-x-4 gap-y-2.5 rounded-xl border border-[var(--border-default)] bg-[var(--bg-surface)] p-4">
+              {codes.map((c, i) => (
+                <div key={c} className="flex items-baseline gap-2.5">
+                  <span className="w-4 shrink-0 text-right font-mono text-[10.5px] tabular-nums text-[var(--fg-subtle)]">
+                    {i + 1}
+                  </span>
+                  <code className="font-mono text-[13.5px] tracking-[0.08em] text-[var(--fg-primary)]">{c}</code>
+                </div>
+              ))}
+            </div>
+            <div className="flex gap-2">
+              <Button
+                variant="secondary"
+                size="sm"
+                iconLeft={<Copy size={14} />}
+                onClick={() =>
+                  navigator.clipboard?.writeText(text).then(
+                    () => toast.success("Backup codes copied"),
+                    () => toast.error("Could not copy — select and copy them by hand")
+                  )
+                }
+              >
+                Copy
+              </Button>
+            </div>
+            <label className="flex cursor-pointer items-start gap-2.5 text-[13px] text-[var(--fg-secondary)]">
+              <input
+                type="checkbox"
+                checked={saved}
+                onChange={(e) => setSaved(e.target.checked)}
+                className="mt-0.5 cursor-pointer accent-[var(--brand)]"
+              />
+              <span>I have saved these backup codes somewhere safe.</span>
+            </label>
+          </div>
+        ) : (
+          <form onSubmit={submit} className="flex flex-col gap-4">
+            <Field label="Confirm with your password" required>
+              <div className="relative">
+                <Lock size={15} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-[var(--fg-muted)] pointer-events-none" />
+                <Input
+                  type="password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  autoComplete="current-password"
+                  className="pl-10 h-11"
+                  autoFocus
+                />
+              </div>
+            </Field>
+            {err && (
+              <p className="rounded-lg border border-[var(--danger-border)] bg-[var(--danger-soft)] px-3.5 py-2.5 text-[12.5px] text-[var(--danger-fg)]">
+                {err}
+              </p>
+            )}
+            <button type="submit" className="hidden" aria-hidden tabIndex={-1} />
+          </form>
+        )}
+      </Modal.Body>
+      <Modal.Footer>
+        {codes ? (
+          <Button disabled={!saved} onClick={() => { onDone?.(); onClose?.(); }}>
+            Done
+          </Button>
+        ) : (
+          <>
+            <Button variant="ghost" onClick={onClose} disabled={busy}>Cancel</Button>
+            <Button onClick={submit} loading={busy} disabled={!password}>
+              Replace them
+            </Button>
+          </>
+        )}
+      </Modal.Footer>
+    </Modal>
+  );
+}
+
 /* ───────────────────────── the panel ───────────────────────── */
 
 export default function AccountSecurity({ forcePasswordChange = false, onPasswordChanged }) {
@@ -238,6 +370,7 @@ export default function AccountSecurity({ forcePasswordChange = false, onPasswor
   const [enrolOpen, setEnrolOpen] = useState(false);
   const [disableOpen, setDisableOpen] = useState(false);
   const [pwOpen, setPwOpen] = useState(false);
+  const [codesOpen, setCodesOpen] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -291,19 +424,53 @@ export default function AccountSecurity({ forcePasswordChange = false, onPasswor
                 {low && (
                   <p className="mt-2 flex items-center gap-1.5 text-[12px] font-medium text-[var(--warning-fg)]">
                     <AlertTriangle size={12} className="shrink-0" />
-                    Running low. Turn it off and on again to get a fresh set of ten.
+                    Running low — replace them below for a fresh set of ten.
                   </p>
                 )}
               </div>
-              <Button
-                variant={on ? "secondary" : "primary"}
-                size="sm"
-                onClick={() => (on ? setDisableOpen(true) : setEnrolOpen(true))}
-                iconLeft={on ? <ShieldOff size={14} /> : <ShieldCheck size={14} />}
-              >
-                {on ? "Turn off" : "Turn on"}
-              </Button>
+              {/* While the estate requires two-factor the server refuses to
+                  turn it off, so the button is not offered — a control whose
+                  only outcome is an error is worse than no control. */}
+              {on && status?.requiredEstateWide ? (
+                <span className="shrink-0 text-right text-[11.5px] leading-snug text-[var(--fg-muted)]">
+                  Required for
+                  <br />
+                  every account
+                </span>
+              ) : (
+                <Button
+                  variant={on ? "secondary" : "primary"}
+                  size="sm"
+                  onClick={() => (on ? setDisableOpen(true) : setEnrolOpen(true))}
+                  iconLeft={on ? <ShieldOff size={14} /> : <ShieldCheck size={14} />}
+                >
+                  {on ? "Turn off" : "Turn on"}
+                </Button>
+              )}
             </div>
+
+            {on && (
+              <>
+                <div className="h-px bg-[var(--border-subtle)]" />
+                <div className="flex items-start justify-between gap-4">
+                  <div className="min-w-0">
+                    <p className="text-[13.5px] font-semibold text-[var(--fg-primary)]">Backup codes</p>
+                    <p className="mt-1.5 text-[12.5px] leading-relaxed text-[var(--fg-secondary)]">
+                      {status?.backupCodesRemaining ?? 0} left of ten. Replacing them makes a fresh set and
+                      stops the old ones working — your authenticator app is unaffected.
+                    </p>
+                  </div>
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    onClick={() => setCodesOpen(true)}
+                    iconLeft={<KeyRound size={14} />}
+                  >
+                    Replace
+                  </Button>
+                </div>
+              </>
+            )}
 
             <div className="h-px bg-[var(--border-subtle)]" />
 
@@ -343,6 +510,11 @@ export default function AccountSecurity({ forcePasswordChange = false, onPasswor
         required={!!status?.requiredEstateWide}
         onClose={() => setDisableOpen(false)}
         onDone={() => { setDisableOpen(false); load(); }}
+      />
+      <BackupCodesModal
+        open={codesOpen}
+        onClose={() => setCodesOpen(false)}
+        onDone={load}
       />
       <PasswordModal
         open={pwOpen}

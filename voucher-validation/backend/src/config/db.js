@@ -65,6 +65,13 @@ export async function getPool() {
     `ALTER TABLE users ADD COLUMN password_set_token CHAR(64) NULL`,
     `ALTER TABLE users ADD COLUMN password_set_expires TIMESTAMP NULL`,
     `ALTER TABLE users ADD COLUMN invited_at TIMESTAMP NULL`,
+
+    // The last TOTP time-step this account successfully used. A code stays
+    // valid for about ninety seconds across the accepted window, and without
+    // this it can be spent repeatedly inside that time — so a code glimpsed
+    // over a shoulder, read off a shared screen, or replayed from a proxied
+    // request is a second sign-in. Recording the step makes each code single-use.
+    `ALTER TABLE users ADD COLUMN totp_last_step BIGINT NULL`,
   ];
   for (const sql of migrations) {
     try { await pool.query(sql); console.log(`Migration OK: ${sql.slice(0, 60)}...`); }

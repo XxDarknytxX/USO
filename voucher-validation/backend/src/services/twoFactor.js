@@ -128,9 +128,35 @@ export async function verifyEnrolment(pool, userId, code) {
 
   const { plain, hashed } = await makeBackupCodes();
   await pool.query(
-    "UPDATE users SET totp_enabled = 1, totp_backup_codes = ?, totp_enrolled_at = NOW() WHERE id = ?",
+    `UPDATE users
+        SET totp_enabled = 1, totp_backup_codes = ?, totp_enrolled_at = NOW(),
+            totp_last_step = NULL
+      WHERE id = ?`,
     [JSON.stringify(hashed), userId]
   );
+  return { ok: true, backupCodes: plain };
+}
+
+/**
+ * Issues a fresh set of backup codes for an already-enrolled account, replacing
+ * whatever is there.
+ *
+ * This exists because the obvious alternative does not work when it is needed
+ * most: "turn two-factor off and on again" is refused outright while the estate
+ * policy requires it, which is exactly the situation where someone down to
+ * their last code cannot afford to be stuck. The authenticator secret is left
+ * alone — the phone still works, only the paper fallback is replaced.
+ */
+export async function regenerateBackupCodes(pool, userId) {
+  const [rows] = await pool.query("SELECT totp_enabled FROM users WHERE id = ?", [userId]);
+  if (!rows[0]?.totp_enabled) {
+    return { ok: false, error: "Two-factor is not on for this account." };
+  }
+  const { plain, hashed } = await makeBackupCodes();
+  await pool.query("UPDATE users SET totp_backup_codes = ? WHERE id = ?", [
+    JSON.stringify(hashed),
+    userId,
+  ]);
   return { ok: true, backupCodes: plain };
 }
 
@@ -143,13 +169,45 @@ export async function verifyEnrolment(pool, userId, code) {
  */
 export async function verifyCode(pool, userId, code) {
   const [rows] = await pool.query(
-    "SELECT totp_secret, totp_backup_codes FROM users WHERE id = ?",
+    "SELECT totp_secret, totp_backup_codes, totp_last_step FROM users WHERE id = ?",
     [userId]
   );
   const secret = rows[0]?.totp_secret;
   if (!secret) return { ok: false, error: "Two-factor authentication is not set up for this account." };
 
-  if (speakeasy.totp.verify({ secret, encoding: "base32", token: String(code), window: 1 })) {
+  // speakeasy.totp.verifyDelta returns WHICH step matched, which is what makes
+  // single-use possible: the code alone cannot be compared against anything,
+  // but the step it belongs to can be remembered.
+  const delta = speakeasy.totp.verifyDelta({
+    secret,
+    encoding: "base32",
+    token: String(code),
+    window: 1,
+  });
+
+  if (delta) {
+    const step = Math.floor(Date.now() / 30000) + delta.delta;
+    const last = rows[0]?.totp_last_step == null ? null : Number(rows[0].totp_last_step);
+
+    // A code is good for about ninety seconds across the window. Accepting it
+    // more than once in that time means a code seen over a shoulder, left on a
+    // shared screen, or captured in flight is a second sign-in for whoever has
+    // it. Each step is spent once, and anything at or before the last one
+    // spent is refused.
+    if (last != null && step <= last) {
+      return { ok: false, error: "That code has already been used. Wait for your app to show the next one." };
+    }
+
+    // Conditional on the step not having moved, so two requests arriving
+    // together cannot both claim it: the second UPDATE matches no rows.
+    const [res] = await pool.query(
+      `UPDATE users SET totp_last_step = ?
+        WHERE id = ? AND (totp_last_step IS NULL OR totp_last_step < ?)`,
+      [step, userId, step]
+    );
+    if (res.affectedRows !== 1) {
+      return { ok: false, error: "That code has already been used. Wait for your app to show the next one." };
+    }
     return { ok: true, usedBackupCode: false };
   }
 
@@ -157,12 +215,21 @@ export async function verifyCode(pool, userId, code) {
   const codes = !raw ? [] : typeof raw === "string" ? JSON.parse(raw) : raw;
   for (let i = 0; i < codes.length; i++) {
     if (await bcrypt.compare(String(code), codes[i])) {
-      codes.splice(i, 1);
-      await pool.query("UPDATE users SET totp_backup_codes = ? WHERE id = ?", [
-        JSON.stringify(codes),
-        userId,
-      ]);
-      return { ok: true, usedBackupCode: true, backupCodesRemaining: codes.length };
+      const remaining = codes.filter((_, j) => j !== i);
+      // Spending the code is conditional on the stored list still being the
+      // one we read. Two requests presenting the SAME backup code at the same
+      // moment would otherwise both compare successfully against their own
+      // copy and both write back — the code would work twice, which is the one
+      // thing a single-use code must never do. The second UPDATE matches
+      // nothing and is refused.
+      const [res] = await pool.query(
+        "UPDATE users SET totp_backup_codes = ? WHERE id = ? AND totp_backup_codes = ?",
+        [JSON.stringify(remaining), userId, typeof raw === "string" ? raw : JSON.stringify(raw)]
+      );
+      if (res.affectedRows !== 1) {
+        return { ok: false, error: "That code has already been used." };
+      }
+      return { ok: true, usedBackupCode: true, backupCodesRemaining: remaining.length };
     }
   }
   return { ok: false, error: "That code is not right." };
@@ -176,7 +243,10 @@ export async function verifyCode(pool, userId, code) {
  */
 export async function clearTwoFactor(pool, userId) {
   await pool.query(
-    "UPDATE users SET totp_enabled = 0, totp_secret = NULL, totp_backup_codes = NULL, totp_enrolled_at = NULL WHERE id = ?",
+    `UPDATE users
+        SET totp_enabled = 0, totp_secret = NULL, totp_backup_codes = NULL,
+            totp_enrolled_at = NULL, totp_last_step = NULL
+      WHERE id = ?`,
     [userId]
   );
 }
