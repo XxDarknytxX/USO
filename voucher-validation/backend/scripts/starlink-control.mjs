@@ -131,6 +131,63 @@ try {
       `  usage       ${use.ok}/${use.villages} village(s) ok, ${use.used_gb} GB total, newest ${use.newest}`
     );
 
+  /* --------------------------------------------------- per-village detail
+     A count cannot distinguish "six dishes are dark" from "six ids do not
+     match", and those need completely different responses. This names them. */
+  const [villages] = await pool.query(
+    `SELECT p.name,
+            p.starlink_device_id AS dev,
+            p.starlink_service_line_number AS line,
+            l.last_seen_at,
+            TIMESTAMPDIFF(SECOND, l.last_seen_at, NOW()) AS age_s,
+            l.latency_ms, l.drop_rate, l.obstruction_pct,
+            s.total_used_gb, s.allowance_gb, s.fetch_ok, s.error_text
+       FROM network_projects p
+       LEFT JOIN starlink_device_latest l
+              ON l.device_id = LOWER(CONCAT('ut', TRIM(LEADING 'ut' FROM LOWER(p.starlink_device_id))))
+       LEFT JOIN starlink_status s ON s.project_id = p.id
+      WHERE p.is_active = 1
+      ORDER BY (l.last_seen_at IS NULL) DESC, p.sort_order, p.name`
+  ).catch(() => [[]]);
+
+  if (villages.length) {
+    const age = (s) => {
+      if (s == null) return "never";
+      if (s < 90) return `${s}s`;
+      if (s < 5400) return `${Math.round(s / 60)}m`;
+      if (s < 172800) return `${Math.round(s / 3600)}h`;
+      return `${Math.round(s / 86400)}d`;
+    };
+    console.log("\nPER VILLAGE   (telemetry age · link · data used)");
+    for (const v of villages) {
+      const noKit = !v.dev && !v.line;
+      const seen = v.last_seen_at ? age(Number(v.age_s)) : noKit ? "no kit" : "never";
+      const link =
+        v.latency_ms != null
+          ? `${Math.round(v.latency_ms)}ms ${(Number(v.drop_rate) * 100).toFixed(1)}% drop`
+          : "";
+      const data =
+        v.total_used_gb != null
+          ? `${Number(v.total_used_gb).toFixed(1)} GB` +
+            (v.allowance_gb > 0 ? ` / ${Number(v.allowance_gb).toFixed(0)}` : " (no cap)")
+          : v.fetch_ok === 0 && v.error_text
+            ? `usage failed: ${String(v.error_text).slice(0, 48)}`
+            : "";
+      const flag = !v.last_seen_at && !noKit ? "  <-- no telemetry" : "";
+      console.log(
+        `  ${String(v.name).padEnd(16)} ${seen.padEnd(8)} ${link.padEnd(22)} ${data}${flag}`
+      );
+    }
+    const missing = villages.filter((v) => !v.last_seen_at && (v.dev || v.line));
+    if (missing.length) {
+      console.log(
+        `\n  ${missing.length} village(s) have a kit but no telemetry. Either the dish is\n` +
+          "  genuinely dark, or its id does not match what the stream reports. Check one\n" +
+          "  against the probe's device list:  node scripts/starlink-probe.mjs"
+      );
+    }
+  }
+
   if (action === "on") {
     console.log(
       "\nNow restart so both jobs pick this up immediately:\n" +
