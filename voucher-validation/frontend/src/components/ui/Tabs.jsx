@@ -5,8 +5,25 @@
  * Each tab: { value, label, icon?(node), count? }. Controlled via value/onChange.
  */
 
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+
 function cn(...parts) {
   return parts.filter(Boolean).join(" ");
+}
+
+const FADE = 28; // px of fade at an edge that has content beyond it
+
+/** Builds the mask for the scroll strip. No hidden content → no mask at all. */
+function maskStyle({ left, right }) {
+  if (!left && !right) return undefined;
+  const stops = [
+    left ? "transparent 0" : "#000 0",
+    left ? `#000 ${FADE}px` : null,
+    right ? `#000 calc(100% - ${FADE}px)` : null,
+    right ? "transparent 100%" : "#000 100%",
+  ].filter(Boolean);
+  const g = `linear-gradient(to right, ${stops.join(", ")})`;
+  return { maskImage: g, WebkitMaskImage: g };
 }
 
 export default function Tabs({
@@ -17,6 +34,28 @@ export default function Tabs({
   size = "md",
   className,
 }) {
+  // Declared above the pills branch so hook order never depends on `variant`.
+  const stripRef = useRef(null);
+  const [edges, setEdges] = useState({ left: false, right: false });
+
+  const syncEdges = useCallback(() => {
+    const el = stripRef.current;
+    if (!el) return;
+    const max = el.scrollWidth - el.clientWidth;
+    const next = { left: el.scrollLeft > 1, right: max > 1 && el.scrollLeft < max - 1 };
+    setEdges((p) => (p.left === next.left && p.right === next.right ? p : next));
+  }, []);
+
+  useLayoutEffect(syncEdges, [syncEdges, tabs.length, size, variant]);
+
+  useEffect(() => {
+    const el = stripRef.current;
+    if (!el || typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver(syncEdges);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [syncEdges, variant]);
+
   if (variant === "pills") {
     return (
       <div
@@ -61,10 +100,18 @@ export default function Tabs({
     );
   }
 
-  // underline variant
+  // underline variant. The strip scrolls when the tabs overrun the container.
+  // A fade on whichever edge has content beyond it makes a clipped tab read as
+  // "there is more" rather than as a layout bug. The mask is applied only when
+  // there is genuinely something hidden, so a strip that fits is never dimmed.
   return (
     <div className={cn("relative border-b border-[var(--border-default)]", className)}>
-      <div className="flex items-center gap-1 overflow-x-auto scrollbar-none">
+      <div
+        ref={stripRef}
+        onScroll={syncEdges}
+        className="flex items-center gap-1 overflow-x-auto scrollbar-none"
+        style={maskStyle(edges)}
+      >
         {tabs.map((tab) => {
           const active = tab.value === value;
           return (

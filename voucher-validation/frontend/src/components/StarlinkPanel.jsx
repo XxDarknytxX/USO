@@ -7,11 +7,15 @@
 // (this app's charting library) rather than pulling in chart.js, and re-skinned to
 // the admin theme so it works in both light and dark.
 //
-// The palette is the source's: blue for included priority data, amber for top-up,
-// grey for standard. Deliberately NOT Vodafone red — a whole chart of brand red
-// reads as one solid block and drowns the rest of the dashboard.
+// This chart was the model the rest of the app's charts were standardised on, so
+// it now spends the shared furniture from chart.jsx — ChartStat for the headline,
+// axisX/axisY/gridProps for the plot, LegendRows for the breakdown — rather than
+// its own near-identical copies. The palette is the source's: blue for included
+// priority data, amber for top-up, grey for standard. Deliberately NOT Vodafone
+// red — a whole chart of brand red reads as one solid block and drowns the rest
+// of the dashboard.
 //
-// Self-fetching on purpose: it stays out of SiteDashboard's own load() and out of
+// Self-fetching on purpose: it stays out of its host page's own load() and out of
 // the page-level loading gate, so a slow or failing Starlink API can never delay
 // or break the rest of the dashboard. Renders NOTHING when the village has no
 // Starlink configured — most villages will be in that state.
@@ -23,12 +27,28 @@ import {
 import { Satellite, RefreshCw, Info } from "lucide-react";
 
 import { networkApi } from "../services/api";
-import { Panel, Badge, EmptyState, CHART_COLORS, ChartTooltip, useChartTheme } from "./ui";
+import {
+  Panel,
+  Badge,
+  EmptyState,
+  Segmented,
+  CHART_COLORS,
+  ChartTooltip,
+  ChartStat,
+  LegendRow,
+  LegendRows,
+  useChartTheme,
+  axisX,
+  axisY,
+  gridProps,
+  BAR_MAX_SIZE,
+  BAR_CATEGORY_GAP,
+} from "./ui";
 
 const CYCLES = [
-  { key: "A", label: "Current" },
-  { key: "B", label: "Previous" },
-  { key: "C", label: "2 cycles ago" },
+  { value: "A", label: "Current" },
+  { value: "B", label: "Previous" },
+  { value: "C", label: "2 cycles ago" },
 ];
 
 const SERIES = [
@@ -60,31 +80,12 @@ const dateRange = (c) => {
   return `${f(c.startDate)} to ${f(lastDay)}`;
 };
 
-/** One row of the breakdown under the chart. */
-function UsageRow({ color, label, used, cap }) {
-  const pct = cap > 0 ? Math.min(100, (used / cap) * 100) : null;
-  return (
-    <div className="flex items-center gap-3">
-      <span className="h-2.5 w-2.5 rounded-full shrink-0" style={{ background: color }} />
-      <span className="text-[12.5px] text-[var(--fg-secondary)] flex-1 min-w-0 truncate">{label}</span>
-      {pct != null && (
-        <span className="hidden sm:block w-24 h-1.5 rounded-full bg-[var(--bg-surface)] overflow-hidden shrink-0">
-          <span className="block h-full rounded-full" style={{ width: `${pct}%`, background: color }} />
-        </span>
-      )}
-      <span className="text-[12.5px] font-semibold text-[var(--fg-primary)] tabular-nums shrink-0">
-        {gb(used)}
-        {cap > 0 && <span className="font-normal text-[var(--fg-muted)]"> / {gb(cap)}</span>}
-      </span>
-    </div>
-  );
-}
-
+/** A kit identifier, stated beside the headline rather than in a panel of its own. */
 function KitFact({ label, children }) {
   return (
     <div className="min-w-0">
-      <p className="text-[10px] uppercase tracking-wider text-[var(--fg-muted)] font-semibold">{label}</p>
-      <div className="text-[12.5px] text-[var(--fg-primary)] mt-0.5 truncate">{children}</div>
+      <p className="text-label">{label}</p>
+      <div className="text-[12.5px] text-[var(--fg-primary)] mt-1 truncate">{children}</div>
     </div>
   );
 }
@@ -122,59 +123,47 @@ export default function StarlinkPanel({ projectId }) {
 
   // The source sets chart.js `borderRadius: 4` on EVERY dataset, which rounds
   // all four corners of each stacked segment — the pill look. Recharts needs the
-  // radius on the Bar itself to do the same.
-  const BAR_RADIUS = [4, 4, 4, 4];
+  // radius on the Bar itself to do the same, and the shared BAR_RADIUS is square
+  // at the foot (right for a single series, wrong for a stack).
+  const STACK_RADIUS = [4, 4, 4, 4];
 
   return (
     <Panel
       title="Starlink"
       subtitle={kit.nickname || kit.serviceLineNumber || "Data usage"}
       icon={<Satellite size={15} />}
+      tone="teal"
       actions={
-        <div className="flex items-center gap-0.5 p-0.5 rounded-full bg-[var(--bg-surface)] border border-[var(--border-default)]">
-          {CYCLES.slice(0, cycleCount).map((c) => (
-            <button
-              key={c.key}
-              onClick={() => setCycle(c.key)}
-              className={
-                "px-3 py-1 rounded-full text-[11.5px] font-medium transition-colors whitespace-nowrap " +
-                (cycle === c.key
-                  ? "bg-[var(--accent)] text-white shadow-sm"
-                  : "text-[var(--fg-muted)] hover:text-[var(--fg-secondary)]")
-              }
-            >
-              {c.label}
-            </button>
-          ))}
-        </div>
+        <Segmented
+          size="sm"
+          value={cycle}
+          onChange={setCycle}
+          options={CYCLES.slice(0, cycleCount)}
+        />
       }
     >
-      {/* Headline: total consumed this cycle */}
-      <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-3 mb-5">
-        <div>
-          <p className="flex items-baseline gap-2">
-            <span className="text-3xl sm:text-4xl font-semibold text-[var(--fg-primary)] tabular-nums">
-              {t ? gb1(t.totalUsed) : "—"}
-            </span>
-            <span className="text-sm font-medium text-[var(--accent)]">GB used</span>
-          </p>
-          <p className="text-[11.5px] text-[var(--fg-muted)] mt-1">{dateRange(data?.cycle) || "This billing cycle"}</p>
-        </div>
-
-        <div className="grid grid-cols-2 sm:flex sm:items-end gap-4 sm:gap-6">
-          <KitFact label="Service line">
-            <span className="font-mono text-[11.5px]">{kit.serviceLineNumber || "—"}</span>
-          </KitFact>
-          <KitFact label="Device">
-            <span className="font-mono text-[11.5px]">{kit.deviceId || "—"}</span>
-          </KitFact>
-          <KitFact label="Status">
-            {kit.active == null
-              ? "—"
-              : <Badge tone={kit.active ? "success" : "neutral"}>{kit.active ? "Active" : "Inactive"}</Badge>}
-          </KitFact>
-        </div>
-      </div>
+      {/* Headline: total consumed this cycle, with the kit's identifiers beside
+          it — they are reference detail, not figures, so they stay small. */}
+      <ChartStat
+        value={t ? gb1(t.totalUsed) : "—"}
+        unit="GB used"
+        caption={dateRange(data?.cycle) || "This billing cycle"}
+        right={
+          <div className="grid grid-cols-2 sm:flex sm:items-end gap-4 sm:gap-7">
+            <KitFact label="Service line">
+              <span className="font-mono text-[11.5px]">{kit.serviceLineNumber || "—"}</span>
+            </KitFact>
+            <KitFact label="Device">
+              <span className="font-mono text-[11.5px]">{kit.deviceId || "—"}</span>
+            </KitFact>
+            <KitFact label="Status">
+              {kit.active == null
+                ? "—"
+                : <Badge tone={kit.active ? "success" : "neutral"}>{kit.active ? "Active" : "Inactive"}</Badge>}
+            </KitFact>
+          </div>
+        }
+      />
 
       {days.length === 0 ? (
         <EmptyState
@@ -189,32 +178,11 @@ export default function StarlinkPanel({ projectId }) {
       ) : (
         <>
           <ResponsiveContainer width="100%" height={300}>
-            <BarChart data={days} margin={{ top: 8, right: 4, left: -8, bottom: 0 }} barCategoryGap="22%">
-              <CartesianGrid strokeDasharray="3 3" vertical={false} stroke={ct.grid} />
-              <XAxis
-                dataKey="d"
-                tickLine={false}
-                axisLine={false}
-                tick={{ fill: ct.axis, fontSize: ct.tickFontSize }}
-                minTickGap={14}
-              />
-              <YAxis
-                tickLine={false}
-                axisLine={false}
-                width={46}
-                tick={{ fill: ct.axis, fontSize: ct.tickFontSize }}
-                label={{
-                  value: "GB",
-                  angle: -90,
-                  position: "insideLeft",
-                  offset: 16,
-                  style: { fill: ct.axis, fontSize: 11 },
-                }}
-              />
-              <Tooltip
-                content={<ChartTooltip valueFormatter={gb} />}
-                cursor={{ fill: ct.cursor }}
-              />
+            <BarChart data={days} margin={{ top: 8, right: 4, left: -8, bottom: 0 }} barCategoryGap={BAR_CATEGORY_GAP}>
+              <CartesianGrid {...gridProps(ct)} />
+              <XAxis dataKey="d" {...axisX(ct)} />
+              <YAxis {...axisY(ct, { unit: "GB" })} />
+              <Tooltip content={<ChartTooltip valueFormatter={gb} />} cursor={{ fill: ct.cursor }} />
               {SERIES.map((s) => (
                 <Bar
                   key={s.key}
@@ -222,35 +190,55 @@ export default function StarlinkPanel({ projectId }) {
                   name={s.name}
                   stackId="a"
                   fill={s.color}
-                  radius={BAR_RADIUS}
-                  maxBarSize={22}
+                  radius={STACK_RADIUS}
+                  maxBarSize={BAR_MAX_SIZE}
                   isAnimationActive={false}
                 />
               ))}
             </BarChart>
           </ResponsiveContainer>
 
-          {/* Breakdown, mirroring the premium dashboard's summary block */}
+          {/* Breakdown, mirroring the premium dashboard's summary block. The
+              share meters read against each allowance's cap, so `amount` is the
+              raw number and `value` keeps the "used / cap" wording. */}
           {t && (
-            <div className="mt-5 pt-4 border-t border-[var(--border-default)] space-y-2.5">
-              <UsageRow color={CHART_COLORS.blue} label="Priority (included)" used={t.baseUsed} cap={t.baseCap} />
-              <UsageRow color={CHART_COLORS.amber} label="Priority (top-up)" used={t.topUsed} cap={t.topCap} />
-              <UsageRow color={CHART_COLORS.slate} label="Standard" used={t.standardUsed} cap={0} />
-              <div className="pt-2.5 mt-2.5 border-t border-[var(--border-default)] flex items-center justify-between">
-                <span className="text-[12.5px] font-medium text-[var(--fg-primary)]">Total used</span>
-                <span className="text-[13px] font-semibold text-[var(--fg-primary)] tabular-nums">{gb(t.totalUsed)}</span>
+            <LegendRows>
+              <LegendRow
+                color={CHART_COLORS.blue}
+                label="Priority (included)"
+                amount={t.baseUsed}
+                total={t.baseCap}
+                value={<Used used={t.baseUsed} cap={t.baseCap} />}
+              />
+              <LegendRow
+                color={CHART_COLORS.amber}
+                label="Priority (top-up)"
+                amount={t.topUsed}
+                total={t.topCap}
+                value={<Used used={t.topUsed} cap={t.topCap} />}
+              />
+              <LegendRow
+                color={CHART_COLORS.slate}
+                label="Standard"
+                amount={t.standardUsed}
+                total={0}
+                value={<Used used={t.standardUsed} cap={0} />}
+              />
+              <div className="pt-3 mt-3 border-t border-[var(--border-subtle)] flex items-center justify-between">
+                <span className="font-display text-[12.5px] font-semibold text-[var(--fg-primary)]">Total used</span>
+                <span className="text-[13.5px] font-semibold text-[var(--fg-primary)] tabular-nums">{gb(t.totalUsed)}</span>
               </div>
-            </div>
+            </LegendRows>
           )}
 
-          <div className="flex items-center justify-between mt-3 text-[11px] text-[var(--fg-muted)]">
+          <div className="flex items-center justify-between gap-3 mt-4 text-[11.5px] text-[var(--fg-muted)]">
             <span className="inline-flex items-center gap-1.5">
-              <Info size={11} />
+              <Info size={12} />
               Usage is tracked in UTC and is approximate.
             </span>
             {data?.fetchedAt && (
-              <span className="inline-flex items-center gap-1.5">
-                {data.stale && <RefreshCw size={10} />}
+              <span className="inline-flex items-center gap-1.5 whitespace-nowrap">
+                {data.stale && <RefreshCw size={11} />}
                 {data.stale ? `cached, ${relTime(data.fetchedAt)}` : `updated ${relTime(data.fetchedAt)}`}
               </span>
             )}
@@ -258,5 +246,15 @@ export default function StarlinkPanel({ projectId }) {
         </>
       )}
     </Panel>
+  );
+}
+
+/** "12.34 GB / 40.00 GB" — the cap stays subordinate to the figure that moved. */
+function Used({ used, cap }) {
+  return (
+    <>
+      {gb(used)}
+      {cap > 0 && <span className="font-normal text-[var(--fg-muted)]"> / {gb(cap)}</span>}
+    </>
   );
 }

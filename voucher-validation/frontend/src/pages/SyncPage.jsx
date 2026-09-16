@@ -1,5 +1,13 @@
 // src/pages/SyncPage.jsx
-// Manual sync controls + history table.
+//
+// Pull the voucher inventory from Ruijie Cloud, and the log of every run.
+//
+// The page used to say everything twice: two action cards repeated the two
+// header buttons, and the last run's counts were prose inside one of them. Now
+// the actions live once, in the header, the last run is a KPI row (so "did the
+// overnight sync work" is answerable without reading the table), and the
+// connection test reports into a single strip that only exists once you have
+// run it. Nothing was dropped — it moved.
 
 import { useEffect, useRef, useState } from "react";
 import toast from "react-hot-toast";
@@ -9,20 +17,36 @@ import {
   CheckCircle,
   XCircle,
   Clock,
-  ArrowDownCircle,
+  Database,
+  PlusCircle,
 } from "lucide-react";
 
 import { voucherApi } from "../services/api";
 import {
   Button,
-  Badge,
   EmptyState,
   PageHeader,
   Panel,
   SkeletonTable,
+  PageShell,
+  KpiGrid,
+  StatCard,
+  Toolbar,
+  Segmented,
+  StatusPill,
+  DataTable,
+  Th,
+  Td,
 } from "../components/ui";
 
 const LIMIT = 20;
+
+// Sync outcomes, said in colour once so the KPI tile and the table agree.
+const STATUS_FG = {
+  completed: "var(--success-fg)",
+  failed: "var(--danger-fg)",
+  running: "var(--warning-fg)",
+};
 
 export default function SyncPage() {
   const [syncing, setSyncing] = useState(false);
@@ -64,8 +88,8 @@ export default function SyncPage() {
     }
   }
 
-  // The "Last sync" card must reflect the true most-recent run regardless of the
-  // table's filter/page, so it uses its own tiny unfiltered fetch.
+  // The "Last sync" KPIs must reflect the true most-recent run regardless of the
+  // table's filter/page, so they use their own tiny unfiltered fetch.
   async function loadLastSync() {
     try {
       const data = await voucherApi.syncLogs({ page: 1, limit: 1 });
@@ -76,6 +100,7 @@ export default function SyncPage() {
   }
 
   function changeFilter(t) {
+    if (loading) return; // the strip stays visible while a page is in flight
     typeFilterRef.current = t;
     setTypeFilter(t);
     setPage(1);
@@ -135,13 +160,16 @@ export default function SyncPage() {
     return isNaN(dt.getTime()) ? "—" : dt.toLocaleString();
   }
 
+  const lastStatus = lastSync?.status;
+
   return (
-    <div className="p-4 sm:p-6 lg:p-8">
+    <PageShell>
       <PageHeader
         eyebrow="Operations"
         title="Sync"
         subtitle="Pull the latest voucher inventory from Ruijie Cloud."
-        icon={<RefreshCw size={20} />}
+        icon={<RefreshCw size={22} />}
+        tone="teal"
         actions={
           <>
             <Button
@@ -166,239 +194,214 @@ export default function SyncPage() {
         }
       />
 
-      <div className="mt-6 space-y-5">
-        {/* ----- Action cards ----- */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <Panel
-            title="Sync vouchers"
-            subtitle="Pull the latest inventory from Ruijie Cloud"
-            icon={<ArrowDownCircle size={15} />}
-          >
-            <div className="flex flex-col gap-3">
-              {lastSync && (
-                <p className="text-[12.5px] text-[var(--fg-secondary)] leading-relaxed">
-                  Last sync · {formatDate(lastSync.sync_started_at)}
-                  <br />
-                  {lastSync.total_processed} processed · {lastSync.total_new} new
-                  · {lastSync.total_updated} updated
-                </p>
-              )}
-              <Button
-                onClick={handleSync}
-                variant="primary"
-                size="md"
-                loading={syncing}
-                iconLeft={!syncing && <RefreshCw size={14} />}
-                className="w-full"
-              >
-                {syncing ? "Syncing…" : "Sync now"}
-              </Button>
-            </div>
-          </Panel>
-
-          <Panel
-            title="API connection"
-            subtitle="Test Ruijie Cloud API connectivity"
-            icon={<Wifi size={15} />}
-          >
-            <div className="flex flex-col gap-3">
-              {connectionStatus && (
-                <div
-                  className={
-                    "flex items-start gap-2 px-3 py-2 rounded-lg text-[12px] font-medium border " +
-                    (connectionStatus.success
-                      ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/20"
-                      : "bg-[var(--accent)]/10 text-[var(--accent)] border-[var(--accent)]/20")
-                  }
-                >
-                  {connectionStatus.success ? (
-                    <CheckCircle size={13} className="mt-[2px] shrink-0" />
-                  ) : (
-                    <XCircle size={13} className="mt-[2px] shrink-0" />
-                  )}
-                  <span>
-                    {connectionStatus.success
-                      ? "Connected successfully"
-                      : connectionStatus.error || "Connection failed"}
-                  </span>
-                </div>
-              )}
-              <Button
-                onClick={testConnection}
-                variant="secondary"
-                size="md"
-                loading={testing}
-                iconLeft={!testing && <Wifi size={14} />}
-                className="w-full"
-              >
-                Test connection
-              </Button>
-            </div>
-          </Panel>
-        </div>
-
-        {/* ----- History table ----- */}
-        {loading && syncLogs.length === 0 ? (
-          <SkeletonTable rows={5} cols={9} />
-        ) : (
-          <Panel
-            title="Sync history"
-            icon={<Clock size={15} />}
-            padding={false}
-            actions={
-              <div className="inline-flex rounded-md border border-[var(--border-default)] p-0.5">
-                {[
-                  { v: "all", label: "All" },
-                  { v: "manual", label: "Manual" },
-                  { v: "auto", label: "Automatic" },
-                ].map((o) => (
-                  <button
-                    key={o.v}
-                    onClick={() => changeFilter(o.v)}
-                    disabled={loading}
-                    className={
-                      "px-3 py-1 text-[12px] font-medium rounded transition-colors disabled:opacity-60 " +
-                      (typeFilter === o.v
-                        ? "bg-[var(--accent)] text-white"
-                        : "text-[var(--fg-secondary)] hover:bg-[var(--bg-surface)]")
-                    }
-                  >
-                    {o.label}
-                  </button>
-                ))}
-              </div>
-            }
-          >
-            {syncLogs.length === 0 ? (
-              <EmptyState
-                icon={Clock}
-                title={
-                  typeFilter === "all"
-                    ? "No sync history"
-                    : `No ${typeFilter === "auto" ? "automatic" : "manual"} syncs`
-                }
-                description={
-                  typeFilter === "all"
-                    ? "Run a sync to populate this log."
-                    : "Try a different filter."
-                }
-              />
-            ) : (
+      {/* The last run, which is the only thing anyone opens this page to check.
+          The headline is the age of the run; the exact timestamp and outcome stay
+          on the sub-line, because "did it work" is read before "when". */}
+      <KpiGrid cols={4}>
+        <StatCard
+          label="Last sync"
+          value={lastSync ? relativeTime(lastSync.sync_started_at) : "Never"}
+          sub={
+            lastSync ? (
               <>
-                <div className="overflow-x-auto">
-                  <table className="w-full text-[13px]">
-                    <thead>
-                      <tr className="text-label border-b border-[var(--border-default)]">
-                        <th className="px-5 py-3">Date</th>
-                        <th className="px-5 py-3">Type</th>
-                        <th className="px-5 py-3">Status</th>
-                        <th className="px-5 py-3">Fetched</th>
-                        <th className="px-5 py-3">Processed</th>
-                        <th className="px-5 py-3">New</th>
-                        <th className="px-5 py-3">Updated</th>
-                        <th className="px-5 py-3">Archived</th>
-                        <th className="px-5 py-3">User</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-[var(--border-default)]">
-                      {syncLogs.map((log) => (
-                        <tr
-                          key={log.id}
-                          className="hover:bg-[var(--bg-surface)] transition-colors"
-                        >
-                          <td className="px-5 py-3 text-[12.5px] font-mono text-[var(--fg-secondary)]">
-                            {formatDate(log.sync_started_at)}
-                          </td>
-                          <td className="px-5 py-3">
-                            <TypeBadge type={log.sync_type} />
-                          </td>
-                          <td className="px-5 py-3">
-                            <Badge
-                              tone={
-                                log.status === "completed"
-                                  ? "success"
-                                  : log.status === "failed"
-                                    ? "danger"
-                                    : "warning"
-                              }
-                            >
-                              {log.status}
-                            </Badge>
-                          </td>
-                          <Td>{log.total_fetched}</Td>
-                          <Td>{log.total_processed}</Td>
-                          <Td accent="success">{log.total_new}</Td>
-                          <Td accent="info">{log.total_updated}</Td>
-                          <Td accent="warning">{log.total_archived || 0}</Td>
-                          <td className="px-5 py-3 text-[12.5px] text-[var(--fg-muted)]">
-                            {log.user_email || "—"}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-
-                <div className="flex items-center justify-between px-5 py-3 border-t border-[var(--border-default)] text-[12px] text-[var(--fg-muted)]">
-                  <span>
-                    {total} total · page {page} of {totalPages}
-                  </span>
-                  <div className="flex items-center gap-1">
-                    <Button
-                      variant="ghost"
-                      size="xs"
-                      disabled={loading || page <= 1}
-                      onClick={() => goPage(page - 1)}
-                    >
-                      Prev
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      size="xs"
-                      disabled={loading || page >= totalPages}
-                      onClick={() => goPage(page + 1)}
-                    >
-                      Next
-                    </Button>
-                  </div>
-                </div>
+                <span className="font-semibold" style={{ color: STATUS_FG[lastStatus] || "var(--fg-secondary)" }}>
+                  {lastStatus}
+                </span>
+                {` · ${lastSync.sync_type === "auto" ? "Automatic" : "Manual"} · ${formatDate(
+                  lastSync.sync_started_at
+                )}`}
               </>
-            )}
-          </Panel>
-        )}
-      </div>
-    </div>
+            ) : (
+              "Run a sync to populate this log"
+            )
+          }
+          icon={<Clock size={17} />}
+          color="cyan"
+        />
+        <StatCard
+          label="Processed"
+          value={lastSync ? Number(lastSync.total_processed || 0).toLocaleString() : "—"}
+          sub={lastSync ? `${Number(lastSync.total_fetched || 0).toLocaleString()} fetched from Ruijie` : undefined}
+          icon={<Database size={17} />}
+          color="blue"
+        />
+        <StatCard
+          label="New vouchers"
+          value={lastSync ? Number(lastSync.total_new || 0).toLocaleString() : "—"}
+          sub="Added on the last run"
+          icon={<PlusCircle size={17} />}
+          color="emerald"
+        />
+        <StatCard
+          label="Updated"
+          value={lastSync ? Number(lastSync.total_updated || 0).toLocaleString() : "—"}
+          sub={lastSync ? `${Number(lastSync.total_archived || 0).toLocaleString()} archived` : undefined}
+          icon={<RefreshCw size={17} />}
+          color="indigo"
+        />
+      </KpiGrid>
+
+      {/* Connection test result — only on screen once you have asked for it. */}
+      {connectionStatus && (
+        <div
+          role="status"
+          className={
+            "flex items-start gap-2.5 rounded-xl border px-4 py-3 text-[12.5px] font-medium " +
+            (connectionStatus.success
+              ? "bg-[var(--success-soft)] border-[var(--success-border)] text-[var(--success-fg)]"
+              : "bg-[var(--danger-soft)] border-[var(--danger-border)] text-[var(--danger-fg)]")
+          }
+        >
+          {connectionStatus.success ? (
+            <CheckCircle size={14} className="mt-[1px] shrink-0" />
+          ) : (
+            <XCircle size={14} className="mt-[1px] shrink-0" />
+          )}
+          <span className="min-w-0">
+            {connectionStatus.success
+              ? "Connected to the Ruijie Cloud API successfully."
+              : connectionStatus.error || "Connection failed"}
+          </span>
+        </div>
+      )}
+
+      <Toolbar>
+        <Segmented
+          value={typeFilter}
+          onChange={changeFilter}
+          options={[
+            { value: "all", label: "All runs" },
+            { value: "manual", label: "Manual" },
+            { value: "auto", label: "Automatic" },
+          ]}
+          className={loading ? "opacity-60" : ""}
+        />
+        <span className="text-[12.5px] text-[var(--fg-muted)] ml-auto tabular-nums">
+          {total.toLocaleString()} run{total === 1 ? "" : "s"} · page {page} of {totalPages}
+        </span>
+      </Toolbar>
+
+      {loading && syncLogs.length === 0 ? (
+        <SkeletonTable rows={5} cols={9} />
+      ) : (
+        <Panel title="Sync history" subtitle="Every run, manual and scheduled" icon={<Clock size={15} />} tone="teal" padding={false}>
+          {syncLogs.length === 0 ? (
+            <EmptyState
+              icon={Clock}
+              title={typeFilter === "all" ? "No sync history" : `No ${typeFilter === "auto" ? "automatic" : "manual"} syncs`}
+              description={typeFilter === "all" ? "Run a sync to populate this log." : "Try a different filter."}
+              action={
+                typeFilter === "all" ? (
+                  <Button
+                    onClick={handleSync}
+                    variant="primary"
+                    size="sm"
+                    loading={syncing}
+                    iconLeft={!syncing && <RefreshCw size={13} />}
+                  >
+                    {syncing ? "Syncing…" : "Sync now"}
+                  </Button>
+                ) : (
+                  <Button variant="secondary" size="sm" onClick={() => changeFilter("all")}>
+                    Show all runs
+                  </Button>
+                )
+              }
+            />
+          ) : (
+            <>
+              <DataTable>
+                <thead>
+                  <tr>
+                    <Th>Date</Th>
+                    <Th>Type</Th>
+                    <Th>Status</Th>
+                    <Th align="right">Fetched</Th>
+                    <Th align="right">Processed</Th>
+                    <Th align="right">New</Th>
+                    <Th align="right">Updated</Th>
+                    <Th align="right">Archived</Th>
+                    <Th>User</Th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {syncLogs.map((log) => (
+                    <tr key={log.id}>
+                      <Td mono nowrap>
+                        {formatDate(log.sync_started_at)}
+                      </Td>
+                      <Td>
+                        <StatusPill tone={log.sync_type === "auto" ? "info" : "neutral"}>
+                          {log.sync_type === "auto" ? "Automatic" : "Manual"}
+                        </StatusPill>
+                      </Td>
+                      <Td>
+                        <StatusPill
+                          tone={log.status === "completed" ? "success" : log.status === "failed" ? "danger" : "warning"}
+                        >
+                          {log.status}
+                        </StatusPill>
+                      </Td>
+                      <CountCell value={log.total_fetched} />
+                      <CountCell value={log.total_processed} />
+                      <CountCell value={log.total_new} tone="var(--success-fg)" />
+                      <CountCell value={log.total_updated} tone="var(--info-fg)" />
+                      <CountCell value={log.total_archived || 0} tone="var(--warning-fg)" />
+                      <Td muted nowrap>
+                        {log.user_email || "—"}
+                      </Td>
+                    </tr>
+                  ))}
+                </tbody>
+              </DataTable>
+
+              <div className="flex items-center justify-between gap-3 px-5 py-3 border-t border-[var(--border-subtle)] bg-[var(--surface-sunken)] text-[12.5px] text-[var(--fg-muted)]">
+                <span className="tabular-nums">
+                  {total} total · page {page} of {totalPages}
+                </span>
+                <div className="flex items-center gap-1">
+                  <Button variant="ghost" size="xs" disabled={loading || page <= 1} onClick={() => goPage(page - 1)}>
+                    Prev
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="xs"
+                    disabled={loading || page >= totalPages}
+                    onClick={() => goPage(page + 1)}
+                  >
+                    Next
+                  </Button>
+                </div>
+              </div>
+            </>
+          )}
+        </Panel>
+      )}
+    </PageShell>
   );
 }
 
-function TypeBadge({ type }) {
-  const auto = type === "auto";
+/* ------------ Local helpers ------------------------------------------------ */
+
+/** A count column: tabular, and tinted only where the number carries meaning. */
+function CountCell({ value, tone }) {
   return (
-    <span
-      className={
-        "inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium border " +
-        (auto
-          ? "bg-blue-500/10 text-blue-400 border-blue-500/20"
-          : "bg-[var(--bg-surface)] text-[var(--fg-secondary)] border-[var(--border-default)]")
-      }
-    >
-      {auto ? "Automatic" : "Manual"}
-    </span>
+    <Td align="right" nowrap className="tabular-nums font-semibold">
+      <span style={tone ? { color: tone } : undefined}>{Number(value || 0).toLocaleString()}</span>
+    </Td>
   );
 }
 
-function Td({ children, accent }) {
-  const color =
-    accent === "success"
-      ? "text-emerald-400"
-      : accent === "info"
-        ? "text-blue-400"
-        : accent === "warning"
-          ? "text-amber-400"
-          : "text-[var(--fg-secondary)]";
-  return (
-    <td className={`px-5 py-3 text-[13px] font-semibold ${color}`}>
-      {children}
-    </td>
-  );
+/** "12 min ago" — the exact timestamp still ships as the tile's sub-line. */
+function relativeTime(value) {
+  if (!value) return "—";
+  const then = new Date(value).getTime();
+  if (isNaN(then)) return "—";
+  const mins = Math.round((Date.now() - then) / 60000);
+  if (mins < 1) return "Just now";
+  if (mins < 60) return `${mins} min ago`;
+  const hours = Math.round(mins / 60);
+  if (hours < 24) return `${hours} hr ago`;
+  const days = Math.round(hours / 24);
+  return `${days} day${days === 1 ? "" : "s"} ago`;
 }

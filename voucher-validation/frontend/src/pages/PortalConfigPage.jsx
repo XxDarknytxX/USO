@@ -1,11 +1,18 @@
 // src/pages/PortalConfigPage.jsx
 //
-// Portal Plans management page.
-// Rebuilt on the "Operations Console" design system — IBM Plex typography,
-// Vodafone red as the only chromatic punctuation, hairline borders, dense
-// table with breathable modal forms.
+// Portal plans — the catalogue the captive portal sells from. A plan is two
+// things at once: a price card a villager reads on their phone, and a mapping
+// onto a Ruijie user group that vouchers are claimed from. The page is laid out
+// so those two jobs stay visibly separate.
+//
+// Rebuilt on the Lightning primitives: one list instead of a wall of cards,
+// filters in a Toolbar, and — the piece that mattered most — a create/edit form
+// with room to think in. The old modal packed fifteen fields into a three- and
+// four-column grid with no grouping, so nothing told you which fields a customer
+// sees and which ones talk to Ruijie. It is now grouped sections with a label
+// rail carrying that explanation.
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useMemo, useState, useCallback } from "react";
 import { portalConfigApi, voucherApi } from "../services/api";
 import { useAuth } from "../hooks/useAuth";
 import { useSite } from "../hooks/useSite";
@@ -17,10 +24,11 @@ import {
   Trash2,
   Check,
   X,
-  Filter,
   Star,
   Layers,
   Tag,
+  Ticket,
+  MapPin,
   Sparkles,
 } from "lucide-react";
 
@@ -36,10 +44,20 @@ import {
   Toggle,
   TagInput,
   Badge,
-  Section,
   EmptyState,
   PageHeader,
   Panel,
+  PageShell,
+  KpiGrid,
+  StatCard,
+  Toolbar,
+  SearchInput,
+  StatusPill,
+  DataTable,
+  Th,
+  Td,
+  TableMessage,
+  RecordCell,
 } from "../components/ui";
 
 // ---------------------------------------------------------------------------
@@ -53,6 +71,20 @@ const CATEGORY_TONES = {
   monthly: "success",
   custom: "brand",
 };
+
+// Object-tile colour per category, so a long list is scannable by hue alone —
+// the one place colour is allowed to live on this page.
+const CATEGORY_TILES = {
+  daily: "blue",
+  weekly: "orange",
+  monthly: "green",
+  custom: "violet",
+};
+
+// Toolbar controls are 36px pills. The Field primitives default to 40px and a
+// small radius; inline is the one override Tailwind's class ordering cannot
+// undo, so the filter strip stays a single height.
+const PILL = { height: 36, borderRadius: 999 };
 
 const ICON_OPTIONS = [
   { value: "fa-wifi", label: "WiFi" },
@@ -94,13 +126,14 @@ const EMPTY_FORM = {
 // ---------------------------------------------------------------------------
 export default function PortalConfigPage() {
   const { isAdmin } = useAuth();
-  const { activeGroupId, visibleSiteIds, sites } = useSite();
+  const { activeGroupId, visibleSiteIds, sites, activeSite, isGlobal } = useSite();
 
   const [plans, setPlans] = useState([]);
   const [loading, setLoading] = useState(true);
   const [userGroups, setUserGroups] = useState([]);
 
   const [categoryFilter, setCategoryFilter] = useState("");
+  const [query, setQuery] = useState("");
 
   const [showModal, setShowModal] = useState(false);
   const [editingPlan, setEditingPlan] = useState(null);
@@ -206,191 +239,253 @@ export default function PortalConfigPage() {
     }
   };
 
-  const hasFilters = !!categoryFilter;
+  // Category is a server-side filter (it changes what we fetch); the search box
+  // is local, because the list is small enough that a round-trip per keystroke
+  // would be the slower answer.
+  const visiblePlans = useMemo(() => {
+    const needle = query.trim().toLowerCase();
+    if (!needle) return plans;
+    return plans.filter((p) =>
+      [p.planKey, p.name, p.category, p.userGroupName, p.userGroup, p.dataAllowance]
+        .some((v) => String(v || "").toLowerCase().includes(needle))
+    );
+  }, [plans, query]);
+
+  const stats = useMemo(() => {
+    const active = plans.filter((p) => p.isActive).length;
+    const featured = plans.filter((p) => p.popular).length;
+    const withStock = plans.filter((p) => p.availableVouchers != null);
+    return {
+      active,
+      featured,
+      stock: withStock.length
+        ? withStock.reduce((n, p) => n + Number(p.availableVouchers || 0), 0)
+        : null,
+    };
+  }, [plans]);
+
+  const hasFilters = !!categoryFilter || !!query.trim();
+  const scopeLabel = isGlobal ? "All villages" : activeSite?.name || "the selected village";
+  const colSpan = isAdmin ? 7 : 6;
 
   return (
-    <div className="p-4 sm:p-6 lg:p-8">
-      {/* Header */}
+    <PageShell>
       <PageHeader
         eyebrow="Portal"
         title="Portal Plans"
-        subtitle={`${plans.length} plan${plans.length !== 1 ? "s" : ""} configured`}
-        icon={<Globe size={20} />}
+        subtitle="What the captive portal offers, and the Ruijie user group each offer draws its vouchers from."
+        icon={<Globe size={22} />}
+        tone="violet"
         actions={
-          <>
-            <FilterPicker value={categoryFilter} onChange={setCategoryFilter} />
-            {hasFilters && (
-              <Button
-                variant="ghost"
-                size="sm"
-                iconLeft={<X size={13} />}
-                onClick={() => setCategoryFilter("")}
-              >
-                Clear
-              </Button>
-            )}
-            {isAdmin && (
-              <Button
-                variant="primary"
-                size="md"
-                iconLeft={<Plus size={14} />}
-                onClick={handleCreate}
-              >
-                New Plan
-              </Button>
-            )}
-          </>
+          isAdmin && (
+            <Button variant="primary" size="md" iconLeft={<Plus size={14} />} onClick={handleCreate}>
+              New plan
+            </Button>
+          )
         }
       />
 
-      {/* Table */}
-      <div className="mt-6">
-        <Panel padding={false}>
-          {loading ? (
-            <LoadingTable />
-          ) : plans.length === 0 ? (
-            <EmptyState
-              icon={Layers}
-              title="No plans configured yet"
-              description={
-                hasFilters
-                  ? "Try clearing the filter, or add a new plan in the selected category."
-                  : "Plans appear here once you create them. Each plan maps a price to a Ruijie user group."
-              }
-              action={
-                isAdmin && (
-                  <Button
-                    variant="primary"
-                    size="sm"
-                    iconLeft={<Plus size={13} />}
-                    onClick={handleCreate}
-                  >
-                    Create first plan
-                  </Button>
-                )
-              }
-            />
-          ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full text-[13px]">
-                <thead className="bg-[var(--surface-sunken)]/95 backdrop-blur">
-                  <tr className="text-label text-left">
-                    <Th>Key</Th>
-                    <Th>Name</Th>
-                    <Th>Category</Th>
-                    <Th className="text-right">Price</Th>
-                    <Th>User group</Th>
-                    <Th className="text-right">Available</Th>
-                    <Th className="text-center">Active</Th>
-                    {isAdmin && <Th className="text-right pr-5">·</Th>}
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-[var(--border-default)]">
-                  {plans.map((plan) => (
-                    <tr
-                      key={plan._id || plan.id}
-                      className="transition-colors hover:bg-[var(--bg-surface)]"
-                    >
-                      <Td>
-                        <span className="font-mono text-[12.5px] text-[var(--text-secondary)] tabular">
-                          {plan.planKey}
-                        </span>
-                      </Td>
-                      <Td>
-                        <div className="flex items-center gap-2 min-w-0">
-                          <span className="font-medium text-[var(--text-primary)] truncate">
-                            {plan.name}
+      <KpiGrid>
+        <StatCard
+          label="Plans configured"
+          value={plans.length}
+          sub={categoryFilter ? `${categoryFilter} only` : "all categories"}
+          icon={<Layers size={18} />}
+          color="violet"
+        />
+        <StatCard
+          label="Live on the portal"
+          value={stats.active}
+          sub={`${plans.length - stats.active} hidden from customers`}
+          icon={<Globe size={18} />}
+          color="green"
+        />
+        <StatCard
+          label="Featured"
+          value={stats.featured}
+          sub="carry the popular star"
+          icon={<Star size={18} />}
+          color="amber"
+        />
+        <StatCard
+          label="Vouchers available"
+          value={stats.stock == null ? "—" : stats.stock.toLocaleString()}
+          sub="across the mapped user groups"
+          icon={<Ticket size={18} />}
+          color="indigo"
+        />
+      </KpiGrid>
+
+      <Toolbar>
+        <SearchInput
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder="Search plans, keys, user groups…"
+          width="w-72"
+        />
+        <Select
+          value={categoryFilter}
+          onChange={(e) => setCategoryFilter(e.target.value)}
+          style={{ ...PILL, width: 180 }}
+          aria-label="Filter by category"
+        >
+          <option value="">All categories</option>
+          {CATEGORIES.map((cat) => (
+            <option key={cat} value={cat}>
+              {cat.charAt(0).toUpperCase() + cat.slice(1)}
+            </option>
+          ))}
+        </Select>
+        {hasFilters && (
+          <Button
+            variant="ghost"
+            size="sm"
+            iconLeft={<X size={13} />}
+            onClick={() => {
+              setCategoryFilter("");
+              setQuery("");
+            }}
+          >
+            Clear
+          </Button>
+        )}
+        <span className="ml-auto text-[12px] text-[var(--fg-muted)] tabular-nums">
+          {visiblePlans.length} of {plans.length} plan{plans.length !== 1 ? "s" : ""} · {scopeLabel}
+        </span>
+      </Toolbar>
+
+      <Panel
+        title="Plan catalogue"
+        subtitle="Sort order decides the running order on the portal."
+        icon={<Layers size={15} />}
+        tone="violet"
+        padding={false}
+      >
+        {loading ? (
+          <LoadingTable />
+        ) : plans.length === 0 ? (
+          <EmptyState
+            icon={Layers}
+            title="No plans configured yet"
+            description={
+              categoryFilter
+                ? "Try clearing the filter, or add a new plan in the selected category."
+                : "Plans appear here once you create them. Each plan maps a price to a Ruijie user group."
+            }
+            action={
+              isAdmin && (
+                <Button variant="primary" size="sm" iconLeft={<Plus size={13} />} onClick={handleCreate}>
+                  Create first plan
+                </Button>
+              )
+            }
+          />
+        ) : (
+          <DataTable>
+            <thead>
+              <tr>
+                <Th>Plan</Th>
+                <Th>Category</Th>
+                <Th align="right">Price</Th>
+                <Th>Ruijie user group</Th>
+                <Th align="right">Available</Th>
+                <Th align="center">Active</Th>
+                {isAdmin && <Th align="right">Actions</Th>}
+              </tr>
+            </thead>
+            <tbody>
+              {visiblePlans.length === 0 ? (
+                <TableMessage colSpan={colSpan}>No plan matches “{query.trim()}”.</TableMessage>
+              ) : (
+                visiblePlans.map((plan) => (
+                  <tr key={plan._id || plan.id}>
+                    <Td>
+                      <div className="flex items-center gap-2 min-w-0">
+                        <RecordCell
+                          tone={CATEGORY_TILES[plan.category] || "violet"}
+                          icon={<Layers size={14} />}
+                          title={plan.name}
+                          subtitle={plan.planKey}
+                          mono
+                        />
+                        {Boolean(plan.popular) && (
+                          <span title="Popular" className="shrink-0 text-[var(--warning-fg)]">
+                            <Star size={12} className="fill-current" strokeWidth={1.5} />
                           </span>
-                          {Boolean(plan.popular) && (
-                            <span
-                              title="Popular"
-                              className="text-[var(--warning-fg)]"
-                            >
-                              <Star
-                                size={12}
-                                className="fill-current"
-                                strokeWidth={1.5}
-                              />
-                            </span>
-                          )}
-                        </div>
-                      </Td>
-                      <Td>
-                        <Badge tone={CATEGORY_TONES[plan.category]}>
-                          {plan.category}
-                        </Badge>
-                      </Td>
-                      <Td className="text-right">
-                        <span className="font-mono text-[var(--text-primary)] tabular">
-                          {plan.currency || "FJD"}{" "}
-                          <span className="font-semibold">
-                            {Number(plan.price || 0).toFixed(2)}
-                          </span>
+                        )}
+                      </div>
+                    </Td>
+                    <Td>
+                      <StatusPill tone={CATEGORY_TONES[plan.category] || "neutral"} dot={false}>
+                        {plan.category}
+                      </StatusPill>
+                    </Td>
+                    <Td align="right" nowrap>
+                      <span className="text-[11.5px] text-[var(--fg-muted)]">
+                        {plan.currency || "FJD"}{" "}
+                      </span>
+                      <span className="font-semibold text-[var(--fg-primary)] tabular-nums">
+                        {Number(plan.price || 0).toFixed(2)}
+                      </span>
+                    </Td>
+                    <Td>
+                      <span className="truncate inline-block max-w-[200px] align-middle">
+                        {plan.userGroupName || plan.userGroup || (
+                          <span className="text-[var(--fg-muted)]">—</span>
+                        )}
+                      </span>
+                      {plan.dataAllowance && (
+                        <span className="block text-[11.5px] text-[var(--fg-muted)] truncate max-w-[200px]">
+                          {plan.dataAllowance}
                         </span>
-                      </Td>
-                      <Td>
-                        <span className="text-[var(--text-tertiary)] truncate inline-block max-w-[180px]">
-                          {plan.userGroupName || plan.userGroup || (
-                            <span className="text-[var(--text-quaternary)]">
-                              —
-                            </span>
-                          )}
-                        </span>
-                      </Td>
-                      <Td className="text-right">
-                        <Badge
-                          tone="neutral"
-                          icon={<Tag size={10} strokeWidth={2} />}
-                        >
-                          {plan.availableVouchers ?? "—"}
-                        </Badge>
-                      </Td>
-                      <Td className="text-center">
-                        <div className="flex justify-center">
-                          <Toggle
-                            checked={!!plan.isActive}
-                            onChange={() => isAdmin && handleToggleActive(plan)}
-                            disabled={!isAdmin}
-                          />
-                        </div>
-                      </Td>
-                      {isAdmin && (
-                        <Td className="text-right pr-3">
-                          <div className="flex items-center justify-end gap-0.5">
-                            <IconButton
-                              size="sm"
-                              onClick={() => handleEdit(plan)}
-                              aria-label="Edit"
-                              title="Edit plan"
-                            >
-                              <Pencil size={14} />
-                            </IconButton>
-                            <IconButton
-                              size="sm"
-                              onClick={() => handleDelete(plan)}
-                              aria-label="Delete"
-                              title="Delete plan"
-                              className="hover:text-[var(--brand)]"
-                            >
-                              <Trash2 size={14} />
-                            </IconButton>
-                          </div>
-                        </Td>
                       )}
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </Panel>
-      </div>
+                    </Td>
+                    <Td align="right">
+                      <Badge tone="neutral" icon={<Tag size={10} strokeWidth={2} />}>
+                        {plan.availableVouchers ?? "—"}
+                      </Badge>
+                    </Td>
+                    <Td align="center">
+                      <div className="flex justify-center">
+                        <Toggle
+                          checked={!!plan.isActive}
+                          onChange={() => isAdmin && handleToggleActive(plan)}
+                          disabled={!isAdmin}
+                        />
+                      </div>
+                    </Td>
+                    {isAdmin && (
+                      <Td align="right">
+                        <div className="flex items-center justify-end gap-0.5">
+                          <IconButton size="sm" onClick={() => handleEdit(plan)} aria-label="Edit" title="Edit plan">
+                            <Pencil size={14} />
+                          </IconButton>
+                          <IconButton
+                            size="sm"
+                            onClick={() => handleDelete(plan)}
+                            aria-label="Delete"
+                            title="Delete plan"
+                            className="hover:text-[var(--brand)]"
+                          >
+                            <Trash2 size={14} />
+                          </IconButton>
+                        </div>
+                      </Td>
+                    )}
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </DataTable>
+        )}
+      </Panel>
 
       {/* Create / Edit Modal */}
       <PlanFormModal
         open={showModal}
         plan={editingPlan}
         userGroups={userGroups}
+        scopeLabel={scopeLabel}
         onSave={handleSave}
         onClose={() => setShowModal(false)}
       />
@@ -405,14 +500,18 @@ export default function PortalConfigPage() {
         onConfirm={confirm?.onConfirm}
         onCancel={() => setConfirm(null)}
       />
-    </div>
+    </PageShell>
   );
 }
 
 // ---------------------------------------------------------------------------
 // Plan Form Modal
+//
+// The most consequential form in the console: a wrong user group here sells a
+// customer a plan whose vouchers do not exist. Hence the label rail — each
+// group states, in words, who the fields beside it are for.
 // ---------------------------------------------------------------------------
-function PlanFormModal({ open, plan, userGroups, onSave, onClose }) {
+function PlanFormModal({ open, plan, userGroups, scopeLabel, onSave, onClose }) {
   const isEditing = !!plan;
   const [form, setForm] = useState(EMPTY_FORM);
   const [saving, setSaving] = useState(false);
@@ -490,7 +589,7 @@ function PlanFormModal({ open, plan, userGroups, onSave, onClose }) {
   };
 
   return (
-    <Modal open={open} onClose={onClose} width="xl">
+    <Modal open={open} onClose={onClose} width="2xl">
       <Modal.Header
         icon={Globe}
         eyebrow={isEditing ? "Editing plan" : "New plan"}
@@ -503,199 +602,196 @@ function PlanFormModal({ open, plan, userGroups, onSave, onClose }) {
         onClose={onClose}
       />
 
-      <Modal.Body className="space-y-8">
-        <form onSubmit={handleSubmit} className="space-y-8">
-          {/* -- Identity -------------------------------------------------- */}
-          <Section label="Identity">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-              <Field
-                label="Plan key"
-                required
-                hint="Lowercase, hyphens only. Used in URLs and audit logs."
-              >
-                <Input
-                  mono
-                  value={form.planKey}
-                  onChange={(e) =>
-                    set(
-                      "planKey",
-                      e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, "-")
-                    )
-                  }
-                  placeholder="daily-basic"
-                  disabled={isEditing}
-                />
-              </Field>
-              <Field
-                label="Display name"
-                required
-                hint="Customer-facing name on the portal."
-              >
-                <Input
-                  value={form.name}
-                  onChange={(e) => set("name", e.target.value)}
-                  placeholder="Daily Light"
-                />
-              </Field>
+      <Modal.Body>
+        <form onSubmit={handleSubmit}>
+          {/* A plan belongs to whichever village scope is active, and the scope
+              lives in the sidebar — so say which one this will land in rather
+              than letting the modal imply it is estate-wide. */}
+          {!isEditing && (
+            <div className="mb-7 flex items-start gap-2.5 rounded-xl border border-[var(--border-default)] bg-[var(--bg-surface)] px-4 py-3">
+              <MapPin size={14} className="mt-0.5 shrink-0 text-[var(--fg-muted)]" />
+              <p className="text-[12.5px] text-[var(--fg-secondary)] leading-relaxed">
+                This plan will be created for{" "}
+                <span className="font-semibold text-[var(--fg-primary)]">{scopeLabel}</span>. Change the
+                scope in the sidebar first to publish it somewhere else.
+              </p>
             </div>
-          </Section>
+          )}
 
-          {/* -- Pricing --------------------------------------------------- */}
-          <Section label="Pricing">
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-5">
-              <Field label="Category">
-                <Select
-                  value={form.category}
-                  onChange={(e) => set("category", e.target.value)}
-                >
-                  {CATEGORIES.map((cat) => (
-                    <option key={cat} value={cat}>
-                      {cat.charAt(0).toUpperCase() + cat.slice(1)}
-                    </option>
-                  ))}
-                </Select>
-              </Field>
-              <Field label="Price">
-                <Input
-                  mono
-                  type="number"
-                  step="0.01"
-                  min="0"
-                  value={form.price}
-                  onChange={(e) => set("price", e.target.value)}
-                />
-              </Field>
-              <Field label="Currency">
-                <Input
-                  mono
-                  value={form.currency}
-                  onChange={(e) =>
-                    set("currency", e.target.value.toUpperCase())
-                  }
-                  placeholder="FJD"
-                  maxLength={4}
-                />
-              </Field>
-              <Field label="Sort order" hint="Lower = shown first.">
-                <Input
-                  mono
-                  type="number"
-                  min="0"
-                  value={form.sortOrder}
-                  onChange={(e) => set("sortOrder", e.target.value)}
-                />
-              </Field>
-            </div>
-          </Section>
-
-          {/* -- Capacity / Ruijie mapping --------------------------------- */}
-          <Section label="Capacity">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-              <Field
-                label="Ruijie user group"
-                hint="Vouchers are claimed from this group on purchase."
-              >
-                <Select
-                  value={form.userGroup}
-                  onChange={(e) => handleUserGroupChange(e.target.value)}
-                >
-                  <option value="">Select user group…</option>
-                  {userGroups.map((g) => {
-                    const id = String(g.id ?? g._id ?? g.name);
-                    return (
-                      <option key={id} value={id}>
-                        {g.name || g.groupName || id}
-                      </option>
-                    );
-                  })}
-                </Select>
-              </Field>
-              <Field
-                label="User group name"
-                hint="Auto-filled from selection."
-              >
-                <Input
-                  value={form.userGroupName}
-                  readOnly
-                  className="bg-[var(--surface-sunken)] cursor-not-allowed"
-                  placeholder="Select a user group above"
-                />
-              </Field>
-              <Field
-                label="Data allowance"
-                hint="Auto-filled if the user group exposes a quota."
-                className="md:col-span-2"
-              >
-                <Input
-                  value={form.dataAllowance}
-                  onChange={(e) => set("dataAllowance", e.target.value)}
-                  placeholder="e.g. 1GB / 24h / ↓5Mbps"
-                />
-              </Field>
-            </div>
-          </Section>
-
-          {/* -- Presentation ---------------------------------------------- */}
-          <Section label="Presentation">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-              <Field label="Icon">
-                <Select
-                  value={form.icon}
-                  onChange={(e) => set("icon", e.target.value)}
-                >
-                  {ICON_OPTIONS.map((ico) => (
-                    <option key={ico.value} value={ico.value}>
-                      {ico.label}
-                    </option>
-                  ))}
-                </Select>
-              </Field>
-              <Field label="Description">
-                <Textarea
-                  rows={2}
-                  value={form.description}
-                  onChange={(e) => set("description", e.target.value)}
-                  placeholder="Short tagline shown under the price…"
-                />
-              </Field>
-              <Field
-                label="Features"
-                hint="Press Enter to add a feature. Backspace to remove the last."
-                className="md:col-span-2"
-              >
-                <TagInput
-                  value={form.features}
-                  onChange={(features) => set("features", features)}
-                  placeholder="Unlimited streaming…"
-                />
-              </Field>
-            </div>
-          </Section>
-
-          {/* -- Flags ----------------------------------------------------- */}
-          <Section label="Visibility">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-              <Toggle
-                checked={form.popular}
-                onChange={(v) => set("popular", v)}
-                label="Mark as popular"
-                hint="Adds a star badge on the portal card."
+          <FormSection
+            title="Identity"
+            description="How the plan is referenced internally, and what the customer reads on the card."
+          >
+            <Field
+              label="Plan key"
+              required
+              hint="Lowercase, hyphens only. Used in URLs and audit logs."
+            >
+              <Input
+                mono
+                value={form.planKey}
+                onChange={(e) =>
+                  set("planKey", e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, "-"))
+                }
+                placeholder="daily-basic"
+                disabled={isEditing}
               />
-              <Toggle
-                checked={form.isActive}
-                onChange={(v) => set("isActive", v)}
-                label="Active"
-                hint="Inactive plans are hidden from the portal but kept in the DB."
+            </Field>
+            <Field label="Display name" required hint="Customer-facing name on the portal.">
+              <Input
+                value={form.name}
+                onChange={(e) => set("name", e.target.value)}
+                placeholder="Daily Light"
               />
-            </div>
-          </Section>
+            </Field>
+          </FormSection>
+
+          <FormSection
+            title="Pricing"
+            description="What M-PAiSA charges, and where the plan sits in the running order."
+          >
+            <Field label="Category">
+              <Select value={form.category} onChange={(e) => set("category", e.target.value)}>
+                {CATEGORIES.map((cat) => (
+                  <option key={cat} value={cat}>
+                    {cat.charAt(0).toUpperCase() + cat.slice(1)}
+                  </option>
+                ))}
+              </Select>
+            </Field>
+            <Field label="Sort order" hint="Lower = shown first.">
+              <Input
+                mono
+                type="number"
+                min="0"
+                value={form.sortOrder}
+                onChange={(e) => set("sortOrder", e.target.value)}
+              />
+            </Field>
+            <Field label="Price">
+              <Input
+                mono
+                type="number"
+                step="0.01"
+                min="0"
+                value={form.price}
+                onChange={(e) => set("price", e.target.value)}
+              />
+            </Field>
+            <Field label="Currency">
+              <Input
+                mono
+                value={form.currency}
+                onChange={(e) => set("currency", e.target.value.toUpperCase())}
+                placeholder="FJD"
+                maxLength={4}
+              />
+            </Field>
+          </FormSection>
+
+          <FormSection
+            title="Capacity"
+            description="The Ruijie side. Vouchers are claimed from this group the moment a payment clears, so it must exist and have stock."
+          >
+            <Field
+              label="Ruijie user group"
+              hint="Vouchers are claimed from this group on purchase."
+            >
+              <Select value={form.userGroup} onChange={(e) => handleUserGroupChange(e.target.value)}>
+                <option value="">Select user group…</option>
+                {userGroups.map((g) => {
+                  const id = String(g.id ?? g._id ?? g.name);
+                  return (
+                    <option key={id} value={id}>
+                      {g.name || g.groupName || id}
+                    </option>
+                  );
+                })}
+              </Select>
+            </Field>
+            <Field label="User group name" hint="Auto-filled from selection.">
+              <Input
+                value={form.userGroupName}
+                readOnly
+                className="bg-[var(--surface-sunken)] cursor-not-allowed"
+                placeholder="Select a user group above"
+              />
+            </Field>
+            <Field
+              label="Data allowance"
+              hint="Auto-filled if the user group exposes a quota."
+              className="sm:col-span-2"
+            >
+              <Input
+                value={form.dataAllowance}
+                onChange={(e) => set("dataAllowance", e.target.value)}
+                placeholder="e.g. 1GB / 24h / ↓5Mbps"
+              />
+            </Field>
+          </FormSection>
+
+          <FormSection
+            title="Presentation"
+            description="Everything here is customer-facing copy on the portal card."
+          >
+            <Field label="Icon">
+              <Select value={form.icon} onChange={(e) => set("icon", e.target.value)}>
+                {ICON_OPTIONS.map((ico) => (
+                  <option key={ico.value} value={ico.value}>
+                    {ico.label}
+                  </option>
+                ))}
+              </Select>
+            </Field>
+            <Field label="Description">
+              <Textarea
+                rows={2}
+                value={form.description}
+                onChange={(e) => set("description", e.target.value)}
+                placeholder="Short tagline shown under the price…"
+              />
+            </Field>
+            <Field
+              label="Features"
+              hint="Press Enter to add a feature. Backspace to remove the last."
+              className="sm:col-span-2"
+            >
+              <TagInput
+                value={form.features}
+                onChange={(features) => set("features", features)}
+                placeholder="Unlimited streaming…"
+              />
+            </Field>
+          </FormSection>
+
+          <FormSection
+            title="Visibility"
+            description="Deactivating hides a plan from the portal without deleting its history."
+          >
+            <Toggle
+              checked={form.popular}
+              onChange={(v) => set("popular", v)}
+              label="Mark as popular"
+              hint="Adds a star badge on the portal card."
+            />
+            <Toggle
+              checked={form.isActive}
+              onChange={(v) => set("isActive", v)}
+              label="Active"
+              hint="Inactive plans are hidden from the portal but kept in the DB."
+            />
+          </FormSection>
+
+          {/* Submits on Enter from any field without the footer buttons having
+              to live inside the scrolling body. */}
+          <button type="submit" className="hidden" aria-hidden="true" tabIndex={-1} />
         </form>
       </Modal.Body>
 
       <Modal.Footer>
-        <div className="flex-1 text-[11.5px] text-[var(--text-quaternary)] flex items-center gap-2">
-          <Sparkles size={11} className="opacity-70" />
-          <span className="font-mono">
+        <div className="flex-1 min-w-0 text-[11.5px] text-[var(--fg-muted)] flex items-center gap-2">
+          <Sparkles size={11} className="opacity-70 shrink-0" />
+          <span className="font-mono truncate">
             {form.planKey || "—"} · {form.currency} {Number(form.price || 0).toFixed(2)}
           </span>
         </div>
@@ -719,52 +815,25 @@ function PlanFormModal({ open, plan, userGroups, onSave, onClose }) {
 // ---------------------------------------------------------------------------
 // Small bits
 // ---------------------------------------------------------------------------
-function FilterPicker({ value, onChange }) {
-  return (
-    <div className="relative">
-      <Filter
-        size={13}
-        className="absolute left-2.5 top-1/2 -translate-y-1/2 text-[var(--text-quaternary)] pointer-events-none"
-      />
-      <select
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        className={
-          "appearance-none h-9 pl-8 pr-7 text-[12.5px] " +
-          "bg-[var(--surface-raised)] text-[var(--text-secondary)] " +
-          "border border-[var(--border-default)] rounded-md cursor-pointer " +
-          "hover:border-[var(--border-strong)] focus-input"
-        }
-      >
-        <option value="">All categories</option>
-        {CATEGORIES.map((cat) => (
-          <option key={cat} value={cat}>
-            {cat.charAt(0).toUpperCase() + cat.slice(1)}
-          </option>
-        ))}
-      </select>
-    </div>
-  );
-}
 
-function Th({ children, className = "" }) {
+/**
+ * A titled group inside the plan form. The label rail on the left is what buys
+ * the fields their space: the explanation moves out of the field hints and into
+ * a column of its own, so two fields per row is enough.
+ */
+function FormSection({ title, description, children }) {
   return (
-    <th
-      className={
-        "px-4 py-2.5 font-medium border-b border-[var(--border-subtle)] " +
-        className
-      }
-    >
-      {children}
-    </th>
-  );
-}
-
-function Td({ children, className = "" }) {
-  return (
-    <td className={`px-4 py-3 align-middle ${className}`}>
-      {children}
-    </td>
+    <section className="grid gap-x-8 gap-y-4 md:grid-cols-[200px_minmax(0,1fr)] border-t border-[var(--border-subtle)] pt-7 mt-7 first:border-0 first:pt-0 first:mt-0">
+      <div>
+        <h3 className="font-display text-[13.5px] font-bold tracking-tight text-[var(--fg-primary)]">
+          {title}
+        </h3>
+        {description && (
+          <p className="mt-1.5 text-[12px] leading-relaxed text-[var(--fg-muted)]">{description}</p>
+        )}
+      </div>
+      <div className="min-w-0 grid grid-cols-1 sm:grid-cols-2 gap-x-5 gap-y-5">{children}</div>
+    </section>
   );
 }
 
@@ -773,11 +842,7 @@ function LoadingTable() {
     <div className="flex-1 min-h-0 overflow-hidden p-5">
       <div className="space-y-2.5">
         {Array.from({ length: 6 }).map((_, i) => (
-          <div
-            key={i}
-            className="flex items-center gap-4"
-            style={{ opacity: 1 - i * 0.12 }}
-          >
+          <div key={i} className="flex items-center gap-4" style={{ opacity: 1 - i * 0.12 }}>
             <div className="skeleton h-4 w-24" />
             <div className="skeleton h-4 w-40" />
             <div className="skeleton h-4 w-16" />

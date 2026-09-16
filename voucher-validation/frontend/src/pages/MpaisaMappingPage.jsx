@@ -3,25 +3,28 @@
 // (a UTF-16 tab-separated SQL export); it upserts by number (updates existing,
 // adds new) and lists the current mapping. Rows can also be added and edited by
 // hand — those are tagged 'manual' until a report re-imports the same number.
+//
+// The page is two views of one subject: the numbers we can email, and the
+// paying customers we cannot. They share a Toolbar switch rather than living on
+// separate routes, because the whole point of the unmapped list is that it is
+// the backlog for this one.
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
-  Wallet, Upload, Search, RefreshCw, Mail, Hash, Plus, Pencil, UserPlus,
+  Wallet, RefreshCw, Upload, Mail, Hash, Plus, Pencil, UserPlus,
 } from "lucide-react";
 import toast from "react-hot-toast";
 
 import { mpaisaApi } from "../services/api";
 import UnmappedTransactions from "../components/UnmappedTransactions";
 import {
-  PageHeader, Panel, Button, IconButton, Modal, Field, Input, Select, Badge,
+  PageShell, PageHeader, Panel, Toolbar, SearchInput, Segmented,
+  DataTable, Th, Td, TableMessage, StatusPill,
+  Button, IconButton, Modal, Field, Input, Select, Badge,
 } from "../components/ui";
 import Pagination from "../components/shared/Pagination";
 
 const PAGE_SIZE = 25;
-
-function cn(...p) {
-  return p.filter(Boolean).join(" ");
-}
 
 /**
  * Read an uploaded report file → decoded UTF-8 text. The report is a UTF-16
@@ -54,31 +57,32 @@ function relTime(ts) {
   return `${Math.floor(s / 86400)}d ago`;
 }
 
-function StatusPill({ value }) {
+const STATUS_TONES = {
+  ACTIVE: "success",
+  INACTIVE: "neutral",
+  PENDING: "warning",
+  SUSPENDED: "danger",
+};
+
+/**
+ * The status columns are free-form text copied verbatim from the report, so the
+ * label is whatever the file said (real exports have contained "ACTIVE," with a
+ * trailing comma). Only the tone is derived, from the letters alone.
+ */
+function ReportStatus({ value }) {
   if (!value) return <span className="text-[var(--fg-muted)]">—</span>;
-  const active = String(value).toUpperCase() === "ACTIVE";
-  return (
-    <span
-      className={cn(
-        "inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-medium",
-        active ? "bg-emerald-500/10 text-emerald-500" : "bg-[var(--bg-surface)] text-[var(--fg-muted)]"
-      )}
-    >
-      <span className={cn("w-1.5 h-1.5 rounded-full", active ? "bg-emerald-500" : "bg-[var(--fg-muted)]")} />
-      {value}
-    </span>
-  );
+  const key = String(value).toUpperCase().replace(/[^A-Z]/g, "");
+  return <StatusPill tone={STATUS_TONES[key] || "neutral"}>{value}</StatusPill>;
 }
 
 const STATUS_OPTIONS = ["", "ACTIVE", "INACTIVE", "PENDING", "SUSPENDED"];
 
 /**
- * The status columns are free-form text copied verbatim from the report, so a
- * row can hold a value outside the canonical list (real exports have contained
- * "ACTIVE," with a trailing comma). A native <select> given an unlisted value
- * falls back to its first option, which would show "Not set" next to a table
- * cell showing the real value, and a save would then silently overwrite it.
- * Keeping the current value as an option makes the dropdown truthful.
+ * A row can hold a status outside the canonical list. A native <select> given an
+ * unlisted value falls back to its first option, which would show "Not set" next
+ * to a table cell showing the real value, and a save would then silently
+ * overwrite it. Keeping the current value as an option makes the dropdown
+ * truthful.
  */
 function statusOptions(current) {
   const c = String(current ?? "").trim();
@@ -145,7 +149,7 @@ function MappingModal({ row, onClose, onSaved }) {
 
       <form onSubmit={handleSubmit}>
         <Modal.Body>
-          <div className="flex flex-col gap-5">
+          <div className="flex flex-col gap-6">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <Field
                 label="Phone number"
@@ -296,12 +300,13 @@ export default function MpaisaMappingPage() {
   }
 
   return (
-    <div className="p-4 sm:p-6 lg:p-8">
+    <PageShell>
       <PageHeader
         eyebrow="Customers"
         title="M-PAiSA Mapping"
         subtitle="Phone number → customer email, ingested from the M-PAiSA customer report."
-        icon={<Wallet size={20} />}
+        icon={<Wallet size={22} />}
+        tone="teal"
         actions={
           <>
             <input
@@ -341,113 +346,103 @@ export default function MpaisaMappingPage() {
         }
       />
 
-      {/* Two views of the same subject: who we can reach, and who we cannot. */}
-      <div className="mt-6 inline-flex items-center rounded-md p-0.5 bg-[var(--surface-raised)] border border-[var(--border-default)]">
-        {[
-          { v: "mapped", l: "Mappings" },
-          { v: "unmapped", l: "Unmapped customers" },
-        ].map(({ v, l }) => (
-          <button
-            key={v}
-            onClick={() => setTab(v)}
-            className={
-              "h-7 px-3 text-[12px] font-medium rounded transition-colors " +
-              (tab === v
-                ? "bg-[var(--surface-hover)] text-[var(--text-primary)]"
-                : "text-[var(--text-tertiary)] hover:text-[var(--text-primary)]")
-            }
-          >
-            {l}
-          </button>
-        ))}
-      </div>
+      {/* One strip for both views: the switch, and the filter that belongs to
+          whichever view is showing. The unmapped list carries its own controls
+          because its search, refresh and export are the component's own state. */}
+      <Toolbar>
+        <Segmented
+          options={[
+            { value: "mapped", label: "Mappings", count: total },
+            { value: "unmapped", label: "Unmapped customers" },
+          ]}
+          value={tab}
+          onChange={setTab}
+        />
+        {tab === "mapped" && (
+          <>
+            <SearchInput
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search number or email…"
+              width="w-72"
+            />
+            <span className="ml-auto text-[12px] text-[var(--fg-muted)] tabular-nums">
+              {debounced ? `${total.toLocaleString()} matching` : `${total.toLocaleString()} mapped`}
+            </span>
+          </>
+        )}
+      </Toolbar>
 
       {tab === "unmapped" ? (
-        <div className="mt-5">
-          <UnmappedTransactions />
-        </div>
+        <UnmappedTransactions />
       ) : (
-      <div className="mt-5">
         <Panel
           padding={false}
           title="Number → email"
-          subtitle={`${total} mapped number${total === 1 ? "" : "s"}`}
+          subtitle={`${total.toLocaleString()} mapped number${total === 1 ? "" : "s"}`}
           icon={<Hash size={15} />}
-          actions={
-            <div className="relative">
-              <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--fg-muted)] pointer-events-none" />
-              <input
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                placeholder="Search number or email…"
-                className="w-64 max-w-full pl-9 pr-3 py-2 text-sm bg-[var(--bg-base)] border border-[var(--border-default)] rounded-lg text-[var(--fg-primary)] placeholder:text-[var(--fg-muted)] focus:outline-none focus:border-[var(--accent)] focus:ring-2 focus:ring-[var(--accent)]/20 transition-all"
-              />
-            </div>
-          }
+          tone="teal"
         >
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="text-left text-[var(--fg-muted)] border-b border-[var(--border-default)]">
-                  <th className="px-5 py-3 font-medium">Number</th>
-                  <th className="px-5 py-3 font-medium">Email</th>
-                  <th className="px-5 py-3 font-medium">Email status</th>
-                  <th className="px-5 py-3 font-medium">Account status</th>
-                  <th className="px-5 py-3 font-medium">Source</th>
-                  <th className="px-5 py-3 font-medium whitespace-nowrap">Updated</th>
-                  <th className="px-5 py-3 font-medium w-px" />
-                </tr>
-              </thead>
-              <tbody>
-                {loading ? (
-                  <tr>
-                    <td colSpan={7} className="px-5 py-10 text-center text-[var(--fg-muted)]">Loading…</td>
+          <DataTable>
+            <thead>
+              <tr>
+                <Th>Number</Th>
+                <Th>Email</Th>
+                <Th>Email status</Th>
+                <Th>Account status</Th>
+                <Th>Source</Th>
+                <Th>Updated</Th>
+                <Th align="right">Edit</Th>
+              </tr>
+            </thead>
+            <tbody>
+              {loading ? (
+                <TableMessage colSpan={7}>Loading…</TableMessage>
+              ) : rows.length === 0 ? (
+                <TableMessage colSpan={7}>
+                  {debounced
+                    ? "No matches."
+                    : "No mappings yet — upload the M-PAiSA report, or add one by hand."}
+                </TableMessage>
+              ) : (
+                rows.map((r) => (
+                  <tr key={r.number}>
+                    <Td nowrap>
+                      <span className="font-mono text-[13px] font-semibold text-[var(--fg-primary)]">
+                        {r.number}
+                      </span>
+                    </Td>
+                    <Td>
+                      <span className="inline-flex items-center gap-1.5 min-w-0">
+                        <Mail size={12} className="text-[var(--fg-muted)] shrink-0" />
+                        <span className="truncate">{r.email || "—"}</span>
+                      </span>
+                    </Td>
+                    <Td><ReportStatus value={r.email_status} /></Td>
+                    <Td><ReportStatus value={r.account_status} /></Td>
+                    <Td>
+                      <Badge tone={r.source === "manual" ? "warning" : "neutral"}>
+                        {r.source === "manual" ? "Manual" : "Import"}
+                      </Badge>
+                    </Td>
+                    <Td muted nowrap>{relTime(r.updated_at)}</Td>
+                    <Td align="right">
+                      <IconButton
+                        size="sm"
+                        onClick={() => setEditing({ row: r })}
+                        title={`Edit ${r.number}`}
+                        aria-label={`Edit ${r.number}`}
+                      >
+                        <Pencil size={14} />
+                      </IconButton>
+                    </Td>
                   </tr>
-                ) : rows.length === 0 ? (
-                  <tr>
-                    <td colSpan={7} className="px-5 py-12 text-center text-[var(--fg-muted)]">
-                      {debounced
-                        ? "No matches."
-                        : "No mappings yet — upload the M-PAiSA report, or add one by hand."}
-                    </td>
-                  </tr>
-                ) : (
-                  rows.map((r) => (
-                    <tr key={r.number} className="border-b border-[var(--border-subtle)] hover:bg-[var(--bg-surface)] transition-colors">
-                      <td className="px-5 py-3 font-mono text-[var(--fg-primary)]">{r.number}</td>
-                      <td className="px-5 py-3 text-[var(--fg-secondary)]">
-                        <span className="inline-flex items-center gap-1.5 min-w-0">
-                          <Mail size={12} className="text-[var(--fg-muted)] shrink-0" />
-                          <span className="truncate">{r.email || "—"}</span>
-                        </span>
-                      </td>
-                      <td className="px-5 py-3"><StatusPill value={r.email_status} /></td>
-                      <td className="px-5 py-3"><StatusPill value={r.account_status} /></td>
-                      <td className="px-5 py-3">
-                        <Badge tone={r.source === "manual" ? "warning" : "neutral"}>
-                          {r.source === "manual" ? "Manual" : "Import"}
-                        </Badge>
-                      </td>
-                      <td className="px-5 py-3 text-[var(--fg-muted)] whitespace-nowrap">{relTime(r.updated_at)}</td>
-                      <td className="px-5 py-3 text-right">
-                        <IconButton
-                          size="sm"
-                          onClick={() => setEditing({ row: r })}
-                          title={`Edit ${r.number}`}
-                          aria-label={`Edit ${r.number}`}
-                        >
-                          <Pencil size={14} />
-                        </IconButton>
-                      </td>
-                    </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
-          </div>
+                ))
+              )}
+            </tbody>
+          </DataTable>
           <Pagination page={page} totalPages={totalPages} total={total} onPageChange={setPage} />
         </Panel>
-      </div>
       )}
 
       {editing && (
@@ -457,6 +452,6 @@ export default function MpaisaMappingPage() {
           onSaved={load}
         />
       )}
-    </div>
+    </PageShell>
   );
 }

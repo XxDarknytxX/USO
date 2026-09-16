@@ -6,17 +6,26 @@
 // an admin comes here to see whether the estate is compliant and to read the
 // evidence. The schedule is first for both, because "which sites are overdue"
 // is the question the feature exists to answer.
+//
+// The three views are one Segmented control over one toolbar rather than three
+// stacked panels: schedule, reports and submissions are the same records at
+// three grains, and seeing them at once buys nothing but scroll.
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import toast from "react-hot-toast";
 import {
   Wrench, RefreshCw, ClipboardCheck, AlertTriangle, Lock, Trash2, ListChecks,
+  MapPin, CircleDashed, CalendarClock,
 } from "lucide-react";
 import { maintenanceApi } from "../services/api";
 import { useAuth } from "../hooks/useAuth";
 import { useSite } from "../hooks/useSite";
-import { PageHeader, Panel, Button, Badge, EmptyState, Select } from "../components/ui";
+import {
+  PageShell, PageHeader, KpiGrid, StatCard, Panel, Toolbar, Segmented,
+  DataTable, Th, Td, TableMessage, RecordCell, StatusPill,
+  Button, EmptyState, Select,
+} from "../components/ui";
 import VisitEditor from "../components/maintenance/VisitEditor";
 
 const fmtDate = (d) =>
@@ -45,6 +54,12 @@ function dueLabel(site) {
   if (d === 0) return "Due today";
   if (d < 31) return `Due in ${d} day${d === 1 ? "" : "s"}`;
   return `Due ${fmtDate(site.nextDue)}`;
+}
+
+/** Condition as a pill, or an em dash when nothing has been filed. */
+function ConditionPill({ value }) {
+  if (!value) return <span className="text-[var(--fg-muted)]">—</span>;
+  return <StatusPill tone={CONDITION_TONE[value] || "neutral"}>{CONDITION_LABEL[value] || value}</StatusPill>;
 }
 
 export default function MaintenancePage() {
@@ -103,6 +118,9 @@ export default function MaintenancePage() {
     [visits, isInScope]
   );
   const overdue = useMemo(() => sites.filter((s) => s.overdue), [sites]);
+  const neverServiced = useMemo(() => sites.filter((s) => s.neverServiced), [sites]);
+  const filedCount = scopedVisits.filter((v) => v.status === "submitted").length;
+  const draftCount = scopedVisits.length - filedCount;
 
   async function deleteDraft(v) {
     if (!window.confirm(`Delete the draft for ${v.projectName || "this village"}? Its photos go too. This cannot be undone.`)) return;
@@ -118,13 +136,25 @@ export default function MaintenancePage() {
     }
   }
 
+  // Both the reports and the submissions views filter by village, and they share
+  // one piece of state so switching between them keeps the village you picked.
+  const villageFilter = (
+    <Select value={filterProject} onChange={(e) => setFilterProject(e.target.value)} className="min-w-[180px]">
+      <option value="">All villages</option>
+      {sites.map((s) => (
+        <option key={s.projectId} value={s.projectId}>{s.name}</option>
+      ))}
+    </Select>
+  );
+
   return (
-    <div className="p-4 sm:p-6 lg:p-8">
+    <PageShell>
       <PageHeader
         eyebrow="Field service"
         title="Maintenance"
         subtitle={`Every village is inspected every ${schedule?.intervalMonths ?? 6} months. Open a village to record what you found, component by component.`}
-        icon={<Wrench size={20} />}
+        icon={<Wrench size={22} />}
+        tone="orange"
         actions={
           <Button variant="secondary" size="sm" onClick={load} disabled={loading} iconLeft={<RefreshCw size={14} />}>
             Refresh
@@ -133,36 +163,69 @@ export default function MaintenancePage() {
       />
 
       {/* Compliance first — the question this page exists to answer. */}
-      <div className="mt-6 grid grid-cols-2 lg:grid-cols-4 gap-3">
-        <Stat label="Villages" value={sites.length} />
-        <Stat label="Overdue" value={overdue.length} tone={overdue.length ? "danger" : "success"} />
-        <Stat label="Never serviced" value={sites.filter((s) => s.neverServiced).length} tone={sites.some((s) => s.neverServiced) ? "warning" : "success"} />
-        <Stat label="Reports filed" value={scopedVisits.filter((v) => v.status === "submitted").length} />
-      </div>
+      <KpiGrid>
+        <StatCard
+          label="Villages in scope"
+          value={sites.length}
+          sub={`${schedule?.intervalMonths ?? 6}-month service cycle`}
+          icon={<MapPin size={18} />}
+          color="navy"
+        />
+        <StatCard
+          label="Overdue"
+          value={overdue.length}
+          sub={overdue.length ? "past the service window" : "every village is in window"}
+          icon={<AlertTriangle size={18} />}
+          color={overdue.length ? "red" : "green"}
+        />
+        <StatCard
+          label="Never serviced"
+          value={neverServiced.length}
+          sub={neverServiced.length ? "no inspection on record" : "all villages have a record"}
+          icon={<CircleDashed size={18} />}
+          color={neverServiced.length ? "orange" : "green"}
+        />
+        <StatCard
+          label="Reports filed"
+          value={filedCount}
+          sub={draftCount ? `${draftCount} draft${draftCount === 1 ? "" : "s"} still open` : "no open drafts"}
+          icon={<ClipboardCheck size={18} />}
+          color="indigo"
+        />
+      </KpiGrid>
 
-      <div className="mt-5 inline-flex items-center rounded-md p-0.5 bg-[var(--surface-raised)] border border-[var(--border-default)]">
-        {[
-          { v: "schedule", l: "Schedule" },
-          { v: "reports", l: "Reports" },
-          { v: "submissions", l: "Submissions" },
-        ].map(({ v, l }) => (
-          <button
-            key={v}
-            onClick={() => setTab(v)}
-            className={
-              "h-7 px-3 text-[12px] font-medium rounded transition-colors " +
-              (tab === v
-                ? "bg-[var(--surface-hover)] text-[var(--text-primary)]"
-                : "text-[var(--text-tertiary)] hover:text-[var(--text-primary)]")
-            }
-          >
-            {l}
-          </button>
-        ))}
-      </div>
+      {/* One strip carries the view switch and that view's filters, so the
+          filters never float loose above a table. */}
+      <Toolbar>
+        <Segmented
+          value={tab}
+          onChange={setTab}
+          options={[
+            { value: "schedule", label: "Schedule", count: sites.length },
+            { value: "reports", label: "Reports", count: scopedVisits.length },
+            { value: "submissions", label: "Submissions", count: scopedSubmissions.length },
+          ]}
+        />
+        {tab !== "schedule" && (
+          <div className="ml-auto flex flex-wrap items-center gap-2.5">
+            {villageFilter}
+            {tab === "submissions" && (
+              <Select
+                value={filterComponent}
+                onChange={(e) => setFilterComponent(e.target.value)}
+                className="min-w-[190px]"
+              >
+                <option value="">All components</option>
+                {COMPONENT_FILTERS.map((c) => (
+                  <option key={c.key} value={c.key}>{c.label}</option>
+                ))}
+              </Select>
+            )}
+          </div>
+        )}
+      </Toolbar>
 
       {tab === "schedule" && (
-      <div className="mt-5">
         <Panel
           padding={false}
           title="Service schedule"
@@ -172,59 +235,57 @@ export default function MaintenancePage() {
               : "Every village is within its service window"
           }
           icon={<ClipboardCheck size={15} />}
+          tone="orange"
         >
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
+          {!loading && sites.length === 0 ? (
+            <EmptyState icon={Wrench} title="No villages" description="Add sites under Network first." />
+          ) : (
+            <DataTable>
               <thead>
-                <tr className="text-left border-b border-[var(--border-default)]">
+                <tr>
                   <Th>Village</Th>
                   <Th>Last serviced</Th>
                   <Th>Engineer</Th>
                   <Th>Condition</Th>
                   <Th>Next due</Th>
-                  <Th />
+                  <Th align="right">Action</Th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-[var(--border-default)]">
+              <tbody>
                 {loading ? (
-                  <tr><td colSpan={6} className="px-5 py-10 text-center text-[var(--fg-muted)]">Loading…</td></tr>
-                ) : sites.length === 0 ? (
-                  <tr><td colSpan={6} className="px-5 py-8">
-                    <EmptyState icon={Wrench} title="No villages" description="Add sites under Network first." />
-                  </td></tr>
+                  <TableMessage colSpan={6}>Loading…</TableMessage>
                 ) : (
                   sites.map((s) => (
-                    <tr key={s.projectId} className="hover:bg-[var(--bg-surface)] transition-colors">
-                      <td className="px-5 py-3">
-                        <button
+                    <tr key={s.projectId}>
+                      <Td>
+                        <RecordCell
+                          tone="navy"
+                          icon={<MapPin size={14} />}
+                          title={s.name}
+                          subtitle={s.hostname}
+                          mono
                           onClick={() => navigate(`/maintenance/village/${s.projectId}`)}
-                          className="font-medium text-[var(--fg-primary)] hover:text-[var(--brand)] transition-colors text-left"
-                          title="Open the village profile"
+                        />
+                      </Td>
+                      <Td nowrap>{fmtDate(s.lastVisitDate)}</Td>
+                      <Td>{s.lastEngineer || "—"}</Td>
+                      <Td><ConditionPill value={s.lastCondition} /></Td>
+                      <Td nowrap>
+                        <span
+                          className={
+                            s.overdue
+                              ? "inline-flex items-center gap-1.5 font-semibold text-[var(--danger-fg)]"
+                              : "inline-flex items-center gap-1.5 text-[var(--fg-secondary)]"
+                          }
                         >
-                          {s.name}
-                        </button>
-                      </td>
-                      <td className="px-5 py-3 text-[var(--fg-secondary)] whitespace-nowrap">{fmtDate(s.lastVisitDate)}</td>
-                      <td className="px-5 py-3 text-[var(--fg-secondary)]">{s.lastEngineer || "—"}</td>
-                      <td className="px-5 py-3">
-                        {s.lastCondition ? (
-                          <Badge tone={CONDITION_TONE[s.lastCondition] || "neutral"}>
-                            {CONDITION_LABEL[s.lastCondition] || s.lastCondition}
-                          </Badge>
-                        ) : (
-                          <span className="text-[var(--fg-muted)]">—</span>
-                        )}
-                      </td>
-                      <td className="px-5 py-3 whitespace-nowrap">
-                        <span className={s.overdue ? "text-[var(--brand)] font-medium" : "text-[var(--fg-secondary)]"}>
-                          {s.overdue && <AlertTriangle size={11} className="inline mr-1 -mt-0.5" />}
+                          {s.overdue ? <AlertTriangle size={12} /> : <CalendarClock size={12} className="text-[var(--fg-subtle)]" />}
                           {dueLabel(s)}
                         </span>
-                      </td>
-                      <td className="px-5 py-3 text-right">
+                      </Td>
+                      <Td align="right">
                         <div className="flex items-center justify-end gap-2">
                           <Button
-                            variant="primary"
+                            variant="secondary"
                             size="sm"
                             iconLeft={<Wrench size={13} />}
                             onClick={() => navigate(`/maintenance/village/${s.projectId}`)}
@@ -232,83 +293,64 @@ export default function MaintenancePage() {
                             Service
                           </Button>
                         </div>
-                      </td>
+                      </Td>
                     </tr>
                   ))
                 )}
               </tbody>
-            </table>
-          </div>
+            </DataTable>
+          )}
         </Panel>
-      </div>
       )}
 
       {tab === "reports" && (
-      <div className="mt-5">
         <Panel
           padding={false}
           title="Reports"
           subtitle="The record behind the servicing — drafts you have open, and every filed report"
           icon={<ClipboardCheck size={15} />}
-          actions={
-            <Select value={filterProject} onChange={(e) => setFilterProject(e.target.value)} className="min-w-[190px]">
-              <option value="">All villages</option>
-              {sites.map((s) => (
-                <option key={s.projectId} value={s.projectId}>{s.name}</option>
-              ))}
-            </Select>
-          }
+          tone="orange"
         >
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
+          {!loading && scopedVisits.length === 0 ? (
+            <EmptyState
+              icon={ClipboardCheck}
+              title="No reports yet"
+              description="Start one from the schedule."
+            />
+          ) : (
+            <DataTable>
               <thead>
-                <tr className="text-left border-b border-[var(--border-default)]">
+                <tr>
                   <Th>Date</Th>
                   <Th>Village</Th>
                   <Th>Engineer</Th>
                   <Th>Condition</Th>
-                  <Th>Photos</Th>
+                  <Th align="right">Photos</Th>
                   <Th>Status</Th>
-                  <Th />
+                  <Th align="right">Action</Th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-[var(--border-default)]">
+              <tbody>
                 {loading ? (
-                  <tr><td colSpan={7} className="px-5 py-10 text-center text-[var(--fg-muted)]">Loading…</td></tr>
-                ) : scopedVisits.length === 0 ? (
-                  <tr><td colSpan={7} className="px-5 py-8">
-                    <EmptyState
-                      icon={ClipboardCheck}
-                      title="No reports yet"
-                      description="Start one from the schedule above."
-                    />
-                  </td></tr>
+                  <TableMessage colSpan={7}>Loading…</TableMessage>
                 ) : (
                   scopedVisits.map((v) => (
-                    <tr key={v.id} className="hover:bg-[var(--bg-surface)] transition-colors">
-                      <td className="px-5 py-3 text-[var(--fg-secondary)] whitespace-nowrap">{fmtDate(v.visitDate)}</td>
-                      <td className="px-5 py-3 font-medium text-[var(--fg-primary)]">{v.projectName || "—"}</td>
-                      <td className="px-5 py-3 text-[var(--fg-secondary)]">{v.engineerName || "—"}</td>
-                      <td className="px-5 py-3">
-                        {v.overallCondition ? (
-                          <Badge tone={CONDITION_TONE[v.overallCondition] || "neutral"}>
-                            {CONDITION_LABEL[v.overallCondition] || v.overallCondition}
-                          </Badge>
-                        ) : (
-                          <span className="text-[var(--fg-muted)]">—</span>
-                        )}
-                      </td>
-                      <td className="px-5 py-3 tabular-nums text-[var(--fg-secondary)]">{v.photoCount ?? 0}</td>
-                      <td className="px-5 py-3">
+                    <tr key={v.id}>
+                      <Td nowrap>{fmtDate(v.visitDate)}</Td>
+                      <Td strong>{v.projectName || "—"}</Td>
+                      <Td>{v.engineerName || "—"}</Td>
+                      <Td><ConditionPill value={v.overallCondition} /></Td>
+                      <Td align="right" className="tabular-nums">{v.photoCount ?? 0}</Td>
+                      <Td>
                         {v.status === "submitted" ? (
-                          <Badge tone="success">
-                            <Lock size={9} className="inline mr-1 -mt-0.5" />Filed
-                          </Badge>
+                          <StatusPill tone="success" dot={false}>
+                            <Lock size={10} /> Filed
+                          </StatusPill>
                         ) : (
-                          <Badge tone="warning">Draft</Badge>
+                          <StatusPill tone="warning">Draft</StatusPill>
                         )}
-                      </td>
-                      <td className="px-5 py-3 text-right">
+                      </Td>
+                      <Td align="right">
                         <div className="flex items-center justify-end gap-1">
                           <Button variant="ghost" size="sm" onClick={() => setOpenVisit(v.id)}>
                             {v.status === "submitted" ? "View" : "Continue"}
@@ -322,97 +364,74 @@ export default function MaintenancePage() {
                               loading={deleting === v.id}
                               onClick={() => deleteDraft(v)}
                               title="Delete this draft"
+                              aria-label="Delete this draft"
                               iconLeft={deleting !== v.id && <Trash2 size={13} />}
                             />
                           )}
                         </div>
-                      </td>
+                      </Td>
                     </tr>
                   ))
                 )}
               </tbody>
-            </table>
-          </div>
+            </DataTable>
+          )}
         </Panel>
-      </div>
       )}
 
       {tab === "submissions" && (
-      <div className="mt-5">
         <Panel
           padding={false}
           title="Component submissions"
           subtitle="Every component filed, newest first — what was inspected, when, and by whom"
           icon={<ListChecks size={15} />}
-          actions={
-            <div className="flex items-center gap-2">
-              <Select value={filterProject} onChange={(e) => setFilterProject(e.target.value)} className="min-w-[170px]">
-                <option value="">All villages</option>
-                {sites.map((s) => (
-                  <option key={s.projectId} value={s.projectId}>{s.name}</option>
-                ))}
-              </Select>
-              <Select value={filterComponent} onChange={(e) => setFilterComponent(e.target.value)} className="min-w-[180px]">
-                <option value="">All components</option>
-                {COMPONENT_FILTERS.map((c) => (
-                  <option key={c.key} value={c.key}>{c.label}</option>
-                ))}
-              </Select>
-            </div>
-          }
+          tone="orange"
         >
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
+          {!loading && scopedSubmissions.length === 0 ? (
+            <EmptyState
+              icon={ListChecks}
+              title="Nothing filed yet"
+              description="Components appear here as engineers file them, one at a time."
+            />
+          ) : (
+            <DataTable>
               <thead>
-                <tr className="text-left border-b border-[var(--border-default)]">
+                <tr>
                   <Th>Filed</Th>
                   <Th>Village</Th>
                   <Th>Component</Th>
                   <Th>Condition</Th>
-                  <Th>Photos</Th>
+                  <Th align="right">Photos</Th>
                   <Th>Engineer</Th>
                   <Th>Notes</Th>
-                  <Th />
+                  <Th align="right">Action</Th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-[var(--border-default)]">
+              <tbody>
                 {loading ? (
-                  <tr><td colSpan={8} className="px-5 py-10 text-center text-[var(--fg-muted)]">Loading…</td></tr>
-                ) : scopedSubmissions.length === 0 ? (
-                  <tr><td colSpan={8} className="px-5 py-8">
-                    <EmptyState
-                      icon={ListChecks}
-                      title="Nothing filed yet"
-                      description="Components appear here as engineers file them, one at a time."
-                    />
-                  </td></tr>
+                  <TableMessage colSpan={8}>Loading…</TableMessage>
                 ) : (
                   scopedSubmissions.map((x, i) => (
-                    <tr key={`${x.visitId}-${x.component}-${i}`} className="hover:bg-[var(--bg-surface)] transition-colors">
-                      <td className="px-5 py-3 text-[var(--fg-secondary)] whitespace-nowrap text-[12.5px]">{fmtDate(x.submittedAt)}</td>
-                      <td className="px-5 py-3 font-medium text-[var(--fg-primary)]">{x.projectName || "—"}</td>
-                      <td className="px-5 py-3 text-[var(--fg-secondary)]">{x.componentLabel}</td>
-                      <td className="px-5 py-3">
-                        <Badge tone={CONDITION_TONE[x.condition] || "neutral"}>
-                          {CONDITION_LABEL[x.condition] || x.condition}
-                        </Badge>
-                      </td>
-                      <td className="px-5 py-3 tabular-nums text-[var(--fg-secondary)]">{x.photoCount}</td>
-                      <td className="px-5 py-3 text-[var(--fg-secondary)]">{x.engineerName || "—"}</td>
-                      <td className="px-5 py-3 text-[var(--fg-secondary)] max-w-[280px] truncate" title={x.notes || ""}>
-                        {x.notes || "—"}
-                      </td>
-                      <td className="px-5 py-3 text-right">
+                    <tr key={`${x.visitId}-${x.component}-${i}`}>
+                      <Td nowrap>{fmtDate(x.submittedAt)}</Td>
+                      <Td strong>{x.projectName || "—"}</Td>
+                      <Td>{x.componentLabel}</Td>
+                      <Td><ConditionPill value={x.condition} /></Td>
+                      <Td align="right" className="tabular-nums">{x.photoCount}</Td>
+                      <Td>{x.engineerName || "—"}</Td>
+                      <Td className="max-w-[280px] truncate">
+                        <span title={x.notes || ""}>{x.notes || "—"}</span>
+                      </Td>
+                      <Td align="right">
                         <Button variant="ghost" size="sm" onClick={() => setOpenVisit(x.visitId)}>Open</Button>
-                      </td>
+                      </Td>
                     </tr>
                   ))
                 )}
               </tbody>
-            </table>
-          </div>
+            </DataTable>
+          )}
         </Panel>
-      </div>
       )}
 
       {openVisit && (
@@ -423,24 +442,6 @@ export default function MaintenancePage() {
           onChanged={load}
         />
       )}
-    </div>
-  );
-}
-
-function Th({ children }) {
-  return <th className="px-5 py-2.5 text-label">{children}</th>;
-}
-
-function Stat({ label, value, tone }) {
-  const color =
-    tone === "danger" ? "text-[var(--brand)]"
-    : tone === "warning" ? "text-[var(--warning-fg)]"
-    : tone === "success" ? "text-[var(--success-fg)]"
-    : "text-[var(--fg-primary)]";
-  return (
-    <div className="p-4 rounded-lg bg-[var(--surface-raised)] border border-[var(--border-default)]">
-      <div className="text-[10.5px] uppercase tracking-wide text-[var(--text-quaternary)]">{label}</div>
-      <div className={`text-[22px] font-semibold tracking-tight mt-1 ${color}`}>{value}</div>
-    </div>
+    </PageShell>
   );
 }

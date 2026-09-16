@@ -1,6 +1,11 @@
 // src/components/vouchers/VoucherCreateForm.jsx
-// "Generate Vouchers" modal — pick a profile, pick a quantity, fire.
-// Rebuilt on the design system: Modal + Field + Input + Button + Badge.
+//
+// "Generate vouchers" — pick a profile, pick a quantity, fire.
+//
+// Two decisions, so the modal is two blocks and nothing else. The profile list
+// is a scrollable radio group rather than a select, because the numbers being
+// compared (duration, quota, devices) have to stay visible while choosing — a
+// dropdown would hide exactly the thing you are choosing between.
 
 import { useEffect, useMemo, useState } from "react";
 import { motion } from "framer-motion";
@@ -19,7 +24,7 @@ import {
 } from "lucide-react";
 
 import { voucherApi } from "../../services/api";
-import { Modal, Field, Input, Button, Badge, EmptyState } from "../ui";
+import { Modal, Field, Input, Button, Badge, EmptyState, ObjectTile, Segmented } from "../ui";
 
 const QUICK_QTYS = [1, 5, 10, 25, 50];
 
@@ -70,9 +75,7 @@ export default function VoucherCreateForm({ groupId, siteName, onClose, onCreate
       };
       const result = await voucherApi.create(payload);
       const count = result.count || 1;
-      toast.success(
-        `${count} voucher${count > 1 ? "s" : ""} created successfully`
-      );
+      toast.success(`${count} voucher${count > 1 ? "s" : ""} created successfully`);
       onCreated();
     } catch (err) {
       toast.error(err.message);
@@ -82,17 +85,14 @@ export default function VoucherCreateForm({ groupId, siteName, onClose, onCreate
   }
 
   const selectedId = useMemo(
-    () =>
-      selectedGroup
-        ? String(selectedGroup.id || selectedGroup.userGroupId)
-        : null,
+    () => (selectedGroup ? String(selectedGroup.id || selectedGroup.userGroupId) : null),
     [selectedGroup]
   );
 
   return (
     <Modal open onClose={onClose} width="lg">
       <Modal.Header
-        eyebrow={siteName ? `Site · ${siteName}` : "Vouchers"}
+        eyebrow={siteName ? `Village · ${siteName}` : "Vouchers"}
         title="Generate vouchers"
         subtitle="Pick a profile and how many codes to mint. They appear in the Vouchers list immediately."
         icon={Ticket}
@@ -110,7 +110,7 @@ export default function VoucherCreateForm({ groupId, siteName, onClose, onCreate
             {loadingGroups ? (
               <ProfileSkeleton />
             ) : userGroups.length === 0 ? (
-              <div className="border border-[var(--border-subtle)] rounded-lg bg-[var(--surface-sunken)]">
+              <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-surface)]">
                 <EmptyState
                   icon={Inbox}
                   title="No profiles found"
@@ -125,12 +125,11 @@ export default function VoucherCreateForm({ groupId, siteName, onClose, onCreate
               >
                 {userGroups.map((g) => {
                   const gid = String(g.id || g.userGroupId);
-                  const isSelected = selectedId === gid;
                   return (
                     <ProfileCard
                       key={gid}
                       group={g}
-                      selected={isSelected}
+                      selected={selectedId === gid}
                       onSelect={() => setSelectedGroup(g)}
                     />
                   );
@@ -140,73 +139,48 @@ export default function VoucherCreateForm({ groupId, siteName, onClose, onCreate
           </Field>
 
           {/* Quantity */}
-          <Field
-            label="Quantity"
-            required
-            hint="Between 1 and 100. Each voucher gets a unique code."
-          >
-            <div className="flex items-center gap-2">
-              <QtyStepButton
-                onClick={() => setQuantity(Math.max(1, quantity - 1))}
-                aria-label="Decrease quantity"
-              >
-                <Minus size={14} />
-              </QtyStepButton>
+          <Field label="Quantity" required hint="Between 1 and 100. Each voucher gets a unique code.">
+            <div className="flex flex-wrap items-center gap-3">
+              <div className="flex items-center gap-2">
+                <QtyStepButton onClick={() => setQuantity(Math.max(1, quantity - 1))} aria-label="Decrease quantity">
+                  <Minus size={14} />
+                </QtyStepButton>
 
-              <Input
-                mono
-                type="number"
-                min={1}
-                max={100}
-                value={quantity}
-                onChange={(e) =>
-                  setQuantity(
-                    Math.max(1, Math.min(100, Number(e.target.value) || 1))
-                  )
-                }
-                className="text-center w-20 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-              />
+                <Input
+                  mono
+                  type="number"
+                  min={1}
+                  max={100}
+                  value={quantity}
+                  onChange={(e) => setQuantity(Math.max(1, Math.min(100, Number(e.target.value) || 1)))}
+                  aria-label="Quantity"
+                  className="text-center w-20 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                />
 
-              <QtyStepButton
-                onClick={() => setQuantity(Math.min(100, quantity + 1))}
-                aria-label="Increase quantity"
-              >
-                <Plus size={14} />
-              </QtyStepButton>
-
-              <span className="flex-1" />
-
-              <div className="flex items-center gap-1">
-                {QUICK_QTYS.map((n) => {
-                  const active = quantity === n;
-                  return (
-                    <button
-                      key={n}
-                      type="button"
-                      onClick={() => setQuantity(n)}
-                      className={
-                        "px-2 h-7 text-[12px] font-mono rounded-md transition-colors focus-ring " +
-                        (active
-                          ? "bg-[var(--brand-soft)] text-[var(--brand-fg-on-soft)] border border-[var(--brand-soft-hover)]"
-                          : "bg-transparent text-[var(--text-tertiary)] border border-[var(--border-default)] hover:bg-[var(--surface-hover)] hover:text-[var(--text-primary)] hover:border-[var(--border-strong)]")
-                      }
-                    >
-                      {n}
-                    </button>
-                  );
-                })}
+                <QtyStepButton onClick={() => setQuantity(Math.min(100, quantity + 1))} aria-label="Increase quantity">
+                  <Plus size={14} />
+                </QtyStepButton>
               </div>
+
+              {/* Quick picks cover the batch sizes a village actually orders. */}
+              <Segmented
+                size="sm"
+                value={quantity}
+                onChange={(n) => setQuantity(n)}
+                options={QUICK_QTYS.map((n) => ({ value: n, label: String(n) }))}
+                className="ml-auto"
+              />
             </div>
           </Field>
         </div>
       </Modal.Body>
 
       <Modal.Footer>
-        <span className="mr-auto text-[12.5px] text-[var(--text-tertiary)]">
+        <span className="mr-auto text-[12.5px] text-[var(--fg-muted)] min-w-0 truncate">
           {selectedGroup ? (
             <>
               {(selectedGroup.name || selectedGroup.userGroupName) + " · "}
-              <span className="text-[var(--text-secondary)]">
+              <span className="text-[var(--fg-secondary)] font-semibold tabular-nums">
                 {quantity} code{quantity > 1 ? "s" : ""}
               </span>
             </>
@@ -227,9 +201,7 @@ export default function VoucherCreateForm({ groupId, siteName, onClose, onCreate
         >
           {submitting
             ? "Generating…"
-            : `Generate ${quantity > 1 ? quantity + " " : ""}voucher${
-                quantity > 1 ? "s" : ""
-              }`}
+            : `Generate ${quantity > 1 ? quantity + " " : ""}voucher${quantity > 1 ? "s" : ""}`}
         </Button>
       </Modal.Footer>
     </Modal>
@@ -246,56 +218,60 @@ function ProfileCard({ group, selected, onSelect }) {
       onClick={onSelect}
       whileTap={{ scale: 0.99 }}
       className={
-        "group text-left p-3.5 rounded-lg border transition-[border-color,background-color,box-shadow] duration-150 focus-ring " +
+        "group text-left p-3 rounded-xl border transition-[border-color,background-color,box-shadow] duration-150 focus-ring " +
         (selected
           ? "border-[var(--brand)] bg-[var(--brand-soft)] shadow-[0_0_0_3px_var(--brand-soft)]"
-          : "border-[var(--border-default)] bg-[var(--surface-raised)] hover:border-[var(--border-strong)] hover:bg-[var(--surface-hover)]")
+          : "border-[var(--border-default)] bg-[var(--bg-elevated)] hover:border-[var(--border-hover)] hover:bg-[var(--bg-surface)]")
       }
     >
-      <div className="flex items-start justify-between gap-3 mb-2">
-        <span
-          className={
-            "text-[13px] font-semibold tracking-tight truncate " +
-            (selected
-              ? "text-[var(--brand-fg-on-soft)]"
-              : "text-[var(--text-primary)]")
-          }
-        >
-          {group.name || group.userGroupName}
+      <div className="flex items-start gap-2.5">
+        <ObjectTile tone={selected ? "brand" : "indigo"} size="sm">
+          <Ticket size={14} />
+        </ObjectTile>
+        <span className="min-w-0 flex-1">
+          <span
+            className={
+              "block text-[13px] font-semibold tracking-tight truncate font-display " +
+              (selected ? "text-[var(--brand-fg-on-soft)]" : "text-[var(--fg-primary)]")
+            }
+          >
+            {group.name || group.userGroupName}
+          </span>
+
+          <span className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11.5px] text-[var(--fg-muted)]">
+            {group.timePeriod != null && (
+              <span className="flex items-center gap-1 tabular-nums">
+                <Clock size={11} /> {formatTime(group.timePeriod)}
+              </span>
+            )}
+            {group.quota != null && (
+              <span className="flex items-center gap-1 tabular-nums">
+                <HardDrive size={11} /> {formatQuota(group.quota)}
+              </span>
+            )}
+            {group.noOfDevice != null && (
+              <span className="flex items-center gap-1 tabular-nums">
+                <Users size={11} /> {group.noOfDevice} dev
+              </span>
+            )}
+            {group.voucherCount > 0 && (
+              <Badge tone="brand" size="sm">
+                {group.voucherCount} active
+              </Badge>
+            )}
+          </span>
         </span>
+
         <span
           className={
-            "shrink-0 w-4 h-4 rounded-full border flex items-center justify-center transition-colors " +
+            "shrink-0 mt-0.5 w-4 h-4 rounded-full border flex items-center justify-center transition-colors " +
             (selected
               ? "border-[var(--brand)] bg-[var(--brand)] text-[var(--text-on-brand)]"
-              : "border-[var(--border-strong)] bg-transparent text-transparent group-hover:border-[var(--text-tertiary)]")
+              : "border-[var(--border-strong)] bg-transparent text-transparent group-hover:border-[var(--fg-muted)]")
           }
         >
           <Check size={10} strokeWidth={3} />
         </span>
-      </div>
-
-      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[12px] text-[var(--text-tertiary)]">
-        {group.timePeriod != null && (
-          <span className="flex items-center gap-1">
-            <Clock size={11} /> {formatTime(group.timePeriod)}
-          </span>
-        )}
-        {group.quota != null && (
-          <span className="flex items-center gap-1">
-            <HardDrive size={11} /> {formatQuota(group.quota)}
-          </span>
-        )}
-        {group.noOfDevice != null && (
-          <span className="flex items-center gap-1">
-            <Users size={11} /> {group.noOfDevice} dev
-          </span>
-        )}
-        {group.voucherCount > 0 && (
-          <Badge tone="brand" size="sm">
-            {group.voucherCount} active
-          </Badge>
-        )}
       </div>
     </motion.button>
   );
@@ -308,13 +284,15 @@ function QtyStepButton({ children, ...props }) {
       type="button"
       {...props}
       className={
-        "h-9 w-9 flex items-center justify-center rounded-md " +
-        "bg-[var(--surface-raised)] border border-[var(--border-default)] " +
-        "text-[var(--text-secondary)] " +
-        "hover:bg-[var(--surface-hover)] hover:text-[var(--text-primary)] " +
+        "h-10 w-10 flex items-center justify-center rounded-full " +
+        "bg-[var(--surface)] border border-[var(--input-border)] " +
+        "text-[var(--fg-secondary)] shadow-[var(--shadow-xs)] " +
+        "hover:bg-[var(--bg-surface)] hover:text-[var(--fg-primary)] " +
         "active:bg-[var(--surface-pressed)] focus-ring transition-colors"
       }
-    />
+    >
+      {children}
+    </button>
   );
 }
 
@@ -323,12 +301,9 @@ function ProfileSkeleton() {
   return (
     <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
       {Array.from({ length: 4 }).map((_, i) => (
-        <div
-          key={i}
-          className="h-[78px] rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-sunken)] skeleton"
-        />
+        <div key={i} className="h-[74px] rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-surface)] skeleton" />
       ))}
-      <div className="col-span-full flex items-center justify-center gap-2 text-[12px] text-[var(--text-tertiary)] py-1">
+      <div className="col-span-full flex items-center justify-center gap-2 text-[12px] text-[var(--fg-muted)] py-1">
         <Loader2 size={12} className="animate-spin" /> Loading profiles…
       </div>
     </div>

@@ -1,13 +1,37 @@
 // src/pages/OverviewPage.jsx
-// All-villages network overview (NOC-style): live status + uptime % + usage,
-// served from the background collector snapshots. Auto-refreshes every 30s.
+//
+// The NOC board: every village's live state on one screen, served from the
+// background collector's snapshots and re-read every 30s.
+//
+// Rebuilt as a Lightning list page — four KPIs that answer "is the estate up?",
+// a filter strip, then one dense table. The old version put "villages up" and
+// "villages down" side by side as two of its four tiles, which spent half the
+// summary restating the same fraction; the down count now rides on the villages
+// tile and is one click away in the status filter, freeing a tile for the AP
+// fleet, which is the number that actually explains a village being degraded.
 
-import { useEffect, useState, useCallback, useRef } from "react";
+import { useEffect, useState, useCallback, useRef, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import toast from "react-hot-toast";
-import { Globe, RefreshCw, Users, Activity, CheckCircle2, XCircle } from "lucide-react";
+import { Globe, RefreshCw, Users, Activity, CheckCircle2, Wifi, MapPin, Network } from "lucide-react";
 import { networkApi } from "../services/api";
-import { PageHeader, StatCard, Panel, Button } from "../components/ui";
+import {
+  PageShell,
+  PageHeader,
+  KpiGrid,
+  StatCard,
+  Panel,
+  Button,
+  Toolbar,
+  SearchInput,
+  Segmented,
+  StatusPill,
+  DataTable,
+  Th,
+  Td,
+  TableMessage,
+  RecordCell,
+} from "../components/ui";
 import { useSite } from "../hooks/useSite";
 
 const fmtBytes = (b) => {
@@ -29,6 +53,8 @@ export default function OverviewPage() {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [q, setQ] = useState("");
+  const [status, setStatus] = useState("all");
   const navigate = useNavigate();
   const { isInScope } = useSite();
   const timer = useRef(null);
@@ -88,29 +114,62 @@ export default function OverviewPage() {
 
   // Follow the scope switcher: a single village → just that one; All Villages →
   // the configured scope set (Settings). Recompute the summary from the subset.
-  const sites = (data?.sites || []).filter((v) => isInScope(v.id));
+  const sites = useMemo(
+    () => (data?.sites || []).filter((v) => isInScope(v.id)),
+    [data, isInScope]
+  );
+
   const sum = (f) => sites.reduce((a, v) => a + (Number(f(v)) || 0), 0);
   const s = data
     ? {
         villagesTotal: sites.length,
         villagesUp: sites.filter((v) => v.online === true).length,
         villagesDown: sites.filter((v) => v.online === false).length,
+        villagesUnknown: sites.filter((v) => v.online == null).length,
+        apsOnline: sum((v) => v.apsOnline),
+        apsTotal: sum((v) => v.apsTotal),
         clients: sum((v) => v.clients),
         usageBytes: sum((v) => v.usageBytes),
       }
     : null;
 
+  // The status filter keeps the "down" count one click away now that it no
+  // longer has a KPI tile of its own.
+  const statusOptions = [
+    { value: "all", label: "All", count: sites.length },
+    { value: "online", label: "Online", count: s?.villagesUp ?? 0 },
+    { value: "down", label: "Down", count: s?.villagesDown ?? 0 },
+    ...(s?.villagesUnknown ? [{ value: "unknown", label: "No data", count: s.villagesUnknown }] : []),
+  ];
+
+  const rows = useMemo(() => {
+    const needle = q.trim().toLowerCase();
+    return sites.filter((v) => {
+      if (status === "online" && v.online !== true) return false;
+      if (status === "down" && v.online !== false) return false;
+      if (status === "unknown" && v.online != null) return false;
+      if (!needle) return true;
+      return (
+        String(v.name || "").toLowerCase().includes(needle) ||
+        String(v.hostname || "").toLowerCase().includes(needle)
+      );
+    });
+  }, [sites, q, status]);
+
+  const filtered = q.trim() !== "" || status !== "all";
+
   return (
-    <div className="p-4 sm:p-6 lg:p-8">
+    <PageShell>
       <PageHeader
         eyebrow="Network"
         title="Overview"
         subtitle={`Every village at a glance${data?.lastCollected ? ` · updated ${timeAgo(data.lastCollected)}` : ""}`}
-        icon={<Globe size={20} />}
+        icon={<Globe size={22} />}
+        tone="navy"
         actions={
           <Button
             variant="secondary"
-            size="sm"
+            size="md"
             onClick={collectAndReload}
             disabled={collecting}
             iconLeft={<RefreshCw size={14} className={collecting || refreshing ? "animate-spin" : ""} />}
@@ -120,99 +179,150 @@ export default function OverviewPage() {
         }
       />
 
-      {/* Summary */}
-      <div className="mt-6 grid grid-cols-2 lg:grid-cols-4 gap-3">
+      <KpiGrid>
         <StatCard
           icon={<CheckCircle2 size={18} />}
-          label="Villages up"
+          label="Villages online"
           value={s ? `${s.villagesUp}/${s.villagesTotal}` : "—"}
           color="emerald"
+          trend={s?.villagesDown ? "down" : undefined}
+          trendValue={s?.villagesDown ? `${s.villagesDown} down` : undefined}
+          sub={s?.villagesDown ? "needs attention" : "all villages reporting"}
         />
         <StatCard
-          icon={<XCircle size={18} />}
-          label="Villages down"
-          value={s ? s.villagesDown : "—"}
-          color={s?.villagesDown ? "rose" : "slate"}
+          icon={<Wifi size={18} />}
+          label="Access points online"
+          value={s?.apsTotal ? `${s.apsOnline}/${s.apsTotal}` : "—"}
+          color="blue"
+          sub={s?.apsTotal ? `${s.apsTotal - s.apsOnline} offline across the estate` : "no APs reporting"}
         />
-        <StatCard icon={<Users size={18} />} label="Clients online" value={s ? s.clients : "—"} color="blue" />
-        <StatCard icon={<Activity size={18} />} label="Usage today" value={s ? fmtBytes(s.usageBytes) : "—"} color="violet" />
-      </div>
+        <StatCard
+          icon={<Users size={18} />}
+          label="Clients online"
+          value={s ? s.clients.toLocaleString() : "—"}
+          color="indigo"
+          sub="connected right now"
+        />
+        <StatCard
+          icon={<Activity size={18} />}
+          label="Usage today"
+          value={s ? fmtBytes(s.usageBytes) : "—"}
+          color="violet"
+          sub="all villages combined"
+        />
+      </KpiGrid>
 
-      {/* Villages table */}
-      <div className="mt-5">
-        <Panel padding={false}>
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="text-left border-b border-[var(--border-default)]">
-                  <Th>Village</Th><Th>Status</Th><Th>Internet</Th><Th>Gateway</Th>
-                  <Th>APs</Th><Th>Clients</Th><Th>Usage</Th><Th>Uptime 24h</Th>
+      <Toolbar>
+        <SearchInput value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search villages…" />
+        <Segmented options={statusOptions} value={status} onChange={setStatus} size="sm" />
+        <span className="ml-auto text-[12px] text-[var(--fg-muted)] tabular-nums">
+          {filtered
+            ? `${rows.length} of ${sites.length} villages`
+            : `${sites.length} village${sites.length === 1 ? "" : "s"}`}
+        </span>
+      </Toolbar>
+
+      <Panel
+        title="Village status"
+        subtitle="Collected every ~5 min · re-read every 30s"
+        icon={<Network size={15} />}
+        tone="navy"
+        padding={false}
+      >
+        <DataTable>
+          <thead>
+            <tr>
+              <Th>Village</Th>
+              <Th>Status</Th>
+              <Th>Internet</Th>
+              <Th>Gateway</Th>
+              <Th align="right">APs</Th>
+              <Th align="right">Clients</Th>
+              <Th align="right">Usage</Th>
+              <Th align="right">Uptime 24h</Th>
+            </tr>
+          </thead>
+          <tbody>
+            {loading ? (
+              <TableMessage colSpan={8}>Loading…</TableMessage>
+            ) : rows.length === 0 ? (
+              <TableMessage colSpan={8}>
+                <span className="block font-semibold text-[var(--fg-primary)] text-[13.5px]">
+                  {filtered
+                    ? "No village matches these filters"
+                    : (data?.sites?.length ?? 0) > 0
+                      ? "No villages in the current scope"
+                      : "No villages yet"}
+                </span>
+                <span className="block mt-1">
+                  {filtered
+                    ? "Clear the search or pick a different status."
+                    : (data?.sites?.length ?? 0) > 0
+                      ? "Adjust the All Villages scope in Settings."
+                      : "Add sites under Network."}
+                </span>
+              </TableMessage>
+            ) : (
+              rows.map((v) => (
+                <tr
+                  key={v.id}
+                  onClick={() => navigate("/network")}
+                  className="cursor-pointer"
+                >
+                  <Td>
+                    <RecordCell
+                      tone="navy"
+                      icon={<MapPin size={15} />}
+                      title={v.name}
+                      subtitle={v.hostname || `group ${v.groupId || "—"}`}
+                      mono
+                    />
+                  </Td>
+                  <Td><State state={v.online} up="Online" down="Down" /></Td>
+                  <Td><State state={v.internetUp} up="Up" down="Down" /></Td>
+                  <Td><State state={v.gatewayOnline} up="Online" down="Offline" /></Td>
+                  <Td align="right" nowrap className="tabular-nums">
+                    {v.apsTotal ? `${v.apsOnline}/${v.apsTotal}` : "—"}
+                  </Td>
+                  <Td align="right" nowrap className="tabular-nums">{v.clients ?? 0}</Td>
+                  <Td align="right" nowrap className="tabular-nums">{fmtBytes(v.usageBytes)}</Td>
+                  <Td align="right" nowrap><Uptime pct={v.uptimePct} /></Td>
                 </tr>
-              </thead>
-              <tbody className="divide-y divide-[var(--border-default)]">
-                {loading ? (
-                  <tr><td colSpan={8} className="px-4 py-10 text-center text-[var(--fg-muted)]">Loading…</td></tr>
-                ) : sites.length === 0 ? (
-                  <tr><td colSpan={8} className="px-4 py-10 text-center text-[var(--fg-muted)]">{(data?.sites?.length ?? 0) > 0 ? "No villages in the current scope — adjust the All Villages scope in Settings." : "No villages yet — add sites under Network."}</td></tr>
-                ) : sites.map((v) => (
-                  <tr
-                    key={v.id}
-                    onClick={() => navigate("/network")}
-                    className="hover:bg-[var(--bg-surface)] cursor-pointer transition-colors"
-                  >
-                    <td className="px-4 py-3">
-                      <div className="font-medium text-[var(--fg-primary)]">{v.name}</div>
-                      <div className="text-xs font-mono text-[var(--fg-muted)]">{v.hostname || `group ${v.groupId || "—"}`}</div>
-                    </td>
-                    <td className="px-4 py-3"><Dot state={v.online} up="Online" down="Down" /></td>
-                    <td className="px-4 py-3"><Dot state={v.internetUp} up="Up" down="Down" /></td>
-                    <td className="px-4 py-3"><Dot state={v.gatewayOnline} up="Online" down="Offline" /></td>
-                    <td className="px-4 py-3 text-[var(--fg-secondary)] tabular-nums">{v.apsTotal ? `${v.apsOnline}/${v.apsTotal}` : "—"}</td>
-                    <td className="px-4 py-3 text-[var(--fg-secondary)] tabular-nums">{v.clients ?? 0}</td>
-                    <td className="px-4 py-3 text-[var(--fg-secondary)] tabular-nums">{fmtBytes(v.usageBytes)}</td>
-                    <td className="px-4 py-3"><Uptime pct={v.uptimePct} /></td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </Panel>
-      </div>
+              ))
+            )}
+          </tbody>
+        </DataTable>
 
-      {!loading && sites.some((v) => v.uptimePct == null) && (
-        <p className="mt-3 text-xs text-[var(--fg-muted)]">
-          Uptime fills in as the background monitor collects samples (every ~5 min) — give it a little while after the first deploy.
-        </p>
-      )}
-    </div>
+        {/* Footnote lives with the column it explains rather than under the page,
+            where it read as an unrelated aside. */}
+        {!loading && sites.some((v) => v.uptimePct == null) && (
+          <p className="px-5 py-3 border-t border-[var(--border-subtle)] text-[12px] text-[var(--fg-muted)]">
+            Uptime fills in as the background monitor collects samples (every ~5 min) — give it a little while
+            after the first deploy.
+          </p>
+        )}
+      </Panel>
+    </PageShell>
   );
 }
 
-function Th({ children }) {
-  return <th className="px-4 py-2.5 text-label">{children}</th>;
-}
-
-function Dot({ state, up = "Up", down = "Down" }) {
-  if (state == null) {
-    return (
-      <span className="inline-flex items-center gap-1.5 text-[var(--fg-muted)]">
-        <span className="h-2 w-2 rounded-full bg-[var(--fg-muted)] opacity-50" />—
-      </span>
-    );
-  }
-  return state ? (
-    <span className="inline-flex items-center gap-1.5" style={{ color: "var(--success)" }}>
-      <span className="h-2 w-2 rounded-full" style={{ background: "var(--success)" }} />{up}
-    </span>
-  ) : (
-    <span className="inline-flex items-center gap-1.5" style={{ color: "var(--error)" }}>
-      <span className="h-2 w-2 rounded-full" style={{ background: "var(--error)" }} />{down}
-    </span>
-  );
+/** Tri-state cell: up / down / not reported. */
+function State({ state, up = "Up", down = "Down" }) {
+  if (state == null) return <StatusPill tone="neutral">No data</StatusPill>;
+  return <StatusPill tone={state ? "success" : "danger"}>{state ? up : down}</StatusPill>;
 }
 
 function Uptime({ pct }) {
-  if (pct == null) return <span className="text-[var(--fg-muted)] text-xs">collecting…</span>;
-  const color = pct >= 99 ? "var(--success)" : pct >= 90 ? "var(--warning)" : "var(--error)";
-  return <span className="font-medium tabular-nums" style={{ color }}>{pct}%</span>;
+  if (pct == null) return <span className="text-[12px] text-[var(--fg-muted)]">collecting…</span>;
+  const color = pct >= 99 ? "var(--success-fg)" : pct >= 90 ? "var(--warning-fg)" : "var(--danger-fg)";
+  return (
+    <span className="inline-flex items-center justify-end gap-2">
+      {/* A bar as well as the figure: 97% and 99.9% are hard to tell apart as
+          numbers when you are scanning thirty rows for the bad one. */}
+      <span className="hidden lg:block w-14 h-1.5 rounded-full bg-[var(--bg-surface)] overflow-hidden">
+        <span className="block h-full rounded-full" style={{ width: `${Math.max(0, Math.min(100, pct))}%`, background: color }} />
+      </span>
+      <span className="text-[13px] font-semibold tabular-nums" style={{ color }}>{pct}%</span>
+    </span>
+  );
 }

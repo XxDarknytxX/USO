@@ -1,15 +1,28 @@
 // src/pages/Login.jsx
-// Focused, premium sign-in: a deep canvas with a slowly-breathing Vodafone-red
-// aurora, a centered glass card carrying the app's living red accent line, and a
-// staggered blur-in on load. Theme-aware (uses the same tokens as the app shell).
+//
+// Sign-in, rebuilt as a two-panel layout after Salesforce's product login: a
+// branded panel that says what this system is and what it is for, beside a calm
+// white form panel that does one job.
+//
+// The previous version was a single card floating on an ambient wash — it could
+// have been any admin tool. The brand panel is where the product gets to have a
+// personality; the form side stays deliberately plain, because nobody wants a
+// designed experience while typing a password. On narrow screens the brand panel
+// collapses to a compact header so the form is never pushed below the fold.
 
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Mail, Lock, ArrowRight, Eye, EyeOff, ShieldCheck } from "lucide-react";
+import { Mail, Lock, ArrowRight, Eye, EyeOff, ShieldCheck, Wifi, Ticket, Wrench } from "lucide-react";
 
 import { api } from "../services/api";
 import { Field, Input, Button } from "../components/ui";
 import VodafoneLogo from "../components/ui/VodafoneLogo";
+
+const HIGHLIGHTS = [
+  { Icon: Wifi, title: "Village connectivity", copy: "Live health for every USO site, in one place." },
+  { Icon: Ticket, title: "Vouchers & revenue", copy: "Sales, stock and usage across the estate." },
+  { Icon: Wrench, title: "Field maintenance", copy: "Six-monthly inspections, with photographic evidence." },
+];
 
 export default function Login() {
   const [email, setEmail] = useState("");
@@ -24,10 +37,7 @@ export default function Login() {
     setErr("");
     setLoading(true);
     try {
-      const { token } = await api("/login", {
-        method: "POST",
-        body: { email, password },
-      });
+      const { token } = await api("/login", { method: "POST", body: { email, password } });
       localStorage.setItem("token", token);
       try {
         const payload = JSON.parse(atob(token.split(".")[1]));
@@ -44,145 +54,155 @@ export default function Login() {
   }
 
   return (
-    <div className="relative min-h-screen flex items-center justify-center overflow-hidden bg-[var(--bg-base)] text-[var(--fg-primary)] px-5 py-10">
-      {/* ===== Ambient backdrop =====
-          Built for a LIGHT canvas: a broad brand wash across the top that fades
-          into the page, rather than the old dark-theme aurora, which at 6% red
-          on white was invisible and left the screen looking unfinished. */}
-      <div
-        aria-hidden
-        className="pointer-events-none absolute inset-x-0 top-0 h-[46vh]"
-        style={{ background: "linear-gradient(180deg, rgba(230,0,0,0.16) 0%, rgba(230,0,0,0.06) 38%, transparent 100%)" }}
-      />
-      <div
-        aria-hidden
-        className="pointer-events-none absolute left-1/2 -translate-x-1/2 -top-[26%] w-[min(1000px,130vw)] h-[min(1000px,130vw)] rounded-full blur-[120px] opacity-80 animate-float-slow"
-        style={{ background: "radial-gradient(circle, rgba(230,0,0,0.22), rgba(255,120,120,0.10) 45%, transparent 70%)" }}
-      />
-      <div
-        aria-hidden
-        className="pointer-events-none absolute -bottom-[30%] -right-[14%] w-[min(700px,92vw)] h-[min(700px,92vw)] rounded-full blur-[130px] opacity-70 animate-float"
-        style={{ background: "radial-gradient(circle, rgba(27,150,255,0.16), transparent 66%)" }}
-      />
-      {/* Fine dot grid */}
-      <div
-        aria-hidden
-        className="pointer-events-none absolute inset-0 opacity-[0.05]"
-        style={{ backgroundImage: "radial-gradient(circle at 1px 1px, var(--fg-primary) 1px, transparent 0)", backgroundSize: "34px 34px" }}
-      />
-      {/* Vignette back to the canvas so the card sits in calm space */}
-      <div
-        aria-hidden
-        className="pointer-events-none absolute inset-0"
-        style={{ background: "radial-gradient(ellipse at center, transparent 34%, var(--bg-base) 96%)" }}
-      />
+    <div className="min-h-screen grid lg:grid-cols-[1.05fr_1fr] bg-[var(--bg-base)] text-[var(--fg-primary)]">
+      {/* ============================ Brand panel ============================ */}
+      <aside className="relative overflow-hidden hidden lg:flex flex-col justify-between p-12 xl:p-16 text-white">
+        <div
+          aria-hidden
+          className="absolute inset-0"
+          style={{ background: "linear-gradient(150deg, #7A0A0A 0%, #C20000 34%, #E60000 58%, #FF4D4D 100%)" }}
+        />
+        {/* Speechmark motif, blown up and cropped — brand as texture, not a logo
+            pasted twice. */}
+        <div
+          aria-hidden
+          className="absolute -right-24 -bottom-32 w-[560px] h-[560px] rounded-full opacity-[0.18]"
+          style={{ background: "radial-gradient(circle at 30% 30%, #fff 0%, transparent 62%)" }}
+        />
+        <div
+          aria-hidden
+          className="absolute -left-40 top-[-15%] w-[520px] h-[520px] rounded-full opacity-[0.14] animate-float-slow"
+          style={{ background: "radial-gradient(circle, #fff 0%, transparent 60%)" }}
+        />
 
-      {/* ===== Content ===== */}
-      <div className="relative z-10 w-full max-w-[420px]">
-        {/* Brand lockup */}
-        <div className="flex flex-col items-center text-center mb-7 animate-fade-up">
-          <VodafoneLogo size={52} className="drop-shadow-[0_0_26px_rgba(230,0,0,0.5)]" />
-          <h2 className="mt-4 text-[15px] font-semibold text-[var(--fg-primary)] tracking-tight">Voucher Manager</h2>
-          <p className="text-[12px] font-medium text-[var(--fg-muted)] mt-0.5">Vodafone Fiji · USO Portal</p>
+        <div className="relative flex items-center gap-3">
+          <span className="h-11 w-11 rounded-[14px] bg-white/15 backdrop-blur-sm flex items-center justify-center">
+            <VodafoneLogo size={26} />
+          </span>
+          <div className="leading-tight">
+            <p className="font-display font-extrabold text-[15px] tracking-tight">Voucher Manager</p>
+            <p className="text-[11.5px] text-white/70">Vodafone Fiji · USO</p>
+          </div>
         </div>
 
-        {/* Card */}
-        <div
-          className="relative rounded-2xl border border-[var(--border-default)] bg-[var(--bg-elevated)] shadow-[var(--shadow-elevated)] overflow-hidden animate-fade-up"
-          style={{ animationDelay: "80ms", animationFillMode: "both" }}
-        >
-          {/* Living red accent line — the same pulse as the app chrome */}
-          <div
-            aria-hidden
-            className="absolute top-0 left-0 right-0 h-[2px] animate-header-wave"
-            style={{
-              background:
-                "linear-gradient(90deg, rgba(230,0,0,0.04) 0%, rgba(230,0,0,0.6) 25%, #E60000 50%, rgba(230,0,0,0.6) 75%, rgba(230,0,0,0.04) 100%)",
-              backgroundSize: "200% 100%",
-            }}
-          />
+        <div className="relative max-w-[440px]">
+          <h2 className="font-display font-extrabold text-[40px] xl:text-[46px] leading-[1.08] tracking-[-0.03em]">
+            Connectivity for every village.
+          </h2>
+          <p className="mt-4 text-[15px] leading-relaxed text-white/80">
+            The operations console for the Universal Service Obligation programme — vouchers, network health and
+            field maintenance across Fiji.
+          </p>
 
-          <div className="p-7 sm:p-8">
-            <div className="mb-6">
-              <span className="text-label !text-[var(--accent)] block mb-2">Sign in</span>
-              <h1 className="text-[26px] font-semibold tracking-tight text-[var(--fg-primary)] leading-tight">Welcome back</h1>
-              <p className="text-[13px] text-[var(--fg-secondary)] mt-1.5">Sign in to continue to the operations console.</p>
+          <ul className="mt-10 space-y-5">
+            {HIGHLIGHTS.map(({ Icon, title, copy }) => (
+              <li key={title} className="flex items-start gap-3.5">
+                <span className="mt-0.5 h-9 w-9 shrink-0 rounded-[11px] bg-white/15 backdrop-blur-sm flex items-center justify-center">
+                  <Icon size={17} />
+                </span>
+                <span className="min-w-0">
+                  <span className="block font-display font-bold text-[13.5px]">{title}</span>
+                  <span className="block text-[12.5px] text-white/70 leading-relaxed">{copy}</span>
+                </span>
+              </li>
+            ))}
+          </ul>
+        </div>
+
+        <p className="relative text-[11.5px] text-white/60">
+          © {new Date().getFullYear()} Vodafone Fiji · Universal Service Obligation
+        </p>
+      </aside>
+
+      {/* ============================= Form panel ============================ */}
+      <main className="flex flex-col justify-center px-6 py-12 sm:px-10 lg:px-14 xl:px-20">
+        <div className="w-full max-w-[400px] mx-auto">
+          {/* Compact brand lockup for narrow screens, where the panel is hidden */}
+          <div className="lg:hidden flex items-center gap-3 mb-10">
+            <span className="h-11 w-11 rounded-[14px] bg-[var(--brand-soft)] flex items-center justify-center">
+              <VodafoneLogo size={26} />
+            </span>
+            <div className="leading-tight">
+              <p className="font-display font-extrabold text-[15px] tracking-tight">Voucher Manager</p>
+              <p className="text-[11.5px] text-[var(--fg-muted)]">Vodafone Fiji · USO</p>
             </div>
-
-            <form onSubmit={onSubmit} className="flex flex-col gap-4">
-              <Field label="Email" required>
-                <div className="relative">
-                  <Mail size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--fg-muted)] pointer-events-none" />
-                  <Input
-                    type="email"
-                    value={email}
-                    onChange={(e) => setEmail(e.target.value)}
-                    placeholder="you@vodafone.com.fj"
-                    required
-                    autoComplete="email"
-                    className="pl-9"
-                  />
-                </div>
-              </Field>
-
-              <Field label="Password" required>
-                <div className="relative">
-                  <Lock size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--fg-muted)] pointer-events-none" />
-                  <Input
-                    type={showPassword ? "text" : "password"}
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                    placeholder="Enter your password"
-                    required
-                    autoComplete="current-password"
-                    className="pl-9 pr-10"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setShowPassword((v) => !v)}
-                    tabIndex={-1}
-                    className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[var(--fg-muted)] hover:text-[var(--fg-secondary)] transition-colors p-1 rounded"
-                    aria-label={showPassword ? "Hide password" : "Show password"}
-                  >
-                    {showPassword ? <EyeOff size={14} /> : <Eye size={14} />}
-                  </button>
-                </div>
-              </Field>
-
-              {err && (
-                <div className="flex items-start gap-2 px-3 py-2.5 rounded-lg bg-[var(--accent)]/10 border border-[var(--accent)]/25 animate-fade-in">
-                  <span className="w-1.5 h-1.5 rounded-full bg-[var(--accent)] mt-[7px] shrink-0" />
-                  <p className="text-[12.5px] text-[var(--accent)] font-medium leading-relaxed">{err}</p>
-                </div>
-              )}
-
-              <Button
-                type="submit"
-                variant="primary"
-                size="lg"
-                loading={loading}
-                iconRight={!loading && <ArrowRight size={14} />}
-                className="w-full mt-1"
-              >
-                {loading ? "Signing in…" : "Sign in"}
-              </Button>
-            </form>
           </div>
 
-          {/* Card footer — trust line */}
-          <div className="px-7 sm:px-8 py-3.5 border-t border-[var(--border-default)] bg-[var(--bg-surface)]/40 flex items-center justify-center gap-2 text-[11px] font-medium text-[var(--fg-muted)]">
-            <ShieldCheck size={12} />
+          <div className="mb-8">
+            <h1 className="text-h1 text-[var(--fg-primary)]">Sign in</h1>
+            <p className="text-[13.5px] text-[var(--fg-secondary)] mt-2">
+              Use your Vodafone Fiji account to continue to the operations console.
+            </p>
+          </div>
+
+          <form onSubmit={onSubmit} className="flex flex-col gap-5">
+            <Field label="Email" required>
+              <div className="relative">
+                <Mail size={15} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-[var(--fg-muted)] pointer-events-none" />
+                <Input
+                  type="email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  placeholder="you@vodafone.com.fj"
+                  required
+                  autoComplete="email"
+                  className="pl-10"
+                />
+              </div>
+            </Field>
+
+            <Field label="Password" required>
+              <div className="relative">
+                <Lock size={15} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-[var(--fg-muted)] pointer-events-none" />
+                <Input
+                  type={showPassword ? "text" : "password"}
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  placeholder="Enter your password"
+                  required
+                  autoComplete="current-password"
+                  className="pl-10 pr-11"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword((v) => !v)}
+                  tabIndex={-1}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-[var(--fg-muted)] hover:text-[var(--fg-secondary)] transition-colors"
+                  aria-label={showPassword ? "Hide password" : "Show password"}
+                >
+                  {showPassword ? <EyeOff size={15} /> : <Eye size={15} />}
+                </button>
+              </div>
+            </Field>
+
+            {err && (
+              <div
+                role="alert"
+                className="flex items-start gap-2.5 px-3.5 py-3 rounded-xl bg-[var(--danger-soft)] border border-[var(--danger-border)] animate-fade-in"
+              >
+                <span className="w-1.5 h-1.5 rounded-full bg-[var(--danger-fg)] mt-[7px] shrink-0" />
+                <p className="text-[12.5px] text-[var(--danger-fg)] font-medium leading-relaxed">{err}</p>
+              </div>
+            )}
+
+            <Button
+              type="submit"
+              variant="primary"
+              size="lg"
+              loading={loading}
+              iconRight={!loading && <ArrowRight size={15} />}
+              className="w-full mt-1"
+            >
+              {loading ? "Signing in…" : "Sign in"}
+            </Button>
+          </form>
+
+          <div className="mt-8 pt-6 border-t border-[var(--border-subtle)] flex items-center justify-center gap-2 text-[11.5px] text-[var(--fg-muted)]">
+            <ShieldCheck size={13} />
             <span>Secured · JWT · TLS 1.3</span>
           </div>
         </div>
-
-        <p
-          className="mt-6 text-center text-[11.5px] text-[var(--fg-muted)] animate-fade-up"
-          style={{ animationDelay: "160ms", animationFillMode: "both" }}
-        >
-          Voucher Manager · v1.0 · Vodafone Fiji
-        </p>
-      </div>
+      </main>
     </div>
   );
 }

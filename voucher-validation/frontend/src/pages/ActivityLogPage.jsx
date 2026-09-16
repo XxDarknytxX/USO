@@ -1,20 +1,35 @@
 // src/pages/ActivityLogPage.jsx
-// Voucher lifecycle event log.
+//
+// The voucher lifecycle log — every create, sync, archive and bulk operation,
+// newest first.
+//
+// Same shape as the Vouchers list: a toolbar of filters over one table, so the
+// two pages an operator moves between read the same way. There is deliberately
+// no KPI row here — every number this page could show would be computed from
+// the twenty-five rows currently on screen, and a tile that changes when you
+// page is a liar. The one honest figure, the total event count, is in the
+// header.
 
 import { useEffect, useState, useCallback } from "react";
 import toast from "react-hot-toast";
-import { History, Filter, X } from "lucide-react";
+import { History, X } from "lucide-react";
 
 import { voucherApi } from "../services/api";
 import Pagination from "../components/shared/Pagination";
 import {
-  Badge,
+  Button,
   EmptyState,
   PageHeader,
   Panel,
   SkeletonTable,
   Select,
-  Input,
+  PageShell,
+  Toolbar,
+  SearchInput,
+  StatusPill,
+  DataTable,
+  Th,
+  Td,
 } from "../components/ui";
 
 const EVENT_TYPES = [
@@ -77,29 +92,34 @@ export default function ActivityLogPage() {
   const totalPages = Math.ceil(total / limit);
   const hasFilters = eventType || voucherUuid.trim();
 
+  function clearFilters() {
+    setEventType("");
+    setVoucherUuid("");
+    setPage(1);
+  }
+
   return (
-    <div className="p-4 sm:p-6 lg:p-8">
+    <PageShell>
       <PageHeader
         eyebrow="Audit"
         title="Activity"
-        subtitle={`${total.toLocaleString()} voucher events`}
-        icon={<History size={20} />}
+        subtitle={`${total.toLocaleString()} voucher event${total === 1 ? "" : "s"}${
+          hasFilters ? " matching the current filters" : ""
+        }`}
+        icon={<History size={22} />}
+        tone="slate"
       />
 
-      {/* Filters */}
-      <div className="mt-6 flex flex-wrap items-center gap-2.5">
-        <div className="relative w-full sm:w-48">
-          <Filter
-            size={13}
-            className="absolute left-2.5 top-1/2 -translate-y-1/2 z-10 text-[var(--fg-muted)] pointer-events-none"
-          />
+      <Toolbar>
+        <div className="w-52">
           <Select
             value={eventType}
             onChange={(e) => {
               setEventType(e.target.value);
               setPage(1);
             }}
-            className="pl-8"
+            aria-label="Event type filter"
+            className="h-9! rounded-full! bg-[var(--bg-surface)]!"
           >
             <option value="">All events</option>
             {EVENT_TYPES.map((t) => (
@@ -110,101 +130,108 @@ export default function ActivityLogPage() {
           </Select>
         </div>
 
-        <Input
-          type="text"
-          mono
-          placeholder="Filter by voucher UUID…"
+        {/* Mono, because a UUID is the only thing you paste in here. */}
+        <SearchInput
           value={voucherUuid}
           onChange={(e) => {
             setVoucherUuid(e.target.value);
             setPage(1);
           }}
-          className="w-full sm:w-64"
+          placeholder="Filter by voucher UUID…"
+          width="w-80"
+          className="font-mono"
         />
 
         {hasFilters && (
-          <button
-            onClick={() => {
-              setEventType("");
-              setVoucherUuid("");
-              setPage(1);
-            }}
-            className="inline-flex items-center gap-1 text-[12px] font-medium text-[var(--fg-muted)] hover:text-[var(--accent)] transition-colors"
-          >
-            <X size={12} /> Clear
-          </button>
+          <Button variant="ghost" size="sm" className="ml-auto" onClick={clearFilters} iconLeft={<X size={13} />}>
+            Clear filters
+          </Button>
         )}
-      </div>
+      </Toolbar>
 
-      {/* Table */}
-      <div className="mt-6">
-        {loading ? (
-          <SkeletonTable rows={8} cols={5} />
-        ) : events.length === 0 ? (
-          <Panel padding={false}>
-            <EmptyState
-              icon={History}
-              title="No activity events"
-              description={hasFilters ? "Try clearing filters." : "Events will appear as vouchers change."}
-            />
-          </Panel>
-        ) : (
-          <Panel padding={false}>
-            <div className="overflow-x-auto">
-              <table className="w-full text-[13px]">
-                <thead>
-                  <tr className="text-left border-b border-[var(--border-default)]">
-                    <th className="text-label px-5 py-3">Timestamp</th>
-                    <th className="text-label px-5 py-3">Event</th>
-                    <th className="text-label px-5 py-3">Voucher</th>
-                    <th className="text-label px-5 py-3">Status change</th>
-                    <th className="text-label px-5 py-3">Notes</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-[var(--border-default)]">
-                  {events.map((evt) => (
-                    <tr
-                      key={evt.id}
-                      className="hover:bg-[var(--bg-surface)] transition-colors"
-                    >
-                      <td className="px-5 py-3 text-[12.5px] text-[var(--fg-secondary)] whitespace-nowrap">
-                        {new Date(evt.event_timestamp).toLocaleString()}
-                      </td>
-                      <td className="px-5 py-3">
-                        <Badge tone={EVENT_TONES[evt.event_type] || "neutral"}>
-                          {evt.event_type.replace("_", " ")}
-                        </Badge>
-                      </td>
-                      <td className="px-5 py-3 font-mono text-[12px] text-[var(--accent)]">
-                        {evt.voucher_uuid
-                          ? evt.voucher_uuid.substring(0, 12) + "…"
-                          : "—"}
-                      </td>
-                      <td className="px-5 py-3 text-[12px] font-mono text-[var(--fg-secondary)]">
-                        {evt.old_status && evt.new_status
-                          ? `${evt.old_status} → ${evt.new_status}`
-                          : "—"}
-                      </td>
-                      <td className="px-5 py-3 text-[12px] text-[var(--fg-muted)] max-w-[260px] truncate">
-                        {evt.notes || "—"}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+      {loading ? (
+        <SkeletonTable rows={8} cols={5} />
+      ) : events.length === 0 ? (
+        <Panel padding={false}>
+          <EmptyState
+            icon={History}
+            title="No activity events"
+            description={hasFilters ? "Try clearing filters." : "Events will appear as vouchers change."}
+            action={
+              hasFilters ? (
+                <Button variant="secondary" size="sm" onClick={clearFilters} iconLeft={<X size={13} />}>
+                  Clear filters
+                </Button>
+              ) : null
+            }
+          />
+        </Panel>
+      ) : (
+        <Panel
+          title="Event log"
+          subtitle={`${total.toLocaleString()} event${total === 1 ? "" : "s"} · page ${page} of ${Math.max(
+            1,
+            totalPages
+          )}`}
+          icon={<History size={15} />}
+          tone="slate"
+          padding={false}
+        >
+          <DataTable>
+            <thead>
+              <tr>
+                <Th>Timestamp</Th>
+                <Th>Event</Th>
+                <Th>Voucher</Th>
+                <Th>Status change</Th>
+                <Th>Notes</Th>
+              </tr>
+            </thead>
+            <tbody>
+              {events.map((evt) => (
+                <tr key={evt.id}>
+                  <Td muted nowrap className="tabular-nums">
+                    {new Date(evt.event_timestamp).toLocaleString()}
+                  </Td>
+                  <Td>
+                    <StatusPill tone={EVENT_TONES[evt.event_type] || "neutral"}>
+                      {evt.event_type.replace("_", " ")}
+                    </StatusPill>
+                  </Td>
+                  <Td nowrap>
+                    {evt.voucher_uuid ? (
+                      // Clicking a UUID filters the log to that voucher — the
+                      // question this table always prompts next.
+                      <button
+                        onClick={() => {
+                          setVoucherUuid(evt.voucher_uuid);
+                          setPage(1);
+                        }}
+                        title={`Show only ${evt.voucher_uuid}`}
+                        className="font-mono text-[12px] font-semibold text-[var(--fg-primary)] hover:text-[var(--brand)] transition-colors"
+                      >
+                        {evt.voucher_uuid.substring(0, 12)}…
+                      </button>
+                    ) : (
+                      <span className="text-[var(--fg-muted)]">—</span>
+                    )}
+                  </Td>
+                  <Td mono nowrap>
+                    {evt.old_status && evt.new_status ? `${evt.old_status} → ${evt.new_status}` : "—"}
+                  </Td>
+                  <Td muted>
+                    <span className="block max-w-[320px] truncate" title={evt.notes || ""}>
+                      {evt.notes || "—"}
+                    </span>
+                  </Td>
+                </tr>
+              ))}
+            </tbody>
+          </DataTable>
 
-            {!loading && events.length > 0 && (
-              <Pagination
-                page={page}
-                totalPages={totalPages}
-                total={total}
-                onPageChange={setPage}
-              />
-            )}
-          </Panel>
-        )}
-      </div>
-    </div>
+          <Pagination page={page} totalPages={totalPages} total={total} onPageChange={setPage} />
+        </Panel>
+      )}
+    </PageShell>
   );
 }

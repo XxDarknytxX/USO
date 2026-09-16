@@ -1,13 +1,26 @@
 // src/pages/SettingsPage.jsx
-// System information + read-only app settings.
+// System information + the console's runtime settings.
+//
+// Everything here used to be one column of tall panels — sync, collection,
+// scope, SMTP, receipts, Starlink — so finding a switch meant scrolling past
+// four unrelated forms. Now the page is navigated by tabs, and inside a tab
+// each setting is one row: what it is on the left, the control on the right,
+// with the live status and the Save button in a footer bar under the form. That
+// last part matters more than it looks — several of these settings spend the
+// Ruijie API quota, and the cost belongs next to the button that commits it.
 
 import { useEffect, useState } from "react";
-import { Settings, Server, Eye, EyeOff, MapPin, Check, Globe2, RefreshCw, Mail, Satellite } from "lucide-react";
+import {
+  Settings, Server, Eye, EyeOff, MapPin, Check, Globe2, RefreshCw, Mail,
+  Satellite, Send, Receipt, KeyRound,
+} from "lucide-react";
 import toast from "react-hot-toast";
 
 import { settingsApi, networkApi } from "../services/api";
 import { useSite } from "../hooks/useSite";
-import { Button, Panel, Badge, PageHeader, Toggle, Select, Field, Input, Tabs } from "../components/ui";
+import {
+  PageShell, PageHeader, Panel, Badge, Toggle, Select, Field, Input, Button, Tabs, Section,
+} from "../components/ui";
 
 // Sync-frequency presets. Floor is 5 min to protect the Ruijie account-wide rate
 // limit (the backend clamps to the same range regardless of what's sent).
@@ -36,6 +49,17 @@ const INTERVAL_OPTIONS = [
   { v: 1440, label: "Once a day" },
 ];
 
+const TABS = [
+  { value: "general", label: "General", icon: <Server size={14} /> },
+  { value: "schedules", label: "Schedules", icon: <RefreshCw size={14} /> },
+  { value: "email", label: "Email", icon: <Mail size={14} /> },
+  { value: "starlink", label: "Starlink", icon: <Satellite size={14} /> },
+];
+
+function cn(...p) {
+  return p.filter(Boolean).join(" ");
+}
+
 function relTime(ts) {
   if (!ts) return "—";
   const d = new Date(ts).getTime();
@@ -47,11 +71,95 @@ function relTime(ts) {
   return `${Math.floor(s / 86400)}d ago`;
 }
 
+/* ───────────────────────── Form furniture ─────────────────────────
+   Local, because these shapes only make sense on a settings page: a row that
+   states a decision and offers one control, and a footer that holds the live
+   state of the thing you are about to change next to the button that changes
+   it. Everything else on the page is a shared primitive. */
+
+/** A settings row: description left, control right, stacking on narrow screens. */
+function SettingRow({ title, description, htmlFor, wide = false, children }) {
+  const Label = htmlFor ? "label" : "p";
+  return (
+    <div
+      className={cn(
+        "grid gap-3 py-5 first:pt-0 last:pb-0 sm:gap-10 sm:items-start",
+        wide
+          ? "sm:grid-cols-[minmax(0,1fr)_minmax(0,420px)]"
+          : "sm:grid-cols-[minmax(0,1fr)_minmax(0,290px)]"
+      )}
+    >
+      <div className="min-w-0">
+        <Label htmlFor={htmlFor} className="block text-[13.5px] font-semibold text-[var(--fg-primary)] font-display">
+          {title}
+        </Label>
+        {description && (
+          <p className="mt-1 text-[12.5px] text-[var(--fg-secondary)] leading-relaxed">{description}</p>
+        )}
+      </div>
+      <div className="min-w-0">{children}</div>
+    </div>
+  );
+}
+
+/** The body of a form panel — rows separated by hairlines. */
+function FormBody({ children, className }) {
+  return (
+    <div className={cn("px-5 sm:px-6 py-5 divide-y divide-[var(--border-subtle)]", className)}>{children}</div>
+  );
+}
+
+/** Save bar: what the server currently holds on the left, the actions right. */
+function PanelFooter({ note, children }) {
+  return (
+    <div className="flex flex-wrap items-center justify-between gap-3 px-5 sm:px-6 py-3.5 border-t border-[var(--border-subtle)] bg-[var(--surface-sunken)]">
+      <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[11.5px] text-[var(--fg-muted)] min-w-0">
+        {note}
+      </div>
+      <div className="flex flex-wrap items-center gap-2">{children}</div>
+    </div>
+  );
+}
+
+/** A tickable village in one of the three scope pickers. */
+function CheckRow({ checked, disabled, title, subtitle, note, mono = true, onClick }) {
+  return (
+    <button
+      type="button"
+      disabled={disabled}
+      onClick={onClick}
+      className="w-full flex items-center gap-3 px-4 py-2.5 text-left hover:bg-[var(--bg-surface)] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+    >
+      <span
+        className={cn(
+          "shrink-0 h-[18px] w-[18px] rounded-[5px] flex items-center justify-center border transition-colors",
+          checked
+            ? "bg-[var(--brand)] border-[var(--brand)] text-[var(--text-on-brand)]"
+            : "border-[var(--border-strong)] text-transparent"
+        )}
+      >
+        <Check size={12} strokeWidth={3} />
+      </span>
+      <MapPin size={14} className="shrink-0 text-[var(--fg-muted)]" />
+      <span className="min-w-0 flex-1">
+        <span className="block text-[12.5px] font-medium text-[var(--fg-primary)] truncate">{title}</span>
+        {subtitle && (
+          <span className={cn("block text-[11px] text-[var(--fg-muted)] truncate", mono && "font-mono")}>
+            {subtitle}
+          </span>
+        )}
+      </span>
+      {note && <span className="text-[10.5px] text-[var(--fg-muted)] shrink-0">{note}</span>}
+    </button>
+  );
+}
+
 export default function SettingsPage() {
   const [tab, setTab] = useState("general");
-  const [settings, setSettings] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [showSecrets, setShowSecrets] = useState(false);
+  const [settings, setSettings] = useState([]); // eslint-disable-line no-unused-vars -- raw rows, kept for future keys
+  const [loading, setLoading] = useState(true); // eslint-disable-line no-unused-vars
+  // Details are shown by default; the button masks them for screen-sharing.
+  const [showSecrets, setShowSecrets] = useState(true);
   const { sites, isSiteVisible, toggleVisibleSite, setVisibleSiteIds, allVisible, visibleSites } = useSite();
 
   // Voucher-sync schedule
@@ -401,195 +509,242 @@ export default function SettingsPage() {
     },
   ];
 
+  const savedReceiptCount = normGroups(origReceipts.groupIds).split(",").filter(Boolean).length;
+
   return (
-    <div className="p-4 sm:p-6 lg:p-8">
+    <PageShell width="narrow">
       <PageHeader
         eyebrow="System"
         title="Settings"
-        subtitle="Environment configuration and runtime status."
-        icon={<Settings size={20} />}
-        className="mx-auto max-w-4xl xl:max-w-6xl"
+        subtitle="Environment configuration, schedules and integrations for the console."
+        icon={<Settings size={22} />}
+        tone="slate"
       />
 
-      {/* Centered; the panels sit two-up on wide screens (single column when
-          narrow) so they fill the width without dead space. */}
-      {/* Tabbed rather than one long column: five unrelated panels stacked
-          together made it hard to find anything. Each tab is a coherent group. */}
-      <div className="mt-6 mx-auto max-w-4xl xl:max-w-6xl">
-        <Tabs
-          tabs={[
-            { value: "general", label: "General", icon: <Server size={14} /> },
-            { value: "email", label: "Email", icon: <Mail size={14} /> },
-            { value: "starlink", label: "Starlink", icon: <Satellite size={14} /> },
-          ]}
-          value={tab}
-          onChange={setTab}
-        />
+      <Tabs tabs={TABS} value={tab} onChange={setTab} />
 
-        <div className="mt-5 space-y-5">
-          {tab === "general" && (
-            <>
-          <Panel
-            title="System information"
-            icon={<Server size={15} />}
-            padding={false}
-            actions={
-              <Button
-                variant="ghost"
-                size="xs"
-                onClick={() => setShowSecrets(!showSecrets)}
-                iconLeft={showSecrets ? <EyeOff size={11} /> : <Eye size={11} />}
-              >
-                {showSecrets ? "Hide" : "Show"} details
-              </Button>
-            }
-          >
-            <div className="flex flex-col divide-y divide-[var(--border-default)]">
-              {envVars.map(({ label, value }) => (
-                <div
-                  key={label}
-                  className="flex items-center justify-between px-5 py-3 hover:bg-[var(--bg-surface)] transition-colors"
+      <div className="flex flex-col gap-5">
+        {/* ═══════════════════════════ General ═══════════════════════════ */}
+        {tab === "general" && (
+          <>
+            <Panel
+              title="System information"
+              subtitle="What this browser session is talking to."
+              icon={<Server size={15} />}
+              tone="slate"
+              padding={false}
+              actions={
+                <Button
+                  variant="ghost"
+                  size="xs"
+                  onClick={() => setShowSecrets(!showSecrets)}
+                  iconLeft={showSecrets ? <EyeOff size={11} /> : <Eye size={11} />}
                 >
-                  <span className="text-[12.5px] text-[var(--fg-secondary)]">
-                    {label}
-                  </span>
-                  <span className="text-[12.5px] font-mono text-[var(--fg-primary)]">
-                    {value}
-                  </span>
+                  {showSecrets ? "Hide" : "Show"} details
+                </Button>
+              }
+            >
+              <div className="flex flex-col divide-y divide-[var(--border-subtle)]">
+                {envVars.map(({ label, value }) => (
+                  <div
+                    key={label}
+                    className="flex items-center justify-between gap-4 px-5 sm:px-6 py-3 hover:bg-[var(--bg-surface)] transition-colors"
+                  >
+                    <span className="text-[12.5px] text-[var(--fg-secondary)]">{label}</span>
+                    <span className="text-[12.5px] font-mono text-[var(--fg-primary)] truncate">
+                      {showSecrets ? value : "••••••••"}
+                    </span>
+                  </div>
+                ))}
+                <div className="flex items-center justify-between gap-4 px-5 sm:px-6 py-3">
+                  <span className="text-[12.5px] text-[var(--fg-secondary)]">Status</span>
+                  <Badge tone="success" icon={<span className="w-1.5 h-1.5 rounded-full bg-[var(--success-fg)]" />}>
+                    Operational
+                  </Badge>
                 </div>
-              ))}
-              <div className="flex items-center justify-between px-5 py-3">
-                <span className="text-[12.5px] text-[var(--fg-secondary)]">Status</span>
-                <Badge
-                  tone="success"
-                  icon={
-                    <span className="w-1.5 h-1.5 rounded-full bg-[var(--success-fg)]" />
+              </div>
+            </Panel>
+
+            <Panel
+              title="All Villages scope"
+              subtitle="Which villages are included when the scope is set to “All Villages” — this drives the Dashboard, Overview and Network tab."
+              icon={<Globe2 size={15} />}
+              tone="navy"
+              padding={false}
+              actions={
+                <div className="flex items-center gap-1">
+                  <Button variant="ghost" size="xs" onClick={() => setVisibleSiteIds(null)}>Select all</Button>
+                  <Button variant="ghost" size="xs" onClick={() => setVisibleSiteIds([])}>Clear</Button>
+                </div>
+              }
+            >
+              <div className="flex flex-col divide-y divide-[var(--border-subtle)] max-h-[380px] overflow-y-auto scrollbar-none">
+                {sites.length === 0 ? (
+                  <div className="px-5 sm:px-6 py-4 text-[12.5px] text-[var(--fg-muted)]">
+                    No villages yet — add them under Network.
+                  </div>
+                ) : (
+                  sites.map((s) => (
+                    <CheckRow
+                      key={s.id}
+                      checked={isSiteVisible(s.id)}
+                      title={s.name}
+                      subtitle={s.hostname}
+                      onClick={() => toggleVisibleSite(s.id)}
+                    />
+                  ))
+                )}
+              </div>
+              {sites.length > 0 && (
+                <PanelFooter
+                  note={
+                    <span>
+                      {allVisible ? `All ${sites.length} villages` : `${visibleSites.length} of ${sites.length} villages`} in
+                      the All Villages scope.
+                    </span>
+                  }
+                />
+              )}
+            </Panel>
+          </>
+        )}
+
+        {/* ══════════════════════════ Schedules ══════════════════════════ */}
+        {tab === "schedules" && (
+          <>
+            <Panel
+              title="Voucher sync"
+              subtitle="How often the portal pulls the latest vouchers from Ruijie (Excel export). Turn it off to pause all automatic syncing — you can still sync on demand from the Dashboard."
+              icon={<RefreshCw size={15} />}
+              tone="teal"
+              padding={false}
+            >
+              <FormBody>
+                <SettingRow
+                  title="Automatic sync"
+                  description={
+                    syncEnabled
+                      ? "Vouchers refresh automatically on the schedule below."
+                      : "Automatic syncing is paused."
                   }
                 >
-                  Operational
-                </Badge>
-              </div>
-            </div>
-          </Panel>
-          <Panel
-            title="Voucher sync"
-            subtitle="How often the portal pulls the latest vouchers from Ruijie (Excel export). Turn it off to pause all automatic syncing — you can still sync on demand from the Dashboard."
-            icon={<RefreshCw size={15} />}
-          >
-            <div className="space-y-5">
-              <Toggle
-                checked={syncEnabled}
-                onChange={setSyncEnabled}
-                label="Automatic sync"
-                hint={
-                  syncEnabled
-                    ? "Vouchers refresh automatically on the schedule below."
-                    : "Automatic syncing is paused."
-                }
-              />
+                  <Toggle checked={syncEnabled} onChange={setSyncEnabled} />
+                </SettingRow>
 
-              <Field
-                label="Sync frequency"
-                hint="Minimum 5 minutes to protect the Ruijie API rate limit. More villages = more calls per cycle."
-                className="max-w-xs"
-              >
-                <Select
-                  value={syncInterval}
-                  onChange={(e) => setSyncInterval(Number(e.target.value))}
-                  disabled={!syncEnabled}
+                <SettingRow
+                  title="Sync frequency"
+                  description="Minimum 5 minutes to protect the Ruijie API rate limit. More villages = more calls per cycle."
+                  htmlFor="sync-interval"
                 >
-                  {intervalChoices.map((o) => (
-                    <option key={o.v} value={o.v}>
-                      {o.label}
-                    </option>
-                  ))}
-                </Select>
-              </Field>
+                  <Select
+                    id="sync-interval"
+                    value={syncInterval}
+                    onChange={(e) => setSyncInterval(Number(e.target.value))}
+                    disabled={!syncEnabled}
+                  >
+                    {intervalChoices.map((o) => (
+                      <option key={o.v} value={o.v}>
+                        {o.label}
+                      </option>
+                    ))}
+                  </Select>
+                </SettingRow>
+              </FormBody>
 
-              {syncStatus && (
-                <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[11.5px] text-[var(--text-tertiary)]">
-                  <Badge tone={syncStatus.enabled ? "success" : "neutral"}>
-                    {syncStatus.enabled
-                      ? `Auto-sync on · every ${syncStatus.intervalMinutes} min`
-                      : "Auto-sync off"}
-                  </Badge>
-                  {syncStatus.lastSync && (
-                    <span>
-                      Last sync{" "}
-                      {relTime(
-                        syncStatus.lastSync.sync_completed_at || syncStatus.lastSync.sync_started_at
-                      )}{" "}
-                      · <span className="capitalize">{syncStatus.lastSync.status}</span>
-                    </span>
-                  )}
-                </div>
-              )}
-
-              <div className="flex justify-end border-t border-[var(--border-default)] pt-4">
+              <PanelFooter
+                note={
+                  syncStatus && (
+                    <>
+                      <Badge tone={syncStatus.enabled ? "success" : "neutral"}>
+                        {syncStatus.enabled
+                          ? `Auto-sync on · every ${syncStatus.intervalMinutes} min`
+                          : "Auto-sync off"}
+                      </Badge>
+                      {syncStatus.lastSync && (
+                        <span>
+                          Last sync{" "}
+                          {relTime(
+                            syncStatus.lastSync.sync_completed_at || syncStatus.lastSync.sync_started_at
+                          )}{" "}
+                          · <span className="capitalize">{syncStatus.lastSync.status}</span>
+                        </span>
+                      )}
+                    </>
+                  )
+                }
+              >
                 <Button
                   variant="primary"
+                  size="sm"
                   onClick={saveSyncSettings}
                   loading={savingSync}
                   disabled={!syncDirty || savingSync}
                 >
                   Save changes
                 </Button>
-              </div>
-            </div>
-          </Panel>
-          <Panel
-            title="Network health collection"
-            subtitle="How often every village's device health and uptime are collected from Ruijie. This feeds the Overview page and the village uptime on the Dashboard."
-            icon={<Globe2 size={15} />}
-          >
-            <div className="space-y-5">
-              <Toggle
-                checked={netEnabled}
-                onChange={setNetEnabled}
-                label="Automatic collection"
-                hint={
-                  netEnabled
-                    ? "Every village is collected on the schedule below."
-                    : "Paused — the Overview and Dashboard uptime will show the last collected values."
-                }
-              />
+              </PanelFooter>
+            </Panel>
 
-              <Field
-                label="Collection frequency"
-                hint="Each cycle costs about 4 Ruijie calls per village against a ~5,000/day account quota. Minimum one hour. Uptime % is the share of collected samples that were up, so a longer interval means coarser uptime."
-                className="max-w-sm"
-              >
-                <Select
-                  value={netInterval}
-                  onChange={(e) => setNetInterval(Number(e.target.value))}
-                  disabled={!netEnabled}
+            <Panel
+              title="Network health collection"
+              subtitle="How often every village's device health and uptime are collected from Ruijie. This feeds the Overview page and the village uptime on the Dashboard."
+              icon={<Globe2 size={15} />}
+              tone="navy"
+              padding={false}
+            >
+              <FormBody>
+                <SettingRow
+                  title="Automatic collection"
+                  description={
+                    netEnabled
+                      ? "Every village is collected on the schedule below."
+                      : "Paused — the Overview and Dashboard uptime will show the last collected values."
+                  }
                 >
-                  {netIntervalChoices.map((o) => (
-                    <option key={o.v} value={o.v}>
-                      {o.label}
-                    </option>
-                  ))}
-                </Select>
-              </Field>
+                  <Toggle checked={netEnabled} onChange={setNetEnabled} />
+                </SettingRow>
 
-              {netStatus && (
-                <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[11.5px] text-[var(--text-tertiary)]">
-                  <Badge tone={netStatus.enabled ? "success" : "neutral"}>
-                    {netStatus.enabled
-                      ? `Collection on · every ${netStatus.intervalMinutes} min`
-                      : "Collection off"}
-                  </Badge>
-                  {netStatus.running && <Badge tone="warning">Running now</Badge>}
-                  {netStatus.lastCollected && <span>Last collected {relTime(netStatus.lastCollected)}</span>}
-                  {netStatus.lastRun?.error && (
-                    <span className="text-[var(--brand)]">Last run failed: {netStatus.lastRun.error}</span>
-                  )}
-                </div>
-              )}
+                <SettingRow
+                  title="Collection frequency"
+                  description="Each cycle costs about 4 Ruijie calls per village against a ~5,000/day account quota. Minimum one hour. Uptime % is the share of collected samples that were up, so a longer interval means coarser uptime."
+                  htmlFor="net-interval"
+                >
+                  <Select
+                    id="net-interval"
+                    value={netInterval}
+                    onChange={(e) => setNetInterval(Number(e.target.value))}
+                    disabled={!netEnabled}
+                  >
+                    {netIntervalChoices.map((o) => (
+                      <option key={o.v} value={o.v}>
+                        {o.label}
+                      </option>
+                    ))}
+                  </Select>
+                </SettingRow>
+              </FormBody>
 
-              <div className="flex items-center justify-between gap-3 border-t border-[var(--border-default)] pt-4">
+              <PanelFooter
+                note={
+                  netStatus && (
+                    <>
+                      <Badge tone={netStatus.enabled ? "success" : "neutral"}>
+                        {netStatus.enabled
+                          ? `Collection on · every ${netStatus.intervalMinutes} min`
+                          : "Collection off"}
+                      </Badge>
+                      {netStatus.running && <Badge tone="warning">Running now</Badge>}
+                      {netStatus.lastCollected && <span>Last collected {relTime(netStatus.lastCollected)}</span>}
+                      {netStatus.lastRun?.error && (
+                        <span className="text-[var(--danger-fg)]">Last run failed: {netStatus.lastRun.error}</span>
+                      )}
+                    </>
+                  )
+                }
+              >
                 <Button
                   variant="secondary"
+                  size="sm"
                   onClick={runCollectNow}
                   loading={collecting}
                   disabled={collecting}
@@ -599,412 +754,446 @@ export default function SettingsPage() {
                 </Button>
                 <Button
                   variant="primary"
+                  size="sm"
                   onClick={saveNetSettings}
                   loading={savingNet}
                   disabled={!netDirty || savingNet}
                 >
                   Save changes
                 </Button>
-              </div>
-            </div>
-          </Panel>
-          <Panel
-            title="All Villages scope"
-            subtitle="Choose which villages are included when the scope is set to “All Villages” — this drives the Dashboard, Overview and Network tab."
-            icon={<Globe2 size={15} />}
-            padding={false}
-            actions={
-              <div className="flex items-center gap-1">
-                <Button variant="ghost" size="xs" onClick={() => setVisibleSiteIds(null)}>Select all</Button>
-                <Button variant="ghost" size="xs" onClick={() => setVisibleSiteIds([])}>Clear</Button>
-              </div>
-            }
-          >
-            <div className="flex flex-col divide-y divide-[var(--border-default)] max-h-[340px] overflow-y-auto scrollbar-none">
-              {sites.length === 0 ? (
-                <div className="px-5 py-4 text-[12.5px] text-[var(--fg-muted)]">
-                  No villages yet — add them under Network.
-                </div>
-              ) : (
-                sites.map((s) => {
-                  const on = isSiteVisible(s.id);
-                  return (
-                    <button
-                      key={s.id}
-                      onClick={() => toggleVisibleSite(s.id)}
-                      className="flex items-center gap-3 px-5 py-3 text-left hover:bg-[var(--bg-surface)] transition-colors"
-                    >
-                      <span
-                        className={
-                          "shrink-0 h-[18px] w-[18px] rounded flex items-center justify-center border transition-colors " +
-                          (on
-                            ? "bg-[var(--accent)] border-[var(--accent)] text-white"
-                            : "border-[var(--border-strong)] text-transparent")
-                        }
-                      >
-                        <Check size={12} strokeWidth={3} />
-                      </span>
-                      <MapPin size={14} className="shrink-0 text-[var(--fg-muted)]" />
-                      <div className="min-w-0 flex-1">
-                        <p className="text-[12.5px] font-medium text-[var(--fg-primary)] truncate">{s.name}</p>
-                        {s.hostname && (
-                          <p className="text-[11px] font-mono text-[var(--fg-muted)] truncate">{s.hostname}</p>
-                        )}
-                      </div>
-                    </button>
-                  );
-                })
-              )}
-            </div>
-            {sites.length > 0 && (
-              <div className="px-5 py-2.5 border-t border-[var(--border-default)] text-[11.5px] text-[var(--fg-muted)]">
-                {allVisible ? `All ${sites.length} villages` : `${visibleSites.length} of ${sites.length} villages`} in the All Villages scope.
-              </div>
-            )}
-          </Panel>
-            </>
-          )}
+              </PanelFooter>
+            </Panel>
+          </>
+        )}
 
-          {tab === "email" && (
-            <>
-          <Panel
-            title="Email (SMTP)"
-            subtitle="Outgoing mail server for upcoming email features. Not wired to anything yet — safe to configure ahead of time."
-            icon={<Mail size={15} />}
-          >
-            <div className="space-y-5">
-              <Toggle
-                checked={smtp.enabled}
-                onChange={(v) => setSmtpField("enabled", v)}
-                label="Enable email sending"
-                hint={smtp.enabled ? "The app may send email once the feature is live." : "Email sending is off."}
-              />
+        {/* ════════════════════════════ Email ════════════════════════════ */}
+        {tab === "email" && (
+          <>
+            <Panel
+              title="Email (SMTP)"
+              subtitle="Outgoing mail server. Receipts and manual-assistance emails are sent through this account."
+              icon={<Mail size={15} />}
+              tone="blue"
+              padding={false}
+            >
+              <FormBody>
+                <SettingRow
+                  title="Enable email sending"
+                  description={
+                    smtp.enabled ? "The app may send email once the feature is live." : "Email sending is off."
+                  }
+                >
+                  <Toggle checked={smtp.enabled} onChange={(v) => setSmtpField("enabled", v)} />
+                </SettingRow>
+              </FormBody>
 
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                <div className="sm:col-span-2">
-                  <Field label="SMTP host">
-                    <Input value={smtp.host} onChange={(e) => setSmtpField("host", e.target.value)} placeholder="smtp.example.com" />
+              {/* Three groups, because the questions are different: where to
+                  connect, who to connect as, and what the recipient sees. */}
+              <div className="px-5 sm:px-6 pb-6 pt-6 flex flex-col gap-7 border-t border-[var(--border-subtle)]">
+                <Section label="Server">
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                    <div className="sm:col-span-2">
+                      <Field label="SMTP host" htmlFor="smtp-host">
+                        <Input
+                          id="smtp-host"
+                          value={smtp.host}
+                          onChange={(e) => setSmtpField("host", e.target.value)}
+                          placeholder="smtp.example.com"
+                        />
+                      </Field>
+                    </div>
+                    <Field label="Port" htmlFor="smtp-port">
+                      <Input
+                        id="smtp-port"
+                        value={smtp.port}
+                        onChange={(e) => setSmtpField("port", e.target.value.replace(/[^0-9]/g, ""))}
+                        placeholder="587"
+                        inputMode="numeric"
+                      />
+                    </Field>
+                  </div>
+                  <Field
+                    label="Encryption"
+                    hint="STARTTLS uses port 587; SSL/TLS uses port 465."
+                    className="max-w-xs"
+                    htmlFor="smtp-enc"
+                  >
+                    <Select id="smtp-enc" value={smtp.encryption} onChange={(e) => setSmtpField("encryption", e.target.value)}>
+                      <option value="starttls">STARTTLS</option>
+                      <option value="ssl">SSL/TLS</option>
+                      <option value="none">None</option>
+                    </Select>
                   </Field>
-                </div>
-                <Field label="Port">
-                  <Input
-                    value={smtp.port}
-                    onChange={(e) => setSmtpField("port", e.target.value.replace(/[^0-9]/g, ""))}
-                    placeholder="587"
-                    inputMode="numeric"
-                  />
-                </Field>
+                </Section>
+
+                <Section label="Authentication">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <Field label="Username" htmlFor="smtp-user">
+                      <Input
+                        id="smtp-user"
+                        value={smtp.username}
+                        onChange={(e) => setSmtpField("username", e.target.value)}
+                        placeholder="user@example.com"
+                        autoComplete="off"
+                      />
+                    </Field>
+                    <Field
+                      label="Password"
+                      htmlFor="smtp-pass"
+                      hint={smtpHasPassword ? "A password is stored — leave blank to keep it." : undefined}
+                    >
+                      <Input
+                        id="smtp-pass"
+                        type="password"
+                        value={smtpPassword}
+                        onChange={(e) => setSmtpPassword(e.target.value)}
+                        placeholder={smtpHasPassword ? "•••••••• (unchanged)" : "SMTP password"}
+                        autoComplete="new-password"
+                      />
+                    </Field>
+                  </div>
+                </Section>
+
+                <Section label="Sender">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <Field label="From name" htmlFor="smtp-from-name">
+                      <Input
+                        id="smtp-from-name"
+                        value={smtp.fromName}
+                        onChange={(e) => setSmtpField("fromName", e.target.value)}
+                        placeholder="Vodafone Fiji USO"
+                      />
+                    </Field>
+                    <Field label="From email" htmlFor="smtp-from-email">
+                      <Input
+                        id="smtp-from-email"
+                        type="email"
+                        value={smtp.fromEmail}
+                        onChange={(e) => setSmtpField("fromEmail", e.target.value)}
+                        placeholder="no-reply@vodafone.com.fj"
+                      />
+                    </Field>
+                  </div>
+                </Section>
               </div>
 
-              <Field label="Encryption" hint="STARTTLS uses port 587; SSL/TLS uses port 465." className="max-w-xs">
-                <Select value={smtp.encryption} onChange={(e) => setSmtpField("encryption", e.target.value)}>
-                  <option value="starttls">STARTTLS</option>
-                  <option value="ssl">SSL/TLS</option>
-                  <option value="none">None</option>
-                </Select>
-              </Field>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <Field label="Username">
-                  <Input value={smtp.username} onChange={(e) => setSmtpField("username", e.target.value)} placeholder="user@example.com" autoComplete="off" />
-                </Field>
-                <Field label="Password" hint={smtpHasPassword ? "A password is stored — leave blank to keep it." : undefined}>
-                  <Input
-                    type="password"
-                    value={smtpPassword}
-                    onChange={(e) => setSmtpPassword(e.target.value)}
-                    placeholder={smtpHasPassword ? "•••••••• (unchanged)" : "SMTP password"}
-                    autoComplete="new-password"
-                  />
-                </Field>
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <Field label="From name">
-                  <Input value={smtp.fromName} onChange={(e) => setSmtpField("fromName", e.target.value)} placeholder="Vodafone Fiji USO" />
-                </Field>
-                <Field label="From email">
-                  <Input type="email" value={smtp.fromEmail} onChange={(e) => setSmtpField("fromEmail", e.target.value)} placeholder="no-reply@vodafone.com.fj" />
-                </Field>
-              </div>
-
-              <div className="flex justify-end border-t border-[var(--border-default)] pt-4">
-                <Button variant="primary" onClick={saveSmtp} loading={savingSmtp} disabled={!smtpDirty || savingSmtp}>
+              <PanelFooter note={smtpDirty ? <span className="text-[var(--brand)] font-medium">Unsaved changes</span> : <span>No changes</span>}>
+                <Button variant="primary" size="sm" onClick={saveSmtp} loading={savingSmtp} disabled={!smtpDirty || savingSmtp}>
                   Save SMTP settings
                 </Button>
-              </div>
+              </PanelFooter>
+            </Panel>
 
-              {/* Send a test email using the saved config. Pick which template to
-                  send so email designs can be reviewed in a real inbox. */}
-              <div className="border-t border-[var(--border-default)] pt-4 space-y-2">
-                <p className="text-[12.5px] font-medium text-[var(--fg-secondary)]">Send a test email</p>
-                <div className="flex flex-col sm:flex-row gap-2">
-                  <Select
-                    value={testTemplate}
-                    onChange={(e) => setTestTemplate(e.target.value)}
-                    className="sm:w-56"
-                  >
+            {/* Its own panel rather than a footnote under the server form: this
+                is the only way to see what the templates actually look like. */}
+            <Panel
+              title="Send a test email"
+              subtitle="Sends the selected template (with sample data) using the saved settings above — save first if you just changed them. Every test send is recorded in Portal Logs."
+              icon={<Send size={15} />}
+              tone="violet"
+              padding={false}
+            >
+              <div className="px-5 sm:px-6 py-5 flex flex-col sm:flex-row gap-3 sm:items-end">
+                <Field label="Template" className="sm:w-60" htmlFor="test-template">
+                  <Select id="test-template" value={testTemplate} onChange={(e) => setTestTemplate(e.target.value)}>
                     <option value="connection">Connection test</option>
                     <option value="receipt">Purchase receipt</option>
                     <option value="manual_assist">Manual assistance - voucher code</option>
                   </Select>
+                </Field>
+                <Field label="Recipient" className="flex-1" htmlFor="test-email">
                   <Input
+                    id="test-email"
                     type="email"
                     value={testEmail}
                     onChange={(e) => setTestEmail(e.target.value)}
                     placeholder="recipient@example.com"
-                    className="flex-1"
                   />
-                  <Button
-                    variant="secondary"
-                    onClick={sendTest}
-                    loading={sendingTest}
-                    disabled={!testEmail.trim() || sendingTest}
-                  >
-                    Send test
-                  </Button>
-                </div>
-                <p className="text-[11px] text-[var(--fg-muted)]">
-                  Sends the selected template (with sample data) using the saved settings above — save first if you just changed them. Every test send is recorded in Portal Logs.
-                </p>
+                </Field>
+                <Button
+                  variant="secondary"
+                  onClick={sendTest}
+                  loading={sendingTest}
+                  disabled={!testEmail.trim() || sendingTest}
+                  iconLeft={!sendingTest && <Send size={14} />}
+                >
+                  Send test
+                </Button>
               </div>
+            </Panel>
 
-              {/* Purchase receipts */}
-              <div className="border-t border-[var(--border-default)] pt-4 space-y-3">
-                <Toggle
-                  checked={receiptsEnabled}
-                  onChange={setReceiptsEnabled}
-                  label="Email purchase receipts"
-                  hint="On a successful purchase, email a receipt (voucher code, status link, shared-pool note) to the customer's email from the M-PAiSA mapping."
-                />
-                <div>
-                  <div className="flex items-center justify-between gap-3">
-                    <p className="text-sm font-medium text-[var(--fg-primary)]">Sites</p>
-                    <div className="flex items-center gap-2 text-[11.5px]">
-                      <button
-                        type="button"
-                        onClick={() => setReceiptGroupIds(sites.map((x) => x.ruijieGroupId).filter(Boolean).join(","))}
-                        className="text-[var(--accent)] hover:underline"
-                      >
-                        Select all
-                      </button>
-                      <span className="text-[var(--border-strong)]">|</span>
-                      <button
-                        type="button"
-                        onClick={() => setReceiptGroupIds("")}
-                        className="text-[var(--fg-muted)] hover:text-[var(--fg-secondary)]"
-                      >
-                        Clear
-                      </button>
-                    </div>
-                  </div>
-                  <p className="text-[11.5px] text-[var(--fg-muted)] mt-0.5 mb-2">
-                    Only the selected villages send receipts. A village that is not ticked records a
-                    &ldquo;not selected&rdquo; note against the purchase instead of emailing.
-                  </p>
-                  <div className="rounded-lg border border-[var(--border-default)] divide-y divide-[var(--border-default)] max-h-[220px] overflow-y-auto scrollbar-none">
+            <Panel
+              title="Purchase receipts"
+              subtitle="On a successful purchase, email a receipt (voucher code, status link, shared-pool note) to the customer's email from the M-PAiSA mapping."
+              icon={<Receipt size={15} />}
+              tone="green"
+              padding={false}
+              actions={
+                <div className="flex items-center gap-1">
+                  <Button
+                    variant="ghost"
+                    size="xs"
+                    onClick={() => setReceiptGroupIds(sites.map((x) => x.ruijieGroupId).filter(Boolean).join(","))}
+                  >
+                    Select all
+                  </Button>
+                  <Button variant="ghost" size="xs" onClick={() => setReceiptGroupIds("")}>Clear</Button>
+                </div>
+              }
+            >
+              <FormBody>
+                <SettingRow
+                  title="Email purchase receipts"
+                  description={
+                    receiptsEnabled
+                      ? "Customers who bought through M-PAiSA are emailed their voucher and status link."
+                      : "No receipts are sent, whatever is ticked below."
+                  }
+                >
+                  <Toggle checked={receiptsEnabled} onChange={setReceiptsEnabled} />
+                </SettingRow>
+
+                <SettingRow
+                  title="Villages"
+                  description="Only the selected villages send receipts. A village that is not ticked records a “not selected” note against the purchase instead of emailing."
+                  wide
+                >
+                  <div className="rounded-xl border border-[var(--border-default)] divide-y divide-[var(--border-subtle)] max-h-[260px] overflow-y-auto scrollbar-none">
                     {sites.length === 0 ? (
-                      <div className="px-3 py-3 text-[12.5px] text-[var(--fg-muted)]">
+                      <div className="px-4 py-3 text-[12.5px] text-[var(--fg-muted)]">
                         No villages yet — add them under Network.
                       </div>
                     ) : (
                       sites.map((s) => {
                         const gid = s.ruijieGroupId;
-                        const on = gid ? isReceiptSite(gid) : false;
                         return (
-                          <button
+                          <CheckRow
                             key={s.id}
-                            type="button"
+                            checked={gid ? isReceiptSite(gid) : false}
                             disabled={!gid}
+                            title={s.name}
+                            subtitle={gid || undefined}
+                            note={!gid ? "no group id" : undefined}
                             onClick={() => gid && toggleReceiptSite(gid)}
-                            className="w-full flex items-center gap-3 px-3 py-2.5 text-left hover:bg-[var(--bg-surface)] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                          >
-                            <span
-                              className={
-                                "shrink-0 h-[18px] w-[18px] rounded flex items-center justify-center border transition-colors " +
-                                (on
-                                  ? "bg-[var(--accent)] border-[var(--accent)] text-white"
-                                  : "border-[var(--border-strong)] text-transparent")
-                              }
-                            >
-                              <Check size={12} strokeWidth={3} />
-                            </span>
-                            <span className="min-w-0 flex-1">
-                              <span className="block text-[12.5px] font-medium text-[var(--fg-primary)] truncate">{s.name}</span>
-                              {gid && <span className="block text-[10.5px] font-mono text-[var(--fg-muted)] truncate">{gid}</span>}
-                            </span>
-                            {!gid && <span className="text-[10px] text-[var(--fg-muted)] shrink-0">no group id</span>}
-                          </button>
+                          />
                         );
                       })
                     )}
                   </div>
-                </div>
-                <div className="flex items-center justify-between gap-3 flex-wrap">
-                  {/* What the SERVER holds, not what the boxes show. The two
-                      differ until Save is pressed, and that gap is exactly how
-                      a village silently stops sending receipts. */}
-                  <p className="text-[11.5px] text-[var(--fg-muted)]">
-                    {receiptsDirty ? (
-                      <span className="text-[var(--accent)] font-medium">Unsaved changes</span>
-                    ) : (
-                      <>
-                        Saved:{" "}
-                        {origReceipts.enabled ? (
-                          <span className="text-[var(--fg-secondary)]">
-                            on for {normGroups(origReceipts.groupIds).split(",").filter(Boolean).length} village
-                            {normGroups(origReceipts.groupIds).split(",").filter(Boolean).length === 1 ? "" : "s"}
-                          </span>
-                        ) : (
-                          <span className="text-[var(--fg-secondary)]">off</span>
-                        )}
-                      </>
-                    )}
-                  </p>
-                  <Button
-                    variant={receiptsDirty ? "primary" : "secondary"}
-                    onClick={saveReceipts}
-                    loading={savingReceipts}
-                    disabled={!receiptsDirty || savingReceipts}
-                  >
-                    Save receipt settings
-                  </Button>
-                </div>
-              </div>
-            </div>
-          </Panel>
-            </>
-          )}
+                </SettingRow>
+              </FormBody>
 
-          {tab === "starlink" && (
-            <>
-          <Panel
-            title="Starlink"
-            subtitle="API credentials for the account, and the service line for each village."
-            icon={<Satellite size={15} />}
-          >
-            <div className="space-y-4">
-              <Toggle
-                checked={sl.enabled}
-                onChange={(v) => setSlField("enabled", v)}
-                label="Enable Starlink data"
-                hint={sl.enabled ? "Village dashboards show usage for any village with a service line." : "Starlink cards are hidden everywhere."}
-              />
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <Field label="Token URL" hint="OAuth2 client-credentials endpoint.">
-                  <Input value={sl.tokenUrl} onChange={(e) => setSlField("tokenUrl", e.target.value)} placeholder="https://www.starlink.com/api/auth/connect/token" mono />
-                </Field>
-                <Field label="API base URL">
-                  <Input value={sl.apiBaseUrl} onChange={(e) => setSlField("apiBaseUrl", e.target.value)} placeholder="https://starlink.com/api/public" mono />
-                </Field>
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <Field label="Client ID">
-                  <Input value={sl.clientId} onChange={(e) => setSlField("clientId", e.target.value)} placeholder="Starlink client id" mono />
-                </Field>
-                <Field
-                  label="Client secret"
-                  hint={slHasSecret ? "A secret is stored. Leave blank to keep it." : "Stored encrypted at rest; never sent back to the browser."}
+              {/* What the SERVER holds, not what the boxes show. The two differ
+                  until Save is pressed, and that gap is exactly how a village
+                  silently stops sending receipts. */}
+              <PanelFooter
+                note={
+                  receiptsDirty ? (
+                    <span className="text-[var(--brand)] font-medium">Unsaved changes</span>
+                  ) : (
+                    <span>
+                      Saved:{" "}
+                      {origReceipts.enabled ? (
+                        <span className="text-[var(--fg-secondary)]">
+                          on for {savedReceiptCount} village{savedReceiptCount === 1 ? "" : "s"}
+                        </span>
+                      ) : (
+                        <span className="text-[var(--fg-secondary)]">off</span>
+                      )}
+                    </span>
+                  )
+                }
+              >
+                <Button
+                  variant={receiptsDirty ? "primary" : "secondary"}
+                  size="sm"
+                  onClick={saveReceipts}
+                  loading={savingReceipts}
+                  disabled={!receiptsDirty || savingReceipts}
                 >
-                  <Input
-                    type="password"
-                    value={slSecret}
-                    onChange={(e) => setSlSecret(e.target.value)}
-                    placeholder={slHasSecret ? "•••••••••• (unchanged)" : "Starlink client secret"}
-                    autoComplete="new-password"
-                  />
-                </Field>
+                  Save receipt settings
+                </Button>
+              </PanelFooter>
+            </Panel>
+          </>
+        )}
+
+        {/* ═══════════════════════════ Starlink ══════════════════════════ */}
+        {tab === "starlink" && (
+          <>
+            <Panel
+              title="Starlink API"
+              subtitle="Credentials for the Starlink account. Shared by every village; the service line below decides which kit each village reads."
+              icon={<Satellite size={15} />}
+              tone="indigo"
+              padding={false}
+            >
+              <FormBody>
+                <SettingRow
+                  title="Enable Starlink data"
+                  description={
+                    sl.enabled
+                      ? "Village dashboards show usage for any village with a service line."
+                      : "Starlink cards are hidden everywhere."
+                  }
+                >
+                  <Toggle checked={sl.enabled} onChange={(v) => setSlField("enabled", v)} />
+                </SettingRow>
+              </FormBody>
+
+              <div className="px-5 sm:px-6 pb-6 pt-6 flex flex-col gap-7 border-t border-[var(--border-subtle)]">
+                <Section label="Endpoints">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <Field label="Token URL" hint="OAuth2 client-credentials endpoint." htmlFor="sl-token">
+                      <Input
+                        id="sl-token"
+                        value={sl.tokenUrl}
+                        onChange={(e) => setSlField("tokenUrl", e.target.value)}
+                        placeholder="https://www.starlink.com/api/auth/connect/token"
+                        mono
+                      />
+                    </Field>
+                    <Field label="API base URL" htmlFor="sl-base">
+                      <Input
+                        id="sl-base"
+                        value={sl.apiBaseUrl}
+                        onChange={(e) => setSlField("apiBaseUrl", e.target.value)}
+                        placeholder="https://starlink.com/api/public"
+                        mono
+                      />
+                    </Field>
+                  </div>
+                </Section>
+
+                <Section label="Credentials">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <Field label="Client ID" htmlFor="sl-client">
+                      <Input
+                        id="sl-client"
+                        value={sl.clientId}
+                        onChange={(e) => setSlField("clientId", e.target.value)}
+                        placeholder="Starlink client id"
+                        mono
+                      />
+                    </Field>
+                    <Field
+                      label="Client secret"
+                      htmlFor="sl-secret"
+                      hint={slHasSecret ? "A secret is stored. Leave blank to keep it." : "Stored encrypted at rest; never sent back to the browser."}
+                    >
+                      <Input
+                        id="sl-secret"
+                        type="password"
+                        value={slSecret}
+                        onChange={(e) => setSlSecret(e.target.value)}
+                        placeholder={slHasSecret ? "•••••••••• (unchanged)" : "Starlink client secret"}
+                        autoComplete="new-password"
+                      />
+                    </Field>
+                  </div>
+                </Section>
+
+                {slTest && (
+                  <div className="rounded-xl border border-[var(--border-default)] divide-y divide-[var(--border-subtle)] overflow-hidden">
+                    <div className="px-4 py-2.5 bg-[var(--surface-sunken)] flex items-center gap-2">
+                      <KeyRound size={13} className="text-[var(--fg-muted)]" />
+                      <span className="text-label">Connection test</span>
+                      <Badge tone={slTest.ok ? "success" : "danger"} className="ml-auto">
+                        {slTest.ok ? "Passed" : "Failed"}
+                      </Badge>
+                    </div>
+                    {slTest.steps.map((st, i) => (
+                      <div key={i} className="px-4 py-2.5 flex items-start gap-2.5">
+                        <span
+                          className="mt-[5px] h-2 w-2 rounded-full shrink-0"
+                          style={{ background: st.ok ? "var(--success-fg)" : "var(--danger-fg)" }}
+                        />
+                        <div className="min-w-0">
+                          <p className="text-[12.5px] font-medium text-[var(--fg-primary)]">{st.name}</p>
+                          <p className="text-[11.5px] text-[var(--fg-muted)] break-words">{st.detail}</p>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
 
-              <div className="flex items-center gap-3">
-                <Button variant="primary" size="sm" onClick={saveStarlink} loading={savingSl} disabled={!slDirty || savingSl}>
-                  Save credentials
-                </Button>
+              <PanelFooter
+                note={
+                  slDirty ? (
+                    <span className="text-[var(--brand)] font-medium">Unsaved changes</span>
+                  ) : origSl ? (
+                    <span>No changes</span>
+                  ) : null
+                }
+              >
                 <Button variant="secondary" size="sm" onClick={testStarlink} loading={testingSl} disabled={testingSl}>
                   Test connection
                 </Button>
-                {!slDirty && origSl && <span className="text-[11.5px] text-[var(--fg-muted)]">No changes</span>}
-              </div>
+                <Button variant="primary" size="sm" onClick={saveStarlink} loading={savingSl} disabled={!slDirty || savingSl}>
+                  Save credentials
+                </Button>
+              </PanelFooter>
+            </Panel>
 
-              {slTest && (
-                <div className="rounded-lg border border-[var(--border-default)] divide-y divide-[var(--border-default)]">
-                  {slTest.steps.map((st, i) => (
-                    <div key={i} className="px-3 py-2.5 flex items-start gap-2.5">
-                      <span
-                        className={
-                          "mt-[3px] h-2 w-2 rounded-full shrink-0 " +
-                          (st.ok ? "bg-emerald-500" : "bg-[var(--accent)]")
-                        }
-                      />
-                      <div className="min-w-0">
-                        <p className="text-[12.5px] font-medium text-[var(--fg-primary)]">{st.name}</p>
-                        <p className="text-[11.5px] text-[var(--fg-muted)] break-words">{st.detail}</p>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-
-              {/* Per-village identifiers */}
-              <div className="border-t border-[var(--border-default)] pt-4">
-                <p className="text-[12.5px] font-medium text-[var(--fg-secondary)]">Villages</p>
-                <p className="text-[11.5px] text-[var(--fg-muted)] mt-0.5 mb-3">
-                  The service line number is what draws the usage graph. Leave it blank to hide the Starlink card for that village. The device ID is the kit's user-terminal id and is shown as information only.
-                </p>
-
-                <div className="rounded-lg border border-[var(--border-default)] divide-y divide-[var(--border-default)] max-h-[320px] overflow-y-auto scrollbar-none">
-                  {sites.length === 0 ? (
-                    <div className="px-3 py-3 text-[12.5px] text-[var(--fg-muted)]">
-                      No villages yet — add them under Network.
-                    </div>
-                  ) : (
-                    sites.map((s) => {
-                      const row = slSites[s.id] || { serviceLine: "", deviceId: "" };
-                      const setRow = (k, v) =>
-                        setSlSites((prev) => ({ ...prev, [s.id]: { ...(prev[s.id] || {}), [k]: v } }));
-                      return (
-                        <div key={s.id} className="px-3 py-3 flex flex-col sm:flex-row sm:items-end gap-2.5">
-                          <div className="sm:w-40 min-w-0">
-                            <p className="text-[12.5px] font-medium text-[var(--fg-primary)] truncate">{s.name}</p>
-                            {s.hostname && <p className="text-[10.5px] font-mono text-[var(--fg-muted)] truncate">{s.hostname}</p>}
-                          </div>
-                          <Input
-                            className="flex-1"
-                            value={row.serviceLine}
-                            onChange={(e) => setRow("serviceLine", e.target.value)}
-                            placeholder="Service line number"
-                            mono
-                          />
-                          <Input
-                            className="flex-1"
-                            value={row.deviceId}
-                            onChange={(e) => setRow("deviceId", e.target.value)}
-                            placeholder="Device ID (optional)"
-                            mono
-                          />
-                          <Button
-                            variant="secondary"
-                            size="sm"
-                            onClick={() => saveStarlinkSite(s.id)}
-                            loading={savingSite === s.id}
-                            disabled={savingSite === s.id}
-                          >
-                            Save
-                          </Button>
+            <Panel
+              title="Village service lines"
+              subtitle="The service line number is what draws the usage graph. Leave it blank to hide the Starlink card for that village. The device ID is the kit's user-terminal id and is shown as information only."
+              icon={<MapPin size={15} />}
+              tone="navy"
+              padding={false}
+            >
+              <div className="divide-y divide-[var(--border-subtle)] max-h-[520px] overflow-y-auto scrollbar-none">
+                {sites.length === 0 ? (
+                  <div className="px-5 sm:px-6 py-4 text-[12.5px] text-[var(--fg-muted)]">
+                    No villages yet — add them under Network.
+                  </div>
+                ) : (
+                  sites.map((s) => {
+                    const row = slSites[s.id] || { serviceLine: "", deviceId: "" };
+                    const setRow = (k, v) =>
+                      setSlSites((prev) => ({ ...prev, [s.id]: { ...(prev[s.id] || {}), [k]: v } }));
+                    return (
+                      <div key={s.id} className="px-5 sm:px-6 py-4 flex flex-col lg:flex-row lg:items-center gap-3">
+                        <div className="lg:w-44 min-w-0 shrink-0">
+                          <p className="text-[13px] font-semibold text-[var(--fg-primary)] truncate font-display">{s.name}</p>
+                          {s.hostname && <p className="text-[10.5px] font-mono text-[var(--fg-muted)] truncate">{s.hostname}</p>}
                         </div>
-                      );
-                    })
-                  )}
-                </div>
+                        <Input
+                          className="flex-1"
+                          value={row.serviceLine}
+                          onChange={(e) => setRow("serviceLine", e.target.value)}
+                          placeholder="Service line number"
+                          aria-label={`${s.name} service line number`}
+                          mono
+                        />
+                        <Input
+                          className="flex-1"
+                          value={row.deviceId}
+                          onChange={(e) => setRow("deviceId", e.target.value)}
+                          placeholder="Device ID (optional)"
+                          aria-label={`${s.name} device id`}
+                          mono
+                        />
+                        <Button
+                          variant="secondary"
+                          size="sm"
+                          onClick={() => saveStarlinkSite(s.id)}
+                          loading={savingSite === s.id}
+                          disabled={savingSite === s.id}
+                          className="shrink-0"
+                        >
+                          Save
+                        </Button>
+                      </div>
+                    );
+                  })
+                )}
               </div>
-            </div>
-          </Panel>
-            </>
-          )}
-        </div>
+            </Panel>
+          </>
+        )}
       </div>
-    </div>
+    </PageShell>
   );
 }

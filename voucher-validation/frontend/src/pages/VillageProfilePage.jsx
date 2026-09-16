@@ -14,18 +14,35 @@ import toast from "react-hot-toast";
 import {
   ArrowLeft, RefreshCw, FileText, Upload, Download, Trash2, Camera,
   AlertTriangle, CheckCircle2, CircleDashed, MapPin, Clock, History,
-  Send, Lock, Save,
+  Send, Lock, Save, ShieldCheck, CalendarCheck, CalendarClock, ListChecks, X,
 } from "lucide-react";
 import { maintenanceApi, openDocument, downscaleImage } from "../services/api";
 import { useAuth } from "../hooks/useAuth";
-import { PageHeader, Panel, Button, Badge, EmptyState, Field, Input, Select, Textarea, Modal } from "../components/ui";
+import {
+  PageShell, PageHeader, KpiGrid, StatCard, Panel, Tabs, Segmented,
+  DataTable, Th, Td, StatusPill, ObjectTile,
+  Button, EmptyState, Field, Input, Select, Textarea, Modal,
+} from "../components/ui";
 import PhotoThumb from "../components/maintenance/PhotoThumb";
 
 const COND = {
-  ok:        { label: "OK",              tone: "success", Icon: CheckCircle2 },
-  attention: { label: "Needs attention", tone: "warning", Icon: AlertTriangle },
-  faulty:    { label: "Faulty",          tone: "danger",  Icon: AlertTriangle },
-  na:        { label: "N/A",             tone: "neutral", Icon: CircleDashed },
+  ok:        { label: "OK",              tone: "success", tile: "green",  Icon: CheckCircle2 },
+  attention: { label: "Needs attention", tone: "warning", tile: "orange", Icon: AlertTriangle },
+  faulty:    { label: "Faulty",          tone: "danger",  tile: "red",    Icon: AlertTriangle },
+  na:        { label: "N/A",             tone: "neutral", tile: "slate",  Icon: CircleDashed },
+};
+
+const CONDITION_OPTIONS = ["ok", "attention", "faulty", "na"].map((v) => ({ value: v, label: COND[v].label }));
+
+// Short names for the tab strip only. The server's full component labels head
+// every card and report; these exist purely so eight tabs fit on one line.
+const TAB_LABELS = {
+  gateway: "Gateway",
+  aps: "Access points",
+  starlink: "Starlink",
+  power: "Power",
+  enclosure: "Enclosure",
+  site: "Site & safety",
 };
 
 const fmtDate = (d) =>
@@ -36,6 +53,32 @@ const fmtBytes = (n) => {
   if (v < 1048576) return `${Math.round(v / 1024)} KB`;
   return `${(v / 1048576).toFixed(1)} MB`;
 };
+
+/** The health dot that rides on each component tab. */
+function ConditionDot({ condition, never }) {
+  const bg = never
+    ? "bg-[var(--fg-subtle)]"
+    : condition === "ok"
+      ? "bg-[var(--success-fg)]"
+      : condition === "attention"
+        ? "bg-[var(--warning-fg)]"
+        : condition === "faulty"
+          ? "bg-[var(--danger-fg)]"
+          : "bg-[var(--fg-subtle)]";
+  return (
+    <span
+      className={`w-1.5 h-1.5 rounded-full shrink-0 ${bg}`}
+      title={never ? "Never inspected" : COND[condition]?.label || "Not inspected"}
+    />
+  );
+}
+
+/** A component's current condition, said the same way on every surface. */
+function ComponentPill({ component: c }) {
+  if (c.neverInspected) return <StatusPill tone="neutral">Never inspected</StatusPill>;
+  const C = COND[c.condition];
+  return <StatusPill tone={C?.tone || "neutral"}>{C?.label || c.condition}</StatusPill>;
+}
 
 export default function VillageProfilePage() {
   const { projectId } = useParams();
@@ -66,19 +109,31 @@ export default function VillageProfilePage() {
   const active = useMemo(() => components.find((c) => c.key === tab), [components, tab]);
   const svc = data?.service;
 
+  // One tab per line item, plus the paperwork. The dot carries the component's
+  // condition so the strip doubles as the village's status at a glance — which
+  // is the whole reason this page is tabbed rather than stacked.
+  //
+  // The strip uses a short label: eight full names ("Power (solar / battery /
+  // PSU)") overrun the content width and clip the last tab. The full name is
+  // never lost — it heads the card the tab opens, and the overview grid.
   const tabs = [
-    { key: "overview", label: "Overview" },
-    ...components.map((c) => ({ key: c.key, label: c.label, condition: c.condition, never: c.neverInspected })),
-    { key: "documents", label: "Documents", count: data?.documents?.length || 0 },
+    { value: "overview", label: "Overview" },
+    ...components.map((c) => ({
+      value: c.key,
+      label: TAB_LABELS[c.key] || c.label,
+      icon: <ConditionDot condition={c.condition} never={c.neverInspected} />,
+    })),
+    { value: "documents", label: "Documents", count: data?.documents?.length || 0 },
   ];
 
   return (
-    <div className="p-4 sm:p-6 lg:p-8">
+    <PageShell>
       <PageHeader
         eyebrow="Village profile"
         title={data?.village?.name || "…"}
         subtitle={data?.village?.hostname || ""}
-        icon={<MapPin size={20} />}
+        icon={<MapPin size={22} />}
+        tone="navy"
         actions={
           <>
             <Button variant="ghost" size="sm" onClick={() => navigate("/maintenance")} iconLeft={<ArrowLeft size={14} />}>
@@ -93,92 +148,118 @@ export default function VillageProfilePage() {
 
       {/* Service standing, stated once at the top rather than inferred from the tabs. */}
       {svc && (
-        <div className="mt-6 grid grid-cols-2 lg:grid-cols-4 gap-3">
-          <Tile label="Service status"
+        <KpiGrid>
+          <StatCard
+            label="Service status"
             value={svc.neverServiced ? "Never serviced" : svc.overdue ? "Overdue" : "In window"}
-            tone={svc.neverServiced || svc.overdue ? "danger" : "success"} />
-          <Tile label="Last serviced" value={fmtDate(svc.lastVisitDate)} sub={svc.lastEngineer || ""} />
-          <Tile label="Next due" value={svc.neverServiced ? "—" : fmtDate(svc.nextDue)} sub={`every ${svc.intervalMonths} months`} />
-          <Tile label="Components inspected"
+            sub={
+              svc.neverServiced
+                ? "no report has ever been filed"
+                : svc.overallCondition
+                  ? `last overall: ${COND[svc.overallCondition]?.label || svc.overallCondition}`
+                  : `${svc.intervalMonths}-month cycle`
+            }
+            icon={svc.neverServiced || svc.overdue ? <AlertTriangle size={18} /> : <ShieldCheck size={18} />}
+            color={svc.neverServiced || svc.overdue ? "red" : "green"}
+          />
+          <StatCard
+            label="Last serviced"
+            value={fmtDate(svc.lastVisitDate)}
+            sub={svc.lastEngineer || ""}
+            icon={<CalendarCheck size={18} />}
+            color="navy"
+          />
+          <StatCard
+            label="Next due"
+            value={svc.neverServiced ? "—" : fmtDate(svc.nextDue)}
+            sub={`every ${svc.intervalMonths} months`}
+            icon={<CalendarClock size={18} />}
+            color="indigo"
+          />
+          <StatCard
+            label="Components inspected"
             value={`${data.summary.inspected} / ${data.summary.total}`}
-            sub={data.summary.faulty ? `${data.summary.faulty} faulty` : data.summary.attention ? `${data.summary.attention} need attention` : "all healthy"}
-            tone={data.summary.faulty ? "danger" : data.summary.attention ? "warning" : "success"} />
-        </div>
+            sub={
+              data.summary.faulty
+                ? `${data.summary.faulty} faulty`
+                : data.summary.attention
+                  ? `${data.summary.attention} need attention`
+                  : "all healthy"
+            }
+            icon={<ListChecks size={18} />}
+            color={data.summary.faulty ? "red" : data.summary.attention ? "orange" : "green"}
+          />
+        </KpiGrid>
       )}
 
-      {/* Tabs: one per line item, plus the paperwork. */}
-      <div className="mt-5 flex flex-wrap items-center gap-1 rounded-md p-1 bg-[var(--surface-raised)] border border-[var(--border-default)]">
-        {tabs.map((t) => {
-          const C = t.condition ? COND[t.condition] : null;
-          return (
-            <button
-              key={t.key}
-              onClick={() => setTab(t.key)}
-              className={
-                "h-7 px-3 text-[12px] font-medium rounded transition-colors inline-flex items-center gap-1.5 " +
-                (tab === t.key
-                  ? "bg-[var(--surface-hover)] text-[var(--text-primary)]"
-                  : "text-[var(--text-tertiary)] hover:text-[var(--text-primary)]")
-              }
-            >
-              {t.key !== "overview" && t.key !== "documents" && (
-                <span
-                  className={
-                    "w-1.5 h-1.5 rounded-full " +
-                    (t.never ? "bg-[var(--text-quaternary)]"
-                      : t.condition === "ok" ? "bg-[var(--success-fg)]"
-                      : t.condition === "attention" ? "bg-[var(--warning-fg)]"
-                      : t.condition === "faulty" ? "bg-[var(--brand)]"
-                      : "bg-[var(--text-quaternary)]")
-                  }
-                  title={t.never ? "Never inspected" : COND[t.condition]?.label}
-                />
-              )}
-              {t.label}
-              {t.count != null && <span className="text-[var(--text-quaternary)]">({t.count})</span>}
-            </button>
-          );
-        })}
-      </div>
+      <Tabs tabs={tabs} value={tab} onChange={setTab} variant="underline" size="sm" />
 
       {loading ? (
-        <div className="mt-5 p-10 text-center text-[var(--fg-muted)]">Loading…</div>
+        <Panel padding={false}>
+          <div className="py-16 text-center text-[13px] text-[var(--fg-muted)]">Loading…</div>
+        </Panel>
       ) : tab === "overview" ? (
-        <div className="mt-5 grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
           {components.map((c) => {
             const C = COND[c.condition];
+            const CardIcon = c.neverInspected ? CircleDashed : C?.Icon || CircleDashed;
             return (
-              <button
+              /* The card body is the button and the photo strip is its sibling:
+                 a thumbnail is itself a button, and nesting one inside another
+                 is invalid markup that swallows the inner click. */
+              <div
                 key={c.key}
-                onClick={() => setTab(c.key)}
-                className="text-left p-4 rounded-lg bg-[var(--surface-raised)] border border-[var(--border-default)] hover:border-[var(--brand)] transition-colors"
+                className="group flex flex-col rounded-xl border border-[var(--border-default)] bg-[var(--bg-elevated)] shadow-[var(--shadow-card)] transition-[box-shadow,border-color] duration-200 hover:border-[var(--border-hover)] hover:shadow-[var(--shadow-card-hover)]"
               >
-                <div className="flex items-start justify-between gap-2">
-                  <div className="text-[13px] font-semibold text-[var(--text-primary)]">{c.label}</div>
-                  {c.neverInspected ? (
-                    <Badge tone="neutral">Never inspected</Badge>
-                  ) : (
-                    <Badge tone={C?.tone || "neutral"}>{C?.label || c.condition}</Badge>
+                <button
+                  onClick={() => setTab(c.key)}
+                  className="text-left p-4 focus-ring rounded-t-xl"
+                  title={`Open ${c.label}`}
+                >
+                  <div className="flex items-start justify-between gap-2.5">
+                    <div className="flex items-center gap-2.5 min-w-0">
+                      <ObjectTile tone={c.neverInspected ? "slate" : C?.tile || "slate"} size="sm">
+                        <CardIcon size={15} />
+                      </ObjectTile>
+                      <span className="text-[13.5px] font-semibold text-[var(--fg-primary)] truncate font-display group-hover:text-[var(--brand)] transition-colors">
+                        {c.label}
+                      </span>
+                    </div>
+                    <ComponentPill component={c} />
+                  </div>
+                  <div className="mt-2.5 text-[11.5px] text-[var(--fg-muted)] flex items-center gap-1.5">
+                    <Clock size={11} />
+                    {c.neverInspected ? "No inspection on record" : `${fmtDate(c.lastInspected)} · ${c.engineerName || "—"}`}
+                  </div>
+                  {c.notes && (
+                    <p className="mt-2 text-[12px] text-[var(--fg-secondary)] leading-relaxed line-clamp-2">{c.notes}</p>
                   )}
-                </div>
-                <div className="mt-2 text-[11.5px] text-[var(--fg-muted)] flex items-center gap-1.5">
-                  <Clock size={11} />
-                  {c.neverInspected ? "No inspection on record" : `${fmtDate(c.lastInspected)} · ${c.engineerName || "—"}`}
-                </div>
-                {c.notes && (
-                  <p className="mt-2 text-[12px] text-[var(--fg-secondary)] line-clamp-2">{c.notes}</p>
-                )}
-                <div className="mt-3 flex items-center gap-1.5">
-                  {c.photos.slice(0, 4).map((p) => (
-                    <PhotoThumb key={p.id} photoId={p.id} onOpen={(url) => setLightbox({ url, caption: c.label })} />
-                  ))}
-                  {c.photos.length === 0 && (
-                    <span className="text-[11px] text-[var(--fg-muted)] flex items-center gap-1">
+                </button>
+
+                <div className="mt-auto px-4 pb-4 pt-3 border-t border-[var(--border-subtle)] flex items-center gap-1.5">
+                  {c.photos.length === 0 ? (
+                    <span className="text-[11px] text-[var(--fg-muted)] flex items-center gap-1.5">
                       <Camera size={11} /> No photos
                     </span>
+                  ) : (
+                    <>
+                      {c.photos.slice(0, 4).map((p) => (
+                        <PhotoThumb
+                          key={p.id}
+                          photoId={p.id}
+                          size="xs"
+                          onOpen={(url) => setLightbox({ url, caption: c.label })}
+                        />
+                      ))}
+                      {c.photos.length > 4 && (
+                        <span className="h-14 px-2 inline-flex items-center rounded-[12px] border border-[var(--border-default)] bg-[var(--bg-surface)] text-[11px] font-semibold tabular-nums text-[var(--fg-muted)]">
+                          +{c.photos.length - 4}
+                        </span>
+                      )}
+                    </>
                   )}
                 </div>
-              </button>
+              </div>
             );
           })}
         </div>
@@ -204,12 +285,25 @@ export default function VillageProfilePage() {
 
       {lightbox && (
         <div className="fixed inset-0 z-[80] bg-black/80 flex items-center justify-center p-6" onClick={() => setLightbox(null)}>
-          <img src={lightbox.url} alt={lightbox.caption} className="max-h-full max-w-full rounded-lg" />
+          <button
+            className="absolute top-4 right-4 text-white/80 hover:text-white"
+            onClick={() => setLightbox(null)}
+            aria-label="Close"
+          >
+            <X size={22} />
+          </button>
+          <img src={lightbox.url} alt={lightbox.caption} className="max-h-full max-w-full rounded-xl shadow-[var(--shadow-xl)]" />
+          {lightbox.caption && (
+            <span className="absolute bottom-6 left-1/2 -translate-x-1/2 px-3 py-1.5 rounded-full bg-black/60 text-[12px] text-white/90">
+              {lightbox.caption}
+            </span>
+          )}
         </div>
       )}
-    </div>
+    </PageShell>
   );
 }
+
 function ComponentTab({ component: c, projectId, canService, onOpenPhoto, onChanged }) {
   const C = COND[c.condition];
   const draft = c.draft;
@@ -221,18 +315,15 @@ function ComponentTab({ component: c, projectId, canService, onOpenPhoto, onChan
   const draftPhotos = draft?.photos || [];
 
   return (
-    <div className="mt-5 space-y-4">
+    <div className="flex flex-col gap-4">
       <Panel
         title={c.label}
         subtitle={c.hint}
         icon={C ? <C.Icon size={15} /> : <CircleDashed size={15} />}
+        tone={c.neverInspected ? "slate" : C?.tile || "slate"}
         actions={
           <div className="flex items-center gap-2">
-            {c.neverInspected ? (
-              <Badge tone="neutral">Never inspected</Badge>
-            ) : (
-              <Badge tone={C?.tone || "neutral"}>{C?.label || c.condition}</Badge>
-            )}
+            <ComponentPill component={c} />
             {canService && pending && (
               <Button variant="primary" size="sm" onClick={() => setServicing(true)} iconLeft={<Camera size={14} />}>
                 {draft && (draft.condition || draftPhotos.length) ? "Continue inspection" : "Record inspection"}
@@ -252,30 +343,46 @@ function ComponentTab({ component: c, projectId, canService, onOpenPhoto, onChan
             }
           />
         ) : (
-          <div className="space-y-4">
-            <div className="flex flex-wrap gap-x-6 gap-y-2 text-[12.5px]">
-              <span className="text-[var(--fg-muted)]">Last inspected <span className="text-[var(--fg-primary)]">{fmtDate(c.lastInspected)}</span></span>
-              <span className="text-[var(--fg-muted)]">Engineer <span className="text-[var(--fg-primary)]">{c.engineerName || "—"}</span></span>
-              <span className="text-[var(--fg-muted)]">Visit date <span className="text-[var(--fg-primary)]">{fmtDate(c.lastVisitDate)}</span></span>
-            </div>
+          <div className="flex flex-col gap-5">
+            {/* Provenance for the condition above: three facts, on one line. */}
+            <dl className="grid grid-cols-1 sm:grid-cols-3 gap-px rounded-xl overflow-hidden border border-[var(--border-default)] bg-[var(--border-subtle)]">
+              <Fact label="Last inspected" value={fmtDate(c.lastInspected)} />
+              <Fact label="Engineer" value={c.engineerName || "—"} />
+              <Fact label="Visit date" value={fmtDate(c.lastVisitDate)} />
+            </dl>
+
             {c.notes && (
-              <div className="rounded-lg border border-[var(--border-default)] bg-[var(--surface-sunken)] p-3">
-                <p className="text-[12.5px] text-[var(--fg-secondary)] whitespace-pre-wrap">{c.notes}</p>
+              <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-surface)] p-4">
+                <p className="text-label mb-1.5">Engineer's note</p>
+                <p className="text-[12.5px] text-[var(--fg-secondary)] whitespace-pre-wrap leading-relaxed">{c.notes}</p>
               </div>
             )}
+
             <div>
-              <div className="text-[11px] uppercase tracking-wide text-[var(--text-quaternary)] mb-2">
-                Photos from this inspection
-              </div>
-              <div className="flex flex-wrap gap-2">
-                {c.photos.length === 0 ? (
-                  <span className="text-[12px] text-[var(--fg-muted)]">No photos on this inspection.</span>
-                ) : (
-                  c.photos.map((p) => (
-                    <PhotoThumb key={p.id} photoId={p.id} caption={p.caption} onOpen={(url) => onOpenPhoto(url, c.label)} />
-                  ))
-                )}
-              </div>
+              <p className="text-label mb-2.5">Photos from this inspection</p>
+              {c.photos.length === 0 ? (
+                <span className="text-[12px] text-[var(--fg-muted)]">No photos on this inspection.</span>
+              ) : (
+                /* The only real imagery in the console, so it gets a composed
+                   mosaic rather than a row of stamps: the first frame leads and
+                   the rest sit around it. Below three photos the lead frame
+                   would just leave a hole in the grid, so it stays a plain row. */
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+                  {c.photos.map((p, i) => (
+                    <div
+                      key={p.id}
+                      className={`relative aspect-square ${i === 0 && c.photos.length >= 3 ? "sm:col-span-2 sm:row-span-2" : ""}`}
+                    >
+                      <PhotoThumb
+                        photoId={p.id}
+                        caption={p.caption}
+                        size="fill"
+                        onOpen={(url) => onOpenPhoto(url, c.label)}
+                      />
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           </div>
         )}
@@ -284,52 +391,62 @@ function ComponentTab({ component: c, projectId, canService, onOpenPhoto, onChan
       {/* Work in progress is surfaced on the tab, but editing it happens in the
           modal — the tab stays a view of the village, not a form. */}
       {canService && pending && draft && (draft.condition || draftPhotos.length > 0) && (
-        <div className="flex items-center gap-2 px-3 py-2 rounded-md border border-[var(--warning-border,var(--border-default))] bg-[var(--surface-sunken)]">
-          <AlertTriangle size={13} className="text-[var(--warning-fg)] shrink-0" />
-          <span className="text-[12px] text-[var(--fg-secondary)]">
+        <div className="flex items-center gap-2.5 px-4 py-3 rounded-xl border border-[var(--warning-border)] bg-[var(--warning-soft)]">
+          <AlertTriangle size={14} className="text-[var(--warning-fg)] shrink-0" />
+          <span className="text-[12.5px] text-[var(--fg-secondary)]">
             You have an unfiled inspection for this component
             {draft.condition ? ` (${COND[draft.condition]?.label})` : ""}
             {draftPhotos.length ? ` · ${draftPhotos.length} photo${draftPhotos.length === 1 ? "" : "s"}` : ""}.
           </span>
-          <Button variant="ghost" size="sm" className="ml-auto" onClick={() => setServicing(true)}>
+          <Button variant="secondary" size="sm" className="ml-auto" onClick={() => setServicing(true)}>
             Open
           </Button>
         </div>
       )}
 
       {canService && draft && !pending && (
-        <div className="flex items-center gap-2 text-[12px] text-[var(--fg-muted)]">
+        <div className="flex items-center gap-2 text-[12px] text-[var(--fg-muted)] px-1">
           <Lock size={12} className="text-[var(--success-fg)]" />
           Filed on this visit. An admin can reopen it from the report if it needs revising.
         </div>
       )}
 
       {c.history.length > 1 && (
-        <Panel title="History" subtitle="Every filed inspection of this component, newest first" icon={<History size={15} />} padding={false}>
-          <table className="w-full text-sm">
+        <Panel
+          title="History"
+          subtitle="Every filed inspection of this component, newest first"
+          icon={<History size={15} />}
+          tone="slate"
+          padding={false}
+        >
+          <DataTable>
             <thead>
-              <tr className="text-left border-b border-[var(--border-default)]">
-                <th className="px-5 py-2.5 text-label">Filed</th>
-                <th className="px-5 py-2.5 text-label">Condition</th>
-                <th className="px-5 py-2.5 text-label">Engineer</th>
-                <th className="px-5 py-2.5 text-label">Photos</th>
-                <th className="px-5 py-2.5 text-label">Notes</th>
+              <tr>
+                <Th>Filed</Th>
+                <Th>Condition</Th>
+                <Th>Engineer</Th>
+                <Th align="right">Photos</Th>
+                <Th>Notes</Th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-[var(--border-default)]">
+            <tbody>
               {c.history.map((h, i) => (
                 <tr key={`${h.visitId}-${i}`}>
-                  <td className="px-5 py-3 text-[var(--fg-secondary)] whitespace-nowrap">{fmtDate(h.submittedAt)}</td>
-                  <td className="px-5 py-3">
-                    <Badge tone={COND[h.condition]?.tone || "neutral"}>{COND[h.condition]?.label || h.condition}</Badge>
-                  </td>
-                  <td className="px-5 py-3 text-[var(--fg-secondary)]">{h.engineerName || "—"}</td>
-                  <td className="px-5 py-3 tabular-nums text-[var(--fg-secondary)]">{h.photoCount}</td>
-                  <td className="px-5 py-3 text-[var(--fg-secondary)] max-w-[320px] truncate" title={h.notes || ""}>{h.notes || "—"}</td>
+                  <Td nowrap>{fmtDate(h.submittedAt)}</Td>
+                  <Td>
+                    <StatusPill tone={COND[h.condition]?.tone || "neutral"}>
+                      {COND[h.condition]?.label || h.condition}
+                    </StatusPill>
+                  </Td>
+                  <Td>{h.engineerName || "—"}</Td>
+                  <Td align="right" className="tabular-nums">{h.photoCount}</Td>
+                  <Td className="max-w-[320px] truncate">
+                    <span title={h.notes || ""}>{h.notes || "—"}</span>
+                  </Td>
                 </tr>
               ))}
             </tbody>
-          </table>
+          </DataTable>
         </Panel>
       )}
 
@@ -342,6 +459,16 @@ function ComponentTab({ component: c, projectId, canService, onOpenPhoto, onChan
           onOpenPhoto={onOpenPhoto}
         />
       )}
+    </div>
+  );
+}
+
+/** One cell of the provenance strip. */
+function Fact({ label, value }) {
+  return (
+    <div className="bg-[var(--bg-elevated)] px-4 py-3">
+      <dt className="text-label">{label}</dt>
+      <dd className="text-[13px] font-medium text-[var(--fg-primary)] mt-1">{value}</dd>
     </div>
   );
 }
@@ -467,25 +594,9 @@ function ServiceComponentModal({ component: c, projectId, onClose, onChanged, on
           className="hidden"
           onChange={(e) => { const f = [...(e.target.files || [])]; e.target.value = ""; addPhotos(f); }}
         />
-        <div className="space-y-4">
+        <div className="flex flex-col gap-5">
           <Field label="Condition">
-            <div className="inline-flex rounded-md p-0.5 bg-[var(--surface-sunken)] border border-[var(--border-default)]">
-              {["ok", "attention", "faulty", "na"].map((v) => (
-                <button
-                  key={v}
-                  type="button"
-                  onClick={() => setCondition(v)}
-                  className={
-                    "h-8 px-3 text-[12px] font-medium rounded transition-colors " +
-                    (condition === v
-                      ? "bg-[var(--surface-hover)] text-[var(--text-primary)]"
-                      : "text-[var(--text-tertiary)] hover:text-[var(--text-primary)]")
-                  }
-                >
-                  {COND[v].label}
-                </button>
-              ))}
-            </div>
+            <Segmented options={CONDITION_OPTIONS} value={condition} onChange={setCondition} />
           </Field>
 
           <Field
@@ -496,9 +607,14 @@ function ServiceComponentModal({ component: c, projectId, onClose, onChanged, on
           </Field>
 
           <Field label="Photos" hint="Taken on this visit. Required unless the component is N/A.">
-            <div className="flex flex-wrap items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2.5">
               {photos.map((p) => (
-                <PhotoThumb key={p.id} photoId={p.id} onRemove={removePhoto} onOpen={(url) => onOpenPhoto?.(url, c.label)} />
+                <PhotoThumb
+                  key={p.id}
+                  photoId={p.id}
+                  onRemove={removePhoto}
+                  onOpen={(url) => onOpenPhoto?.(url, c.label)}
+                />
               ))}
               <Button
                 variant="secondary"
@@ -555,11 +671,12 @@ function DocumentsTab({ projectId, documents, categories, isAdmin, onChanged, up
   }
 
   return (
-    <div className="mt-5 space-y-4">
+    <div className="flex flex-col gap-4">
       <Panel
         title="Site documents"
         subtitle="Handover packs, as-builts, warranties and permits — the paperwork that belongs to the village rather than to any one visit."
         icon={<FileText size={15} />}
+        tone="navy"
         actions={
           <Button variant="primary" size="sm" onClick={() => setUploadOpen(true)} iconLeft={<Upload size={14} />}>
             Upload document
@@ -569,24 +686,32 @@ function DocumentsTab({ projectId, documents, categories, isAdmin, onChanged, up
         {documents.length === 0 ? (
           <EmptyState icon={FileText} title="No documents yet" description="Upload the handover pack, as-built drawings, warranties or permits for this village." />
         ) : (
-          <div className="space-y-5">
+          /* Grouped by category rather than listed flat: the paperwork is looked
+             for by kind ("where is the handover pack"), never by date. */
+          <div className="flex flex-col gap-6">
             {categories
               .filter((cat) => grouped[cat.key]?.length)
               .map((cat) => (
                 <div key={cat.key}>
-                  <div className="text-[11px] uppercase tracking-wide text-[var(--text-quaternary)] mb-2">
-                    {cat.label} ({grouped[cat.key].length})
+                  <div className="flex items-center gap-3 mb-2.5">
+                    <span className="text-label">{cat.label}</span>
+                    <span className="text-[11px] font-semibold tabular-nums text-[var(--fg-muted)] rounded-full bg-[var(--bg-surface)] px-1.5">
+                      {grouped[cat.key].length}
+                    </span>
+                    <span className="flex-1 h-px bg-[var(--border-subtle)]" />
                   </div>
-                  <div className="space-y-1.5">
+                  <div className="flex flex-col gap-2">
                     {grouped[cat.key].map((d) => (
                       <div
                         key={d.id}
-                        className="flex items-center gap-3 p-3 rounded-lg border border-[var(--border-default)] bg-[var(--surface-sunken)]"
+                        className="flex items-center gap-3 p-3 rounded-xl border border-[var(--border-default)] bg-[var(--bg-elevated)] shadow-[var(--shadow-xs)] transition-[border-color,box-shadow] duration-150 hover:border-[var(--border-hover)] hover:shadow-[var(--shadow-sm)]"
                       >
-                        <FileText size={16} className="text-[var(--fg-muted)] shrink-0" />
+                        <ObjectTile tone="navy" size="sm">
+                          <FileText size={15} />
+                        </ObjectTile>
                         <div className="min-w-0 flex-1">
-                          <div className="text-[13px] font-medium text-[var(--fg-primary)] truncate">{d.title}</div>
-                          <div className="text-[11.5px] text-[var(--fg-muted)]">
+                          <div className="text-[13px] font-semibold text-[var(--fg-primary)] truncate font-display">{d.title}</div>
+                          <div className="text-[11.5px] text-[var(--fg-muted)] truncate">
                             {d.fileName || "file"} · {fmtBytes(d.bytes)} · {fmtDate(d.uploadedAt)}
                             {d.notes ? ` · ${d.notes}` : ""}
                           </div>
@@ -595,7 +720,14 @@ function DocumentsTab({ projectId, documents, categories, isAdmin, onChanged, up
                           Open
                         </Button>
                         {isAdmin && (
-                          <Button variant="ghost" size="sm" onClick={() => remove(d)} title="Delete" iconLeft={<Trash2 size={13} />} />
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => remove(d)}
+                            title="Delete"
+                            aria-label={`Delete ${d.title}`}
+                            iconLeft={<Trash2 size={13} />}
+                          />
                         )}
                       </div>
                     ))}
@@ -649,13 +781,13 @@ function UploadDocumentModal({ projectId, categories, onClose, onDone }) {
     <Modal open onClose={busy ? () => {} : onClose} width="md">
       <Modal.Header eyebrow="Site documents" title="Upload a document" icon={Upload} onClose={busy ? undefined : onClose} />
       <Modal.Body>
-        <div className="space-y-4">
+        <div className="flex flex-col gap-5">
           <Field label="File" hint="PDF, image, Word or Excel. Up to 100 MB.">
             <input
               type="file"
               accept=".pdf,.jpg,.jpeg,.png,.webp,.doc,.docx,.xls,.xlsx,application/pdf,image/*"
               onChange={(e) => setFile(e.target.files?.[0] || null)}
-              className="block w-full text-[12.5px] text-[var(--fg-secondary)] file:mr-3 file:py-1.5 file:px-3 file:rounded-md file:border file:border-[var(--border-default)] file:bg-[var(--surface-raised)] file:text-[var(--fg-primary)] file:text-[12px]"
+              className="block w-full text-[12.5px] text-[var(--fg-secondary)] file:mr-3 file:py-1.5 file:px-3 file:rounded-full file:border file:border-[var(--border-default)] file:bg-[var(--surface)] file:text-[var(--fg-primary)] file:text-[12px] file:font-semibold"
             />
           </Field>
           <Field label="Category">
@@ -678,20 +810,5 @@ function UploadDocumentModal({ projectId, categories, onClose, onDone }) {
         <Button variant="primary" onClick={submit} loading={busy} disabled={!file || busy}>Upload</Button>
       </Modal.Footer>
     </Modal>
-  );
-}
-
-function Tile({ label, value, sub, tone }) {
-  const color =
-    tone === "danger" ? "text-[var(--brand)]"
-    : tone === "warning" ? "text-[var(--warning-fg)]"
-    : tone === "success" ? "text-[var(--success-fg)]"
-    : "text-[var(--fg-primary)]";
-  return (
-    <div className="p-4 rounded-lg bg-[var(--surface-raised)] border border-[var(--border-default)]">
-      <div className="text-[10.5px] uppercase tracking-wide text-[var(--text-quaternary)]">{label}</div>
-      <div className={`text-[17px] font-semibold tracking-tight mt-1 ${color}`}>{value}</div>
-      {sub && <div className="text-[11px] text-[var(--fg-muted)] mt-0.5">{sub}</div>}
-    </div>
   );
 }

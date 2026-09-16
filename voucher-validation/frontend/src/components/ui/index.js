@@ -47,3 +47,19 @@ export {
   LegendRow,
   LegendRows,
 } from "./chart";
+
+/* --- Layout + data primitives (page structure, tables, filters, status) --- */
+export {
+  PageShell,
+  KpiGrid,
+  Toolbar,
+  SearchInput,
+  Segmented,
+  StatusPill,
+  DataTable,
+  Th,
+  Td,
+  TableMessage,
+  RecordCell,
+  Disclosure,
+} from "./Primitives";

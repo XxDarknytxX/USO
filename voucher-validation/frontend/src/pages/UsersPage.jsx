@@ -1,7 +1,13 @@
 // src/pages/UsersPage.jsx
-// Admin user list + create/edit modal.
+// Console accounts: who can sign in, what they are allowed to see, and the
+// create/edit modal.
+//
+// The list is one table rather than a card per person, and the role counts live
+// in the filter itself instead of a row of KPI tiles — on a page with a handful
+// of accounts, a tile that says "3 admins" is a tile that only tells you
+// something the filter already had to know.
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import toast from "react-hot-toast";
 import {
   Users,
@@ -15,6 +21,7 @@ import {
   Check,
   MapPin,
   Wrench,
+  Globe2,
 } from "lucide-react";
 
 import { userApi, networkApi } from "../services/api";
@@ -26,10 +33,19 @@ import {
   Input,
   Button,
   IconButton,
-  Badge,
   EmptyState,
+  PageShell,
   PageHeader,
   Panel,
+  Toolbar,
+  SearchInput,
+  Segmented,
+  DataTable,
+  Th,
+  Td,
+  TableMessage,
+  RecordCell,
+  StatusPill,
   SkeletonTable,
 } from "../components/ui";
 
@@ -43,12 +59,58 @@ function generatePassword(len = 14) {
   return pw;
 }
 
+/* The three roles, described once. The list, the filter and the modal all read
+   from here so a role never picks up a different colour or wording per screen. */
+const ROLES = {
+  admin: {
+    label: "Admin",
+    icon: Shield,
+    tone: "brand",
+    tile: "violet",
+    desc: "Full administrative access",
+    access: "Every village · full control",
+  },
+  viewer: {
+    label: "Viewer",
+    icon: Eye,
+    tone: "info",
+    tile: "blue",
+    desc: "Read-only access",
+    access: null, // villages are listed per user
+  },
+  engineer: {
+    label: "Engineer",
+    icon: Wrench,
+    tone: "warning",
+    tile: "orange",
+    desc: "Field contractor. Files maintenance reports for any village and sees nothing else.",
+    access: "Maintenance only",
+  },
+};
+
+function roleOf(role) {
+  return ROLES[role] || { label: role || "—", icon: Users, tone: "neutral", tile: "slate", desc: "", access: "—" };
+}
+
+function RolePill({ role }) {
+  const r = roleOf(role);
+  const Icon = r.icon;
+  return (
+    <StatusPill tone={r.tone} dot={false}>
+      <Icon size={11} />
+      {r.label}
+    </StatusPill>
+  );
+}
+
 export default function UsersPage() {
   const [users, setUsers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showCreate, setShowCreate] = useState(false);
   const [editTarget, setEditTarget] = useState(null);
   const [deleteTarget, setDeleteTarget] = useState(null);
+  const [query, setQuery] = useState("");
+  const [roleFilter, setRoleFilter] = useState("all");
   const { email: currentEmail } = useAuth();
 
   async function loadUsers() {
@@ -78,129 +140,201 @@ export default function UsersPage() {
     }
   }
 
+  const counts = useMemo(() => {
+    const c = { all: users.length, admin: 0, viewer: 0, engineer: 0 };
+    for (const u of users) if (c[u.role] != null) c[u.role] += 1;
+    return c;
+  }, [users]);
+
+  const shown = useMemo(() => {
+    const needle = query.trim().toLowerCase();
+    return users.filter((u) => {
+      if (roleFilter !== "all" && u.role !== roleFilter) return false;
+      if (!needle) return true;
+      return (
+        String(u.email || "").toLowerCase().includes(needle) ||
+        String(u.name || "").toLowerCase().includes(needle)
+      );
+    });
+  }, [users, query, roleFilter]);
+
+  const filtered = query.trim() !== "" || roleFilter !== "all";
+
   return (
-    <div className="p-4 sm:p-6 lg:p-8">
-      {/* ----- Header ----- */}
+    <PageShell>
       <PageHeader
         eyebrow="Access"
         title="User Management"
         subtitle={`${users.length.toLocaleString()} account${
           users.length !== 1 ? "s" : ""
         } with console access.`}
-        icon={<Users size={20} />}
+        icon={<Users size={22} />}
+        tone="pink"
         actions={
-          <Button
-            variant="primary"
-            size="md"
-            onClick={() => setShowCreate(true)}
-            iconLeft={<UserPlus size={14} />}
-          >
-            Add user
-          </Button>
+          <>
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={loadUsers}
+              iconLeft={<RefreshCw size={14} />}
+            >
+              Refresh
+            </Button>
+            <Button
+              variant="primary"
+              size="sm"
+              onClick={() => setShowCreate(true)}
+              iconLeft={<UserPlus size={14} />}
+            >
+              Add user
+            </Button>
+          </>
         }
       />
 
-      {/* ----- Table ----- */}
-      <div className="mt-6">
-        {loading ? (
-          <Panel padding>
-            <SkeletonTable rows={5} cols={4} />
-          </Panel>
-        ) : users.length === 0 ? (
-          <Panel padding>
-            <EmptyState
-              icon={Users}
-              title="No users found"
-              description="Add a teammate to give them console access."
-            />
-          </Panel>
-        ) : (
-          <Panel padding={false}>
-            <div className="overflow-x-auto">
-              <table className="w-full text-[13px]">
-                <thead>
-                  <tr className="text-left border-b border-[var(--border-default)]">
-                    <th className="text-label px-5 py-3">User</th>
-                    <th className="text-label px-5 py-3">Role</th>
-                    <th className="text-label px-5 py-3">Joined</th>
-                    <th className="text-label px-5 py-3 text-right">
-                      Actions
-                    </th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-[var(--border-default)]">
-                  {users.map((u) => (
-                    <tr
-                      key={u.id}
-                      className="hover:bg-[var(--bg-surface)] transition-colors"
-                    >
-                      <td className="px-5 py-3">
-                        <div className="flex items-center gap-2.5">
-                          <span
-                            className={
-                              "shrink-0 h-7 w-7 rounded-md flex items-center justify-center text-[11px] font-semibold uppercase " +
-                              "bg-[var(--surface-sunken)] text-[var(--text-secondary)] border border-[var(--border-subtle)]"
-                            }
-                          >
-                            {(u.email || "?").charAt(0)}
-                          </span>
-                          <div className="flex flex-col min-w-0">
-                            <span className="text-[13px] font-medium text-[var(--text-primary)] truncate">
-                              {u.name || "—"}
+      <Toolbar>
+        <Segmented
+          options={[
+            { value: "all", label: "All", count: counts.all },
+            { value: "admin", label: "Admins", count: counts.admin },
+            { value: "viewer", label: "Viewers", count: counts.viewer },
+            { value: "engineer", label: "Engineers", count: counts.engineer },
+          ]}
+          value={roleFilter}
+          onChange={setRoleFilter}
+        />
+        <SearchInput
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder="Search name or email…"
+          width="w-64"
+        />
+        {filtered && (
+          <span className="ml-auto text-[12px] text-[var(--fg-muted)] tabular-nums">
+            {shown.length} of {users.length}
+          </span>
+        )}
+      </Toolbar>
+
+      {loading ? (
+        <Panel padding>
+          <SkeletonTable rows={5} cols={4} />
+        </Panel>
+      ) : users.length === 0 ? (
+        <Panel padding={false}>
+          <EmptyState
+            icon={Users}
+            title="No users found"
+            description="Add a teammate to give them console access."
+            action={
+              <Button variant="primary" size="sm" onClick={() => setShowCreate(true)} iconLeft={<UserPlus size={14} />}>
+                Add user
+              </Button>
+            }
+          />
+        </Panel>
+      ) : (
+        <Panel
+          padding={false}
+          title="Accounts"
+          subtitle="Role decides what each person can reach; viewers are additionally limited to named villages."
+          icon={<Users size={15} />}
+          tone="pink"
+        >
+          <DataTable>
+            <thead>
+              <tr>
+                <Th>User</Th>
+                <Th>Role</Th>
+                <Th>Access</Th>
+                <Th>Joined</Th>
+                <Th align="right">Actions</Th>
+              </tr>
+            </thead>
+            <tbody>
+              {shown.length === 0 ? (
+                <TableMessage colSpan={5}>No account matches those filters.</TableMessage>
+              ) : (
+                shown.map((u) => {
+                  const r = roleOf(u.role);
+                  const villages = Array.isArray(u.villageIds) ? u.villageIds.length : 0;
+                  const isSelf = u.email === currentEmail;
+                  return (
+                    <tr key={u.id}>
+                      <Td>
+                        <RecordCell
+                          tone={r.tile}
+                          icon={
+                            <span className="text-[12px] font-bold uppercase">
+                              {(u.email || "?").charAt(0)}
                             </span>
-                            <span className="text-[12px] text-[var(--text-tertiary)] truncate">
-                              {u.email}
-                            </span>
-                          </div>
-                        </div>
-                      </td>
-                      <td className="px-5 py-3">
-                        <Badge tone={u.role === "admin" ? "brand" : "neutral"} icon={
-                          u.role === "admin" ? <Shield size={10} /> : <Eye size={10} />
-                        }>
-                          {u.role}
-                        </Badge>
-                      </td>
-                      <td className="px-5 py-3 text-[12.5px] text-[var(--text-tertiary)]">
+                          }
+                          title={u.name || u.email}
+                          subtitle={u.name ? u.email : undefined}
+                        />
+                      </Td>
+                      <Td><RolePill role={u.role} /></Td>
+                      <Td muted nowrap>
+                        <span className="inline-flex items-center gap-1.5">
+                          {u.role === "viewer" ? (
+                            <>
+                              <MapPin size={12} className="shrink-0" />
+                              {villages === 0
+                                ? "No villages"
+                                : `${villages} village${villages === 1 ? "" : "s"}`}
+                            </>
+                          ) : (
+                            <>
+                              {u.role === "admin" ? <Globe2 size={12} className="shrink-0" /> : <Wrench size={12} className="shrink-0" />}
+                              {r.access}
+                            </>
+                          )}
+                        </span>
+                      </Td>
+                      <Td muted nowrap>
                         {new Date(u.created_at).toLocaleDateString("en-AU", {
                           day: "numeric",
                           month: "short",
                           year: "numeric",
                         })}
-                      </td>
-                      <td className="px-5 py-3">
+                      </Td>
+                      <Td align="right">
                         <div className="flex items-center justify-end gap-1">
                           <IconButton
                             onClick={() => setEditTarget(u)}
                             size="sm"
                             title="Edit user"
+                            aria-label={`Edit ${u.email}`}
                           >
                             <Edit3 size={14} />
                           </IconButton>
-                          {u.email !== currentEmail ? (
+                          {/* You cannot delete yourself — the API refuses it, so
+                              the row says why rather than offering the button. */}
+                          {isSelf ? (
+                            <span className="text-[11.5px] text-[var(--fg-subtle)] italic px-2">
+                              you
+                            </span>
+                          ) : (
                             <IconButton
                               onClick={() => setDeleteTarget(u)}
                               size="sm"
                               title="Delete user"
+                              aria-label={`Delete ${u.email}`}
                               className="hover:text-[var(--brand)] hover:bg-[var(--brand-soft)]"
                             >
                               <Trash2 size={14} />
                             </IconButton>
-                          ) : (
-                            <span className="text-[11.5px] text-[var(--text-quaternary)] italic px-2">
-                              you
-                            </span>
                           )}
                         </div>
-                      </td>
+                      </Td>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </Panel>
-        )}
-      </div>
+                  );
+                })
+              )}
+            </tbody>
+          </DataTable>
+        </Panel>
+      )}
 
       {/* ----- Modals ----- */}
       {showCreate && (
@@ -235,7 +369,7 @@ export default function UsersPage() {
         onConfirm={handleDelete}
         onCancel={() => setDeleteTarget(null)}
       />
-    </div>
+    </PageShell>
   );
 }
 
@@ -335,7 +469,7 @@ function UserFormModal({ mode, user, onClose, onSaved }) {
 
       <form onSubmit={handleSubmit}>
         <Modal.Body>
-          <div className="flex flex-col gap-5">
+          <div className="flex flex-col gap-6">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <Field label="Name" htmlFor="u-name">
                 <Input
@@ -390,7 +524,7 @@ function UserFormModal({ mode, user, onClose, onSaved }) {
                     onClick={() => setShowPassword(!showPassword)}
                     tabIndex={-1}
                     aria-label={showPassword ? "Hide" : "Show"}
-                    className="h-7 w-7 inline-flex items-center justify-center rounded text-[var(--text-quaternary)] hover:text-[var(--text-secondary)] hover:bg-[var(--surface-hover)] focus-ring"
+                    className="h-7 w-7 inline-flex items-center justify-center rounded-full text-[var(--text-quaternary)] hover:text-[var(--text-secondary)] hover:bg-[var(--surface-hover)] focus-ring"
                   >
                     {showPassword ? <EyeOff size={13} /> : <Eye size={13} />}
                   </button>
@@ -400,7 +534,7 @@ function UserFormModal({ mode, user, onClose, onSaved }) {
                     tabIndex={-1}
                     title="Generate random password"
                     aria-label="Generate password"
-                    className="h-7 w-7 inline-flex items-center justify-center rounded text-[var(--text-quaternary)] hover:text-[var(--brand)] hover:bg-[var(--brand-soft)] focus-ring"
+                    className="h-7 w-7 inline-flex items-center justify-center rounded-full text-[var(--text-quaternary)] hover:text-[var(--brand)] hover:bg-[var(--brand-soft)] focus-ring"
                   >
                     <RefreshCw size={13} />
                   </button>
@@ -408,45 +542,30 @@ function UserFormModal({ mode, user, onClose, onSaved }) {
               </div>
             </Field>
 
+            {/* Role cards rather than a dropdown: the difference between these
+                three is what they are allowed to see, which needs a sentence. */}
             <Field label="Role" required>
-              <div className="grid grid-cols-2 gap-2">
-                {[
-                  {
-                    value: "viewer",
-                    label: "Viewer",
-                    desc: "Read-only access",
-                    icon: Eye,
-                  },
-                  {
-                    value: "admin",
-                    label: "Admin",
-                    desc: "Full administrative access",
-                    icon: Shield,
-                  },
-                  {
-                    value: "engineer",
-                    label: "Engineer",
-                    desc: "Field contractor. Files maintenance reports for any village and sees nothing else.",
-                    icon: Wrench,
-                  },
-                ].map((opt) => {
-                  const selected = form.role === opt.value;
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                {["viewer", "admin", "engineer"].map((value) => {
+                  const opt = ROLES[value];
+                  const selected = form.role === value;
                   const Icon = opt.icon;
                   return (
                     <button
-                      key={opt.value}
+                      key={value}
                       type="button"
-                      onClick={() => setField("role", opt.value)}
+                      onClick={() => setField("role", value)}
+                      aria-pressed={selected}
                       className={
-                        "flex items-start gap-3 text-left p-3 rounded-md border transition-colors " +
+                        "flex items-start gap-3 text-left p-3.5 rounded-xl border transition-all duration-150 " +
                         (selected
                           ? "border-[var(--brand)] bg-[var(--brand-soft)] shadow-[0_0_0_3px_var(--brand-soft)]"
-                          : "border-[var(--border-default)] bg-[var(--surface-raised)] hover:border-[var(--border-strong)] hover:bg-[var(--surface-hover)]")
+                          : "border-[var(--border-default)] bg-[var(--surface-raised)] hover:border-[var(--border-hover)] hover:bg-[var(--surface-hover)]")
                       }
                     >
                       <span
                         className={
-                          "shrink-0 h-8 w-8 rounded-md flex items-center justify-center mt-0.5 " +
+                          "shrink-0 h-8 w-8 rounded-[10px] flex items-center justify-center mt-0.5 " +
                           (selected
                             ? "bg-[var(--brand)] text-[var(--text-on-brand)]"
                             : "bg-[var(--surface-sunken)] text-[var(--text-tertiary)] border border-[var(--border-subtle)]")
@@ -454,10 +573,10 @@ function UserFormModal({ mode, user, onClose, onSaved }) {
                       >
                         <Icon size={14} />
                       </span>
-                      <div className="flex flex-col">
+                      <span className="flex flex-col min-w-0">
                         <span
                           className={
-                            "text-[13px] font-semibold " +
+                            "text-[13px] font-semibold font-display " +
                             (selected
                               ? "text-[var(--brand-fg-on-soft)]"
                               : "text-[var(--text-primary)]")
@@ -465,10 +584,10 @@ function UserFormModal({ mode, user, onClose, onSaved }) {
                         >
                           {opt.label}
                         </span>
-                        <span className="text-[11.5px] text-[var(--text-tertiary)]">
+                        <span className="text-[11.5px] text-[var(--text-tertiary)] leading-snug">
                           {opt.desc}
                         </span>
-                      </div>
+                      </span>
                     </button>
                   );
                 })}
@@ -488,53 +607,59 @@ function UserFormModal({ mode, user, onClose, onSaved }) {
                     No villages yet — add them under Network first.
                   </p>
                 ) : (
-                  <div className="max-h-52 overflow-y-auto rounded-md border border-[var(--border-default)] divide-y divide-[var(--border-subtle)]">
-                    {villages.map((v) => {
-                      const checked = form.villageIds.includes(v.id);
-                      return (
-                        <button
-                          key={v.id}
-                          type="button"
-                          onClick={() => toggleVillage(v.id)}
-                          className="w-full flex items-center gap-3 px-3 py-2 text-left hover:bg-[var(--surface-hover)] transition-colors"
-                        >
-                          <span
-                            className={
-                              "shrink-0 h-[18px] w-[18px] rounded flex items-center justify-center border transition-colors " +
-                              (checked
-                                ? "bg-[var(--brand)] border-[var(--brand)] text-[var(--text-on-brand)]"
-                                : "border-[var(--border-strong)] text-transparent")
-                            }
+                  <>
+                    <div className="max-h-52 overflow-y-auto rounded-xl border border-[var(--border-default)] divide-y divide-[var(--border-subtle)]">
+                      {villages.map((v) => {
+                        const checked = form.villageIds.includes(v.id);
+                        return (
+                          <button
+                            key={v.id}
+                            type="button"
+                            onClick={() => toggleVillage(v.id)}
+                            className="w-full flex items-center gap-3 px-3.5 py-2.5 text-left hover:bg-[var(--surface-hover)] transition-colors"
                           >
-                            <Check size={12} strokeWidth={3} />
-                          </span>
-                          <MapPin size={14} className="shrink-0 text-[var(--text-quaternary)]" />
-                          <span className="min-w-0 flex-1">
-                            <span className="block text-[12.5px] font-medium text-[var(--text-primary)] truncate">
-                              {v.name}
+                            <span
+                              className={
+                                "shrink-0 h-[18px] w-[18px] rounded-[5px] flex items-center justify-center border transition-colors " +
+                                (checked
+                                  ? "bg-[var(--brand)] border-[var(--brand)] text-[var(--text-on-brand)]"
+                                  : "border-[var(--border-strong)] text-transparent")
+                              }
+                            >
+                              <Check size={12} strokeWidth={3} />
                             </span>
-                            {v.hostname && (
-                              <span className="block text-[11px] font-mono text-[var(--text-tertiary)] truncate">
-                                {v.hostname}
+                            <MapPin size={14} className="shrink-0 text-[var(--text-quaternary)]" />
+                            <span className="min-w-0 flex-1">
+                              <span className="block text-[12.5px] font-medium text-[var(--text-primary)] truncate">
+                                {v.name}
                               </span>
-                            )}
-                          </span>
-                        </button>
-                      );
-                    })}
-                  </div>
+                              {v.hostname && (
+                                <span className="block text-[11px] font-mono text-[var(--text-tertiary)] truncate">
+                                  {v.hostname}
+                                </span>
+                              )}
+                            </span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                    <p className="mt-1.5 text-[11.5px] text-[var(--text-tertiary)] tabular-nums">
+                      {form.villageIds.length} of {villages.length} selected
+                    </p>
+                  </>
                 )}
               </Field>
             )}
 
             {err && (
               <div
+                role="alert"
                 className={
-                  "flex items-start gap-2 px-3 py-2.5 rounded-md " +
-                  "bg-[var(--danger-soft)] border border-[var(--brand-soft-hover)]"
+                  "flex items-start gap-2.5 px-3.5 py-3 rounded-xl " +
+                  "bg-[var(--danger-soft)] border border-[var(--danger-border)]"
                 }
               >
-                <span className="w-1.5 h-1.5 rounded-full bg-[var(--brand)] mt-[7px] shrink-0" />
+                <span className="w-1.5 h-1.5 rounded-full bg-[var(--danger-fg)] mt-[7px] shrink-0" />
                 <p className="text-[12.5px] text-[var(--danger-fg)] font-medium leading-relaxed">
                   {err}
                 </p>
@@ -546,14 +671,13 @@ function UserFormModal({ mode, user, onClose, onSaved }) {
         <Modal.Footer>
           <Button
             type="button"
-            variant="secondary"
-            size="sm"
+            variant="ghost"
             onClick={onClose}
             disabled={loading}
           >
             Cancel
           </Button>
-          <Button type="submit" variant="primary" size="sm" loading={loading}>
+          <Button type="submit" variant="primary" loading={loading}>
             {isEdit ? "Save changes" : "Create user"}
           </Button>
         </Modal.Footer>

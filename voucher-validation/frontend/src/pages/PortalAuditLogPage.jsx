@@ -1,23 +1,37 @@
 // src/pages/PortalAuditLogPage.jsx
-// Captive-portal audit log — payment, handshake, voucher, auth events.
+//
+// Captive-portal audit log — payment, handshake, voucher and auth events, in
+// the order they happened.
+//
+// This is a forensic page: someone is here because a customer says they paid
+// and got nothing. So it is a single list with the filters that narrow it in a
+// Toolbar above, and every row opens to the raw event payload underneath. The
+// detail stays inline rather than in a drawer, because the question is nearly
+// always "what did the row above this one say".
 
 import { useEffect, useState, useCallback } from "react";
 import toast from "react-hot-toast";
 import { format } from "date-fns";
 import { motion, AnimatePresence } from "framer-motion";
-import {
-  FileText,
-  Search,
-  Filter,
-  ChevronDown,
-  ChevronUp,
-  RotateCcw,
-  X,
-} from "lucide-react";
+import { FileText, ChevronDown, ChevronUp, RotateCcw, RefreshCw } from "lucide-react";
 
 import { portalAuditApi } from "../services/api";
 import Pagination from "../components/shared/Pagination";
-import { Badge, EmptyState, PageHeader, Panel } from "../components/ui";
+import {
+  Badge,
+  Button,
+  EmptyState,
+  PageHeader,
+  Panel,
+  PageShell,
+  Toolbar,
+  SearchInput,
+  Select,
+  Input,
+  DataTable,
+  Th,
+  Td,
+} from "../components/ui";
 
 const EVENT_TYPES = [
   "payment_initiated",
@@ -71,6 +85,13 @@ const EVENT_TONES = {
   system_error: "danger",
 };
 
+// Toolbar controls are 36px pills; the Field primitives default to 40px and a
+// small radius. Inline is the one override Tailwind's class ordering cannot
+// undo, so the filter strip stays a single height.
+const PILL = { height: 36, borderRadius: 999 };
+
+const COLUMNS = 9;
+
 function formatEventLabel(eventType) {
   return eventType
     .split("_")
@@ -88,16 +109,14 @@ function formatTimestamp(iso) {
 
 function JsonViewer({ data }) {
   if (!data || typeof data !== "object") {
-    return (
-      <span className="text-[11.5px] text-[var(--text-quaternary)]">No data</span>
-    );
+    return <span className="text-[11.5px] text-[var(--fg-muted)]">No data</span>;
   }
   return (
     <pre
       className={
         "text-[11px] leading-relaxed font-mono " +
-        "bg-[var(--surface-sunken)] border border-[var(--border-subtle)] " +
-        "text-[var(--text-secondary)] rounded-md p-3 overflow-x-auto max-h-80 " +
+        "bg-[var(--bg-elevated)] border border-[var(--border-subtle)] " +
+        "text-[var(--fg-secondary)] rounded-lg p-3 overflow-x-auto max-h-80 " +
         "whitespace-pre-wrap break-words"
       }
     >
@@ -160,193 +179,175 @@ export default function PortalAuditLogPage() {
   const toggleRow = (id) => setExpandedRow((p) => (p === id ? null : id));
 
   return (
-    <div className="p-4 sm:p-6 lg:p-8">
+    <PageShell>
       <PageHeader
         eyebrow="Portal"
         title="Portal Logs"
-        subtitle={`${total.toLocaleString()} events`}
-        icon={<FileText size={20} />}
+        subtitle={`${total.toLocaleString()} event${total !== 1 ? "s" : ""} — every payment, handshake, voucher and auth step the portal recorded.`}
+        icon={<FileText size={22} />}
+        tone="blue"
+        actions={
+          <Button variant="secondary" size="sm" onClick={fetchLogs} iconLeft={<RefreshCw size={14} />}>
+            Refresh
+          </Button>
+        }
       />
 
-      <div className="mt-6 space-y-4">
-        {/* Filters */}
-        <Panel
-          title="Filters"
-          icon={<Filter size={15} />}
-          actions={
-            hasFilters ? (
-              <button
-                onClick={clearFilters}
-                className="inline-flex items-center gap-1 text-[11.5px] text-[var(--accent)] hover:text-[var(--brand-hover)] transition-colors"
-              >
-                <RotateCcw size={11} /> Clear all
-              </button>
-            ) : null
-          }
+      <Toolbar>
+        <Select
+          value={eventType}
+          onChange={(e) => {
+            setEventType(e.target.value);
+            setPage(1);
+          }}
+          style={{ ...PILL, width: 210 }}
+          aria-label="Filter by event type"
         >
-          <div className="flex flex-wrap items-end gap-3">
-            <FilterField label="Event type">
-              <select
-                value={eventType}
-                onChange={(e) => {
-                  setEventType(e.target.value);
-                  setPage(1);
-                }}
-                className={filterClass()}
-              >
-                <option value="">All events</option>
-                {EVENT_TYPES.map((t) => (
-                  <option key={t} value={t}>
-                    {formatEventLabel(t)}
-                  </option>
-                ))}
-              </select>
-            </FilterField>
+          <option value="">All events</option>
+          {EVENT_TYPES.map((t) => (
+            <option key={t} value={t}>
+              {formatEventLabel(t)}
+            </option>
+          ))}
+        </Select>
 
-            <FilterSearch
-              label="Transaction ID"
-              placeholder="Search…"
-              value={transactionId}
-              onChange={(v) => {
-                setTransactionId(v);
-                setPage(1);
-              }}
-            />
+        <SearchInput
+          value={transactionId}
+          onChange={(e) => {
+            setTransactionId(e.target.value);
+            setPage(1);
+          }}
+          placeholder="Transaction ID…"
+          width="w-52"
+        />
 
-            <FilterSearch
-              label="Session ID"
-              placeholder="Search…"
-              value={sessionId}
-              onChange={(v) => {
-                setSessionId(v);
-                setPage(1);
-              }}
-            />
+        <SearchInput
+          value={sessionId}
+          onChange={(e) => {
+            setSessionId(e.target.value);
+            setPage(1);
+          }}
+          placeholder="Session ID…"
+          width="w-52"
+        />
 
-            <FilterField label="Start date">
-              <input
-                type="date"
-                value={startDate}
-                onChange={(e) => {
-                  setStartDate(e.target.value);
-                  setPage(1);
-                }}
-                className={filterClass()}
-              />
-            </FilterField>
+        <DateFilter
+          label="From"
+          value={startDate}
+          onChange={(v) => {
+            setStartDate(v);
+            setPage(1);
+          }}
+        />
+        <DateFilter
+          label="To"
+          value={endDate}
+          onChange={(v) => {
+            setEndDate(v);
+            setPage(1);
+          }}
+        />
 
-            <FilterField label="End date">
-              <input
-                type="date"
-                value={endDate}
-                onChange={(e) => {
-                  setEndDate(e.target.value);
-                  setPage(1);
-                }}
-                className={filterClass()}
-              />
-            </FilterField>
+        {hasFilters && (
+          <Button variant="ghost" size="sm" iconLeft={<RotateCcw size={13} />} onClick={clearFilters}>
+            Clear all
+          </Button>
+        )}
+      </Toolbar>
+
+      <Panel
+        title="Event log"
+        subtitle="Newest first. Open a row for the full payload."
+        icon={<FileText size={15} />}
+        tone="blue"
+        padding={false}
+      >
+        {loading ? (
+          <div className="p-5 space-y-2.5">
+            {Array.from({ length: 8 }).map((_, i) => (
+              <div key={i} className="h-10 rounded-lg skeleton" style={{ opacity: 1 - i * 0.09 }} />
+            ))}
           </div>
-        </Panel>
-
-        {/* Table */}
-        <Panel padding={false}>
-          {loading ? (
-            <div className="p-4 space-y-2">
-              {Array.from({ length: 8 }).map((_, i) => (
-                <div key={i} className="h-10 rounded skeleton" />
-              ))}
-            </div>
-          ) : logs.length === 0 ? (
-            <EmptyState
-              icon={FileText}
-              title="No audit events"
-              description={hasFilters ? "Try widening the filters." : "Events will appear as portal traffic flows."}
-            />
-          ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full text-[13px]">
-                <thead>
-                  <tr className="bg-[var(--bg-surface)] text-left text-label border-b border-[var(--border-default)]">
-                    <th className="px-3 py-2.5 w-8" />
-                    <th className="px-3 py-2.5">Timestamp</th>
-                    <th className="px-3 py-2.5">Event</th>
-                    <th className="px-3 py-2.5">Transaction</th>
-                    <th className="px-3 py-2.5">Plan</th>
-                    <th className="px-3 py-2.5">Voucher</th>
-                    <th className="px-3 py-2.5">Amount</th>
-                    <th className="px-3 py-2.5">Phone</th>
-                    <th className="px-3 py-2.5">Source</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-[var(--border-default)]">
-                  {logs.map((log) => (
-                    <LogRow
-                      key={log.id}
-                      log={log}
-                      isExpanded={expandedRow === log.id}
-                      onToggle={() => toggleRow(log.id)}
-                    />
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-
-          <Pagination
-            page={page}
-            totalPages={totalPages}
-            total={total}
-            onPageChange={setPage}
+        ) : logs.length === 0 ? (
+          <EmptyState
+            icon={FileText}
+            title="No audit events"
+            description={hasFilters ? "Try widening the filters." : "Events will appear as portal traffic flows."}
           />
-        </Panel>
-      </div>
-    </div>
+        ) : (
+          <DataTable>
+            <thead>
+              <tr>
+                <Th className="w-8" />
+                <Th>Timestamp</Th>
+                <Th>Event</Th>
+                <Th>Transaction</Th>
+                <Th>Plan</Th>
+                <Th>Voucher</Th>
+                <Th align="right">Amount</Th>
+                <Th>Phone</Th>
+                <Th>Source</Th>
+              </tr>
+            </thead>
+            <tbody>
+              {logs.map((log) => (
+                <LogRow
+                  key={log.id}
+                  log={log}
+                  isExpanded={expandedRow === log.id}
+                  onToggle={() => toggleRow(log.id)}
+                />
+              ))}
+            </tbody>
+          </DataTable>
+        )}
+
+        <Pagination page={page} totalPages={totalPages} total={total} onPageChange={setPage} />
+      </Panel>
+    </PageShell>
   );
 }
 
 function LogRow({ log, isExpanded, onToggle }) {
   return (
     <>
-      <tr
-        onClick={onToggle}
-        className="hover:bg-[var(--bg-surface)] cursor-pointer transition-colors"
-      >
-        <td className="px-3 py-2.5 text-[var(--text-quaternary)]">
-          {isExpanded ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
-        </td>
-        <td className="px-3 py-2.5 text-[12.5px] text-[var(--text-tertiary)] whitespace-nowrap">
+      <tr onClick={onToggle} className="cursor-pointer">
+        <Td>
+          {/* Colour on a child, not on Td: two text-colour utilities on one
+              element resolve by stylesheet order, which is not ours to pick. */}
+          <span className="text-[var(--fg-muted)]">
+            {isExpanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+          </span>
+        </Td>
+        <Td nowrap muted>
           {formatTimestamp(log.event_timestamp)}
-        </td>
-        <td className="px-3 py-2.5">
+        </Td>
+        <Td>
           <Badge tone={EVENT_TONES[log.event_type] || "neutral"}>
             {formatEventLabel(log.event_type)}
           </Badge>
-        </td>
-        <td className="px-3 py-2.5 font-mono text-[12px] text-[var(--brand-fg-on-soft)]">
-          {log.transaction_id || "—"}
-        </td>
-        <td className="px-3 py-2.5 text-[12px] text-[var(--text-secondary)]">
-          {log.plan_key || "—"}
-        </td>
-        <td className="px-3 py-2.5 font-mono text-[12px] text-[var(--text-primary)]">
+        </Td>
+        <Td mono nowrap>
+          <span className="text-[var(--brand-fg-on-soft)]">{log.transaction_id || "—"}</span>
+        </Td>
+        <Td nowrap>{log.plan_key || "—"}</Td>
+        <Td mono strong nowrap>
           {log.voucher_code || "—"}
-        </td>
-        <td className="px-3 py-2.5 text-[12px] font-mono text-[var(--text-secondary)] whitespace-nowrap">
+        </Td>
+        <Td align="right" nowrap className="tabular-nums">
           {log.amount != null ? `$${Number(log.amount).toFixed(2)}` : "—"}
-        </td>
-        <td className="px-3 py-2.5 text-[12px] font-mono text-[var(--text-secondary)]">
-          {log.customer_phone || "—"}
-        </td>
-        <td className="px-3 py-2.5 text-[12px] text-[var(--text-tertiary)]">
-          {log.source_system || "—"}
-        </td>
+        </Td>
+        <Td mono>{log.customer_phone || "—"}</Td>
+        <Td muted>{log.source_system || "—"}</Td>
       </tr>
 
       <AnimatePresence>
         {isExpanded && (
           <tr>
-            <td colSpan={9} className="p-0">
+            {/* sf-table pads every cell; the expansion supplies its own padding
+                and must sit flush, and inline is the only padding the table's
+                own rule cannot win back. */}
+            <td colSpan={COLUMNS} style={{ padding: 0 }}>
               <motion.div
                 initial={{ height: 0, opacity: 0 }}
                 animate={{ height: "auto", opacity: 1 }}
@@ -354,47 +355,28 @@ function LogRow({ log, isExpanded, onToggle }) {
                 transition={{ duration: 0.2 }}
                 className="overflow-hidden"
               >
-                <div className="px-6 py-4 bg-[var(--surface-sunken)] border-t border-[var(--border-subtle)]">
+                <div className="px-6 py-5 bg-[var(--bg-surface)] border-t border-[var(--border-subtle)]">
                   {log.event_data?.message && (
-                    <div
-                      className={
-                        "mb-4 p-3 rounded-md " +
-                        "bg-[var(--surface-raised)] border border-[var(--border-subtle)]"
-                      }
-                    >
-                      <span className="text-[12px] font-medium text-[var(--text-tertiary)] block mb-1">
-                        Summary
-                      </span>
-                      <p className="text-[13px] text-[var(--text-primary)]">
-                        {log.event_data.message}
-                      </p>
+                    <div className="mb-5 rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-elevated)] px-4 py-3">
+                      <span className="text-label block mb-1">Summary</span>
+                      <p className="text-[13px] text-[var(--fg-primary)]">{log.event_data.message}</p>
                     </div>
                   )}
 
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-x-6 gap-y-4 mb-5">
                     <DetailItem label="Event ID" value={log.id} />
                     <DetailItem label="Session ID" value={log.session_id} />
                     <DetailItem label="User Group ID" value={log.user_group_id} />
                     <DetailItem label="Source IP" value={log.source_ip} />
                     <DetailItem label="Client IP" value={log.event_data?.clientIp} />
                     <DetailItem label="User Agent" value={log.event_data?.userAgent} />
-                    <DetailItem
-                      label="Received at"
-                      value={formatTimestamp(log.received_at)}
-                    />
-                    <DetailItem
-                      label="Event timestamp"
-                      value={formatTimestamp(log.event_timestamp)}
-                    />
-                    {log.event_data?.error && (
-                      <DetailItem label="Error" value={log.event_data.error} />
-                    )}
+                    <DetailItem label="Received at" value={formatTimestamp(log.received_at)} />
+                    <DetailItem label="Event timestamp" value={formatTimestamp(log.event_timestamp)} />
+                    {log.event_data?.error && <DetailItem label="Error" value={log.event_data.error} />}
                   </div>
 
                   <div>
-                    <span className="text-[12px] font-medium text-[var(--text-tertiary)] block mb-2">
-                      Event data
-                    </span>
+                    <span className="text-label block mb-2">Event data</span>
                     <JsonViewer data={log.event_data} />
                   </div>
                 </div>
@@ -409,65 +391,26 @@ function LogRow({ log, isExpanded, onToggle }) {
 
 function DetailItem({ label, value }) {
   return (
-    <div>
-      <span className="text-[12px] font-medium text-[var(--text-tertiary)]">
-        {label}
-      </span>
-      <p className="text-[12.5px] text-[var(--text-secondary)] font-mono mt-0.5 break-all">
-        {value || "—"}
-      </p>
+    <div className="min-w-0">
+      <span className="text-label">{label}</span>
+      <p className="text-[12.5px] text-[var(--fg-secondary)] font-mono mt-1 break-all">{value || "—"}</p>
     </div>
   );
 }
 
-function FilterField({ label, children }) {
+/** A date bound in the Toolbar. The word carries the meaning; a stacked label
+ *  would make the strip two rows tall for no gain. */
+function DateFilter({ label, value, onChange }) {
   return (
-    <div className="flex flex-col gap-1">
-      <label className="text-[12px] font-medium text-[var(--text-tertiary)]">
-        {label}
-      </label>
-      {children}
-    </div>
-  );
-}
-
-function FilterSearch({ label, placeholder, value, onChange }) {
-  return (
-    <FilterField label={label}>
-      <div className="relative">
-        <Search
-          size={12}
-          className="absolute left-2.5 top-1/2 -translate-y-1/2 text-[var(--text-quaternary)] pointer-events-none"
-        />
-        <input
-          type="text"
-          placeholder={placeholder}
-          value={value}
-          onChange={(e) => onChange(e.target.value)}
-          className={
-            "h-8 pl-7 pr-7 text-[12.5px] rounded-md w-48 font-mono " +
-            "bg-[var(--input-bg)] border border-[var(--input-border)] " +
-            "text-[var(--text-primary)] placeholder:text-[var(--text-quaternary)] " +
-            "hover:border-[var(--input-border-hover)] focus-input"
-          }
-        />
-        {value && (
-          <button
-            onClick={() => onChange("")}
-            className="absolute right-2 top-1/2 -translate-y-1/2 text-[var(--text-quaternary)] hover:text-[var(--text-secondary)]"
-          >
-            <X size={11} />
-          </button>
-        )}
-      </div>
-    </FilterField>
-  );
-}
-
-function filterClass() {
-  return (
-    "h-8 px-3 text-[12.5px] rounded-md " +
-    "bg-[var(--input-bg)] border border-[var(--input-border)] " +
-    "text-[var(--text-primary)] hover:border-[var(--input-border-hover)] focus-input"
+    <label className="inline-flex items-center gap-2 font-display text-[11.5px] font-bold uppercase tracking-[0.07em] text-[var(--fg-muted)]">
+      {label}
+      <Input
+        type="date"
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        style={{ ...PILL, width: 152 }}
+        className="font-sans text-[12.5px] normal-case tracking-normal"
+      />
+    </label>
   );
 }

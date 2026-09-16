@@ -1,6 +1,12 @@
 // src/pages/dashboards/SiteDashboard.jsx
 // Per-village dashboard — shown when a village is selected in the switcher.
 // One village's live network health + voucher inventory, scoped by groupId.
+//
+// Deliberately the same page as the estate dashboard, minus the villages table
+// and plus this village's own network detail: same header, same four headline
+// KPIs, same revenue-trend-beside-plan-mix row, same analysis tabs. Switching
+// scope in the sidebar should feel like the page re-scoping, not like landing
+// on a different product — which is exactly how the two used to read.
 
 import { useEffect, useState, useCallback } from "react";
 import {
@@ -10,19 +16,26 @@ import {
 import {
   Gauge, ArrowLeft, RefreshCw, Wifi, WifiOff, Users, Radio, Activity,
   Ticket, Server, Cpu, Router as RouterIcon, DollarSign, TrendingUp,
+  HardDrive, PackageOpen, Database,
 } from "lucide-react";
 import { useSite } from "../../hooks/useSite";
 import { voucherApi, networkApi, portalConfigApi } from "../../services/api";
 import PlanBreakdown from "../../components/PlanBreakdown";
 import StarlinkPanel from "../../components/StarlinkPanel";
-import MonthlyBreakdown from "../../components/MonthlyBreakdown";
 import MonthPicker from "../../components/MonthPicker";
 import { useMonthlyBreakdown } from "../../hooks/useMonthlyBreakdown";
 import {
-  PageHeader, Button, StatCard, Panel, Badge, EmptyState,
+  hasSalesHistory, BreakdownEmpty,
+  RevenueTrendPanel, RevenuePlanMix, SalesTotals, RiskTotals,
+  SalesByHourPanel, SoldByPlanPanel, OutcomesPanel,
+} from "../../components/MonthlyBreakdown";
+import {
+  PageShell, PageHeader, KpiGrid, StatCard, Panel, Tabs, Button,
+  DataTable, Th, Td, RecordCell, StatusPill, EmptyState,
   SkeletonKpis, SkeletonCard,
-  CHART_COLORS, ChartTooltip, ChartGradient, useChartTheme,
-  ChartStat, LegendRow, axisX, axisY, gridProps, BAR_RADIUS, BAR_MAX_SIZE, BAR_CATEGORY_GAP,
+  CHART_COLORS, STATUS_COLORS, ChartTooltip, ChartGradient,
+  useChartTheme, ChartStat, LegendRow, LegendRows, DONUT, DonutCenter,
+  axisX, axisY, gridProps, BAR_RADIUS, BAR_MAX_SIZE, BAR_CATEGORY_GAP,
 } from "../../components/ui";
 
 const fmtBytes = (b) => {
@@ -41,15 +54,17 @@ const hourLabel = (t) => {
 };
 
 const DEVICE_ICON = { gateway: RouterIcon, ap: Wifi, switch: Server, other: Cpu };
+const DEVICE_TONE = { gateway: "indigo", ap: "teal", switch: "violet", other: "slate" };
 
 export default function SiteDashboard({ groupId, site }) {
   const { setActiveSiteId } = useSite();
-  // One month drives every historical figure on this page.
+  // One window drives every historical figure on this page.
   const mb = useMonthlyBreakdown(groupId);
   const ct = useChartTheme();
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [tab, setTab] = useState("sales");
 
   const load = useCallback(
     async (isRefresh = false) => {
@@ -98,22 +113,22 @@ export default function SiteDashboard({ groupId, site }) {
   const apTotal = health?.summary?.apTotal ?? overviewSite?.apsTotal ?? 0;
   const uptimePct = overviewSite?.uptimePct;
   const usageBytes = health?.usageBytes ?? overviewSite?.usageBytes;
+  const publicIp = overviewSite?.publicIp || health?.internet?.publicIp || "";
   const devices = health?.devices || [];
 
   const revenue = data?.revenue;
-  const revTrend = (revenue?.monthly || []).map((m) => ({
-    label: m.label,
-    revenue: Number(m.revenue || 0),
-    count: Number(m.count || 0),
-  }));
-  const hasRevenue = revenue && (revenue.totalCount > 0 || revenue.total > 0);
 
+  // Expired takes amber rather than STATUS_COLORS.expired: that token is slate,
+  // which is also the only sensible colour for Inactive, and two identical
+  // slices in one donut is not a chart.
   const statusData = [
-    { name: "Active", value: vActive, color: CHART_COLORS.emerald },
-    { name: "Unused", value: vUnused, color: CHART_COLORS.blue },
+    { name: "Active", value: vActive, color: STATUS_COLORS.active },
+    { name: "Unused", value: vUnused, color: STATUS_COLORS.unused },
     { name: "Expired", value: vExpired, color: CHART_COLORS.amber },
     { name: "Inactive", value: vInactive, color: CHART_COLORS.slate },
   ].filter((d) => d.value > 0);
+  const statusTotal = statusData.reduce((a, d) => a + d.value, 0);
+
   // Stacked composition per plan — bar height = total; segments show the split.
   const pkgBar = pkg
     .map((p) => ({
@@ -128,257 +143,343 @@ export default function SiteDashboard({ groupId, site }) {
     clients: p.clients,
   }));
 
+  const headerActions = (
+    <>
+      <MonthPicker state={mb} compact />
+      <Button variant="secondary" size="sm" iconLeft={<ArrowLeft size={14} />} onClick={() => setActiveSiteId(null)}>
+        All villages
+      </Button>
+      <Button
+        variant="ghost"
+        size="sm"
+        iconLeft={<RefreshCw size={14} className={refreshing ? "animate-spin" : ""} />}
+        onClick={() => load(true)}
+        disabled={refreshing}
+      >
+        Refresh
+      </Button>
+    </>
+  );
+
+  if (loading) {
+    return (
+      <PageShell>
+        <PageHeader
+          eyebrow="Village"
+          title={site?.name || "Village"}
+          subtitle={site?.hostname || (groupId ? `Ruijie group ${groupId}` : "")}
+          icon={<Gauge size={22} />}
+          tone="navy"
+          actions={headerActions}
+        />
+        <SkeletonKpis count={4} />
+        <div className="grid grid-cols-1 lg:grid-cols-[1.6fr_1fr] gap-5">
+          <SkeletonCard height="h-[400px]" />
+          <SkeletonCard height="h-[400px]" />
+        </div>
+      </PageShell>
+    );
+  }
+
+  const tabs = [
+    { value: "sales", label: "Sales" },
+    { value: "outcomes", label: "Outcomes" },
+    { value: "plans", label: "Plans" },
+    { value: "capacity", label: "Capacity" },
+    { value: "network", label: "Network" },
+  ];
+
   return (
-    <div className="p-4 sm:p-6 lg:p-8 animate-fade-up">
+    <PageShell>
       <PageHeader
         eyebrow="Village"
         title={site?.name || "Village"}
         subtitle={site?.hostname || (groupId ? `Ruijie group ${groupId}` : "")}
-        icon={<Gauge size={20} />}
-        actions={
-          <>
-            <MonthPicker state={mb} />
-            <Button variant="secondary" size="sm" iconLeft={<ArrowLeft size={14} />} onClick={() => setActiveSiteId(null)}>
-              All villages
-            </Button>
-            <Button
-              variant="ghost"
-              size="sm"
-              iconLeft={<RefreshCw size={14} className={refreshing ? "animate-spin" : ""} />}
-              onClick={() => load(true)}
-              disabled={refreshing}
-            >
-              Refresh
-            </Button>
-          </>
-        }
+        icon={<Gauge size={22} />}
+        tone="navy"
+        actions={headerActions}
       />
 
-      {loading ? (
-        <div className="mt-6 space-y-6">
-          <SkeletonKpis count={4} />
-          <SkeletonCard height="h-72" />
+      {/* Only shown when the link is actually down — the Network KPI already
+          says "Online" the rest of the time. */}
+      {internetUp === false && (
+        <div className="w-full flex items-center gap-3.5 px-4 py-3 rounded-xl border bg-[var(--danger-soft)] border-[var(--danger-border)] text-[var(--danger-fg)]">
+          <WifiOff size={17} className="shrink-0" />
+          <span className="flex-1 min-w-0">
+            <span className="block text-[13px] font-semibold font-display">This village has no internet</span>
+            <span className="block text-[12px] opacity-80">
+              The last collector snapshot could not reach the gateway. Customers cannot connect.
+            </span>
+          </span>
+        </div>
+      )}
+
+      {/* Four headline KPIs, the same four as the estate dashboard. Every other
+          figure lives in the tab it belongs to. */}
+      <KpiGrid cols={4}>
+        <StatCard
+          label={`Revenue · ${mb.label || "month"}`}
+          value={fmtMoney(mb.totals.revenue)}
+          icon={<DollarSign size={18} />}
+          color="accent"
+          sub={`${fmtNum(mb.totals.transactions || 0)} sale${mb.totals.transactions === 1 ? "" : "s"} · ${fmtMoney(mb.totals.avgSale)} avg`}
+        />
+        <StatCard
+          label="Vouchers sold"
+          value={fmtNum(mb.totals.sold || 0)}
+          icon={<TrendingUp size={18} />}
+          color="violet"
+          sub={`${fmtNum(mb.totals.customers || 0)} customers · ${mb.label || "month"}`}
+        />
+        <StatCard
+          label="Live users"
+          value={fmtNum(live)}
+          icon={<Users size={18} />}
+          color="blue"
+          sub={`${fmtNum(clients)} client${clients === 1 ? "" : "s"} on Wi-Fi`}
+        />
+        <StatCard
+          label="Network"
+          value={internetUp == null ? "Unknown" : internetUp ? "Online" : "Offline"}
+          icon={internetUp ? <Wifi size={18} /> : <WifiOff size={18} />}
+          color={internetUp == null ? "slate" : internetUp ? "emerald" : "rose"}
+          sub={uptimePct == null ? publicIp || "no uptime data" : `${uptimePct}% uptime · 24h`}
+        />
+      </KpiGrid>
+
+      {/* Same primary chart row as the estate dashboard. */}
+      {hasSalesHistory(mb) ? (
+        <div className="grid grid-cols-1 lg:grid-cols-[1.6fr_1fr] gap-5">
+          <RevenueTrendPanel state={mb} />
+          <RevenuePlanMix state={mb} />
         </div>
       ) : (
-        <div className="mt-6 space-y-6">
-          {/* KPI rail */}
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-            <StatCard
-              label="Internet"
-              value={internetUp == null ? "Unknown" : internetUp ? "Online" : "Offline"}
-              icon={internetUp ? <Wifi size={18} /> : <WifiOff size={18} />}
-              color={internetUp == null ? "slate" : internetUp ? "emerald" : "rose"}
-              sub={overviewSite?.publicIp || health?.internet?.publicIp || ""}
-            />
-            <StatCard label="Clients online" value={fmtNum(clients)} icon={<Users size={18} />} color="blue" />
-            <StatCard label="Access points" value={apTotal ? `${apOnline}/${apTotal}` : "—"} icon={<Radio size={18} />} color="violet" sub="online" />
-            <StatCard
-              label="Uptime 24h"
-              value={uptimePct == null ? "—" : `${uptimePct}%`}
-              icon={<Activity size={18} />}
-              color={uptimePct == null ? "slate" : uptimePct >= 99 ? "emerald" : uptimePct >= 90 ? "amber" : "rose"}
-            />
-          </div>
+        <Panel title="Sales" icon={<DollarSign size={15} />} tone="red">
+          <BreakdownEmpty />
+        </Panel>
+      )}
 
-          {/* Voucher stock — current inventory, deliberately NOT month-scoped:
-              "how many are left to sell" is a now question, not a July one. */}
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-            <StatCard label="Vouchers" value={fmtNum(vTotal)} icon={<Ticket size={18} />} color="accent" sub={`${fmtNum(vUnused)} left to sell`} />
-            <StatCard label="Sold" value={fmtNum(vSold)} icon={<Ticket size={18} />} color="violet" sub={vTotal ? `${Math.round((vSold / vTotal) * 100)}% of pool · ${fmtNum(vActive)} active` : "—"} />
-            <StatCard label="Live now" value={fmtNum(live)} icon={<Users size={18} />} color="amber" />
-            <StatCard label="Data used" value={fmtBytes(vDataUsedMb * 1024 * 1024)} icon={<Activity size={18} />} color="cyan" sub="all time, this village" />
-          </div>
+      {/* Starlink kit + data usage. Self-fetching and self-hiding: renders
+          nothing at all when this village has no Starlink configured. */}
+      {site?.id && <StarlinkPanel projectId={site.id} />}
 
-          {/* Sales rail — scoped to the month chosen in the header. The
-              labels say which month so a figure can never be mistaken for
-              all-time, which is exactly what the old "total" card was. */}
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-            <StatCard
-              label={`Revenue · ${mb.label || "month"}`}
-              value={fmtMoney(mb.totals.revenue)}
-              icon={<DollarSign size={18} />}
-              color="accent"
-              sub={`${fmtNum(mb.totals.transactions || 0)} sale${mb.totals.transactions === 1 ? "" : "s"}`}
-            />
-            <StatCard
-              label="Vouchers sold"
-              value={fmtNum(mb.totals.sold || 0)}
-              icon={<TrendingUp size={18} />}
-              color="emerald"
-              sub={`${fmtNum(mb.totals.customers || 0)} customers`}
-            />
-            <StatCard
-              label="Avg sale"
-              value={fmtMoney(mb.totals.avgSale)}
-              icon={<Activity size={18} />}
-              color="violet"
-            />
-            <StatCard
-              label="Got online"
-              value={`${mb.totals.connectedPct ?? 0}%`}
-              icon={<Wifi size={18} />}
-              color={(mb.totals.connectedPct ?? 0) >= 95 ? "emerald" : (mb.totals.connectedPct ?? 0) >= 80 ? "amber" : "rose"}
-              sub={`${fmtNum(mb.totals.connected || 0)} of ${fmtNum(mb.totals.transactions || 0)}`}
-            />
-          </div>
+      <div className="flex flex-col gap-5">
+        <Tabs tabs={tabs} value={tab} onChange={setTab} variant="underline" />
 
-          {/* Starlink kit + data usage. Self-fetching and self-hiding: renders
-              nothing at all when this village has no Starlink configured. */}
-          {site?.id && <StarlinkPanel projectId={site.id} />}
-
-          {/* Sales for a chosen month — replaces the old fixed 6-month
-              revenue bar, which could only ever show one window. */}
-          <MonthlyBreakdown state={mb} groupId={groupId} />
-
-          {/* Trend */}
-          <Panel title="Clients" subtitle="Last 24 hours" icon={<Activity size={15} />}>
-            {trendPts.length === 0 ? (
-              <EmptyState icon={Activity} title="No trend data yet" description="The monitor collects a sample every ~5 minutes." />
-            ) : (
-              <>
+        {tab === "sales" && (
+          <div className="flex flex-col gap-5">
+            <SalesTotals state={mb} />
+            <SalesByHourPanel state={mb} />
+            {/* All-time figures, scoped to this village by groupId. */}
+            {revenue && (
+              <Panel title="All-time revenue" subtitle="Every month on record for this village" icon={<DollarSign size={15} />} tone="red">
                 <ChartStat
-                  value={fmtNum(trendPts[trendPts.length - 1]?.clients ?? 0)}
-                  unit="online now"
-                  caption={`Peak ${fmtNum(Math.max(...trendPts.map((p) => p.clients || 0)))} in the last 24 hours`}
+                  value={fmtMoney(revenue.total)}
+                  unit="since launch"
+                  caption={`${fmtNum(revenue.totalCount || 0)} paid transactions across ${fmtNum((revenue.monthly || []).length)} month${(revenue.monthly || []).length === 1 ? "" : "s"}`}
                 />
-                <ResponsiveContainer width="100%" height={240}>
-                  <AreaChart data={trendPts} margin={{ top: 8, right: 8, left: -12, bottom: 0 }}>
-                    <defs><ChartGradient id="siteClients" color={CHART_COLORS.accent} /></defs>
-                    <CartesianGrid {...gridProps(ct)} />
-                    <XAxis dataKey="t" {...axisX(ct, { minTickGap: 24 })} />
-                    <YAxis {...axisY(ct, { width: 36 })} allowDecimals={false} />
-                    <Tooltip content={<ChartTooltip />} cursor={{ stroke: ct.axisLine }} />
-                    <Area type="monotone" dataKey="clients" name="Clients" stroke={CHART_COLORS.accent} strokeWidth={2} fill="url(#siteClients)" isAnimationActive={false} />
-                  </AreaChart>
-                </ResponsiveContainer>
-              </>
+              </Panel>
             )}
-          </Panel>
+          </div>
+        )}
 
-          {/* Vouchers + packages */}
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            <Panel title="Vouchers by status" icon={<Ticket size={15} />}>
-              {statusData.length === 0 ? (
-                <EmptyState icon={Ticket} title="No vouchers" description="This village has no vouchers yet." />
-              ) : (
-                <div className="flex items-center gap-5">
-                  {/* Donut with the total stated in the hole, so the chart
-                      answers "how many" without reading the legend. */}
-                  <div className="relative shrink-0" style={{ width: 168, height: 168 }}>
-                    <ResponsiveContainer width="100%" height="100%">
-                      <PieChart>
-                        <Pie data={statusData} dataKey="value" nameKey="name" innerRadius={58} outerRadius={82} paddingAngle={2} cornerRadius={6} isAnimationActive={false} stroke="none">
-                          {statusData.map((d, i) => <Cell key={i} fill={d.color} />)}
-                        </Pie>
-                        <Tooltip content={<ChartTooltip hideLabel />} />
-                      </PieChart>
-                    </ResponsiveContainer>
-                    <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
-                      <span className="text-2xl font-semibold text-[var(--fg-primary)] tabular-nums leading-none">
-                        {fmtNum(statusData.reduce((a, d) => a + d.value, 0))}
-                      </span>
-                      <span className="text-[10.5px] uppercase tracking-wider text-[var(--fg-muted)] mt-1">Vouchers</span>
-                    </div>
-                  </div>
-                  <div className="flex-1 min-w-0 space-y-2.5">
-                    {statusData.map((d) => (
-                      <LegendRow
-                        key={d.name}
-                        color={d.color}
-                        label={d.name}
-                        value={fmtNum(d.value)}
-                        total={statusData.reduce((a, x) => a + x.value, 0)}
-                      />
-                    ))}
-                  </div>
-                </div>
-              )}
-            </Panel>
+        {tab === "outcomes" && (
+          <div className="flex flex-col gap-5">
+            <RiskTotals state={mb} />
+            <OutcomesPanel state={mb} />
+          </div>
+        )}
 
-            <Panel title="By package" icon={<Ticket size={15} />}>
-              {pkgBar.length === 0 ? (
-                <EmptyState icon={Ticket} title="No packages" />
-              ) : (
-                <ResponsiveContainer width="100%" height={216}>
-                  <BarChart data={pkgBar} margin={{ top: 4, right: 8, left: -12, bottom: 0 }} barCategoryGap={BAR_CATEGORY_GAP}>
-                    <CartesianGrid {...gridProps(ct)} />
-                    <XAxis dataKey="name" {...axisX(ct, { tick: { fill: ct.axis, fontSize: 10 }, interval: 0, angle: -12, textAnchor: "end", height: 40 })} />
-                    <YAxis {...axisY(ct, { width: 32 })} allowDecimals={false} />
-                    <Tooltip content={<ChartTooltip />} cursor={{ fill: ct.cursor }} />
-                    <Bar dataKey="Active" stackId="a" fill={CHART_COLORS.emerald} radius={BAR_RADIUS} maxBarSize={BAR_MAX_SIZE} isAnimationActive={false} />
-                    <Bar dataKey="Expired" stackId="a" fill={CHART_COLORS.amber} radius={BAR_RADIUS} maxBarSize={BAR_MAX_SIZE} isAnimationActive={false} />
-                    <Bar dataKey="Left" stackId="a" fill={CHART_COLORS.accent} radius={BAR_RADIUS} maxBarSize={BAR_MAX_SIZE} isAnimationActive={false} />
-                  </BarChart>
-                </ResponsiveContainer>
-              )}
+        {tab === "plans" && (
+          <div className="flex flex-col gap-5">
+            <SoldByPlanPanel state={mb} />
+            <Panel
+              title="Plan breakdown"
+              subtitle="Sold · Active · Expired · Left · Data used — per voucher plan"
+              icon={<Ticket size={15} />}
+              tone="indigo"
+              padding={false}
+            >
+              <PlanBreakdown packages={pkg} formatQuota={(q) => fmtBytes(Number(q || 0) * 1024 * 1024)} />
             </Panel>
           </div>
+        )}
 
-          {/* Full plan breakdown — total / sold / active / expired / left / data used, per plan */}
-          <Panel title="Plan breakdown" subtitle="Sold · Active · Expired · Left · Data used — per voucher plan" icon={<Ticket size={15} />}>
-            <PlanBreakdown packages={pkg} formatQuota={(mb) => fmtBytes(Number(mb || 0) * 1024 * 1024)} color={CHART_COLORS.accent} />
-          </Panel>
+        {tab === "capacity" && (
+          <div className="flex flex-col gap-5">
+            {/* Voucher stock — current inventory, deliberately NOT window-scoped:
+                "how many are left to sell" is a now question, not a July one. */}
+            <KpiGrid cols={4}>
+              <StatCard label="Vouchers" value={fmtNum(vTotal)} icon={<Database size={18} />} color="indigo" sub={`${fmtNum(vUnused)} left to sell`} />
+              <StatCard label="Sold" value={fmtNum(vSold)} icon={<Ticket size={18} />} color="violet" sub={vTotal ? `${Math.round((vSold / vTotal) * 100)}% of pool · ${fmtNum(vActive)} active` : "—"} />
+              <StatCard label="Live now" value={fmtNum(live)} icon={<Users size={18} />} color="amber" sub="vouchers in use" />
+              <StatCard label="Data used" value={fmtBytes(vDataUsedMb * 1024 * 1024)} icon={<HardDrive size={18} />} color="cyan" sub="all time, this village" />
+            </KpiGrid>
 
-          {/* Devices */}
-          <Panel title="Network devices" subtitle={health ? `${devices.length} device${devices.length === 1 ? "" : "s"}` : "Live data unavailable"} icon={<Server size={15} />} padding={false}>
-            {devices.length === 0 ? (
-              <div className="p-5">
-                <EmptyState icon={Server} title={health ? "No devices reported" : "Couldn't reach Ruijie Cloud"} description={health ? "" : "The live device list is temporarily unavailable."} />
-              </div>
-            ) : (
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm">
+            <div className="grid grid-cols-1 lg:grid-cols-[1fr_1.4fr] gap-5">
+              <Panel title="Vouchers by status" subtitle="The whole pool for this village" icon={<Ticket size={15} />} tone="blue">
+                {statusData.length === 0 ? (
+                  <EmptyState icon={Ticket} title="No vouchers" description="This village has no vouchers yet." />
+                ) : (
+                  <>
+                    {/* Donut with the total stated in the hole, so the chart
+                        answers "how many" without reading the legend. */}
+                    <div className="relative mx-auto" style={{ width: 196, height: 196 }}>
+                      <ResponsiveContainer width="100%" height="100%">
+                        <PieChart>
+                          <Pie data={statusData} dataKey="value" nameKey="name" {...DONUT} isAnimationActive={false}>
+                            {statusData.map((d, i) => <Cell key={i} fill={d.color} />)}
+                          </Pie>
+                          <Tooltip content={<ChartTooltip hideLabel valueFormatter={fmtNum} />} />
+                        </PieChart>
+                      </ResponsiveContainer>
+                      <DonutCenter value={fmtNum(statusTotal)} label="Vouchers" />
+                    </div>
+                    <LegendRows>
+                      {statusData.map((d) => (
+                        <LegendRow key={d.name} color={d.color} label={d.name} value={fmtNum(d.value)} amount={d.value} total={statusTotal} />
+                      ))}
+                    </LegendRows>
+                  </>
+                )}
+              </Panel>
+
+              <Panel title="By package" subtitle="Active · Expired · Left, per plan" icon={<Ticket size={15} />} tone="teal">
+                {pkgBar.length === 0 ? (
+                  <EmptyState icon={PackageOpen} title="No packages" />
+                ) : (
+                  <>
+                    <ChartStat
+                      value={fmtNum(vTotal)}
+                      unit="vouchers"
+                      caption={`Across ${fmtNum(pkgBar.length)} plan${pkgBar.length === 1 ? "" : "s"}`}
+                    />
+                    <ResponsiveContainer width="100%" height={252}>
+                      <BarChart data={pkgBar} margin={{ top: 4, right: 8, left: -12, bottom: 0 }} barCategoryGap={BAR_CATEGORY_GAP}>
+                        <CartesianGrid {...gridProps(ct)} />
+                        <XAxis dataKey="name" {...axisX(ct, { tick: { fill: ct.axis, fontSize: 10 }, interval: 0, angle: -12, textAnchor: "end", height: 46 })} />
+                        <YAxis {...axisY(ct, { width: 32 })} allowDecimals={false} />
+                        <Tooltip content={<ChartTooltip valueFormatter={fmtNum} />} cursor={{ fill: ct.cursor }} />
+                        <Bar dataKey="Active" stackId="a" fill={STATUS_COLORS.active} radius={BAR_RADIUS} maxBarSize={BAR_MAX_SIZE} isAnimationActive={false} />
+                        <Bar dataKey="Expired" stackId="a" fill={CHART_COLORS.amber} radius={BAR_RADIUS} maxBarSize={BAR_MAX_SIZE} isAnimationActive={false} />
+                        <Bar dataKey="Left" stackId="a" fill={STATUS_COLORS.unused} radius={BAR_RADIUS} maxBarSize={BAR_MAX_SIZE} isAnimationActive={false} />
+                      </BarChart>
+                    </ResponsiveContainer>
+                    <LegendRows>
+                      <LegendRow color={STATUS_COLORS.active} label="Active" value={fmtNum(vActive)} amount={vActive} total={vTotal} />
+                      <LegendRow color={CHART_COLORS.amber} label="Expired" value={fmtNum(vExpired)} amount={vExpired} total={vTotal} />
+                      <LegendRow color={STATUS_COLORS.unused} label="Left to sell" value={fmtNum(vUnused)} amount={vUnused} total={vTotal} />
+                    </LegendRows>
+                  </>
+                )}
+              </Panel>
+            </div>
+          </div>
+        )}
+
+        {tab === "network" && (
+          <div className="flex flex-col gap-5">
+            <KpiGrid cols={4}>
+              <StatCard
+                label="Internet"
+                value={internetUp == null ? "Unknown" : internetUp ? "Online" : "Offline"}
+                icon={internetUp ? <Wifi size={18} /> : <WifiOff size={18} />}
+                color={internetUp == null ? "slate" : internetUp ? "emerald" : "rose"}
+                sub={publicIp}
+              />
+              <StatCard label="Clients online" value={fmtNum(clients)} icon={<Users size={18} />} color="blue" />
+              <StatCard label="Access points" value={apTotal ? `${apOnline}/${apTotal}` : "—"} icon={<Radio size={18} />} color="violet" sub="online" />
+              <StatCard
+                label="Uptime 24h"
+                value={uptimePct == null ? "—" : `${uptimePct}%`}
+                icon={<Activity size={18} />}
+                color={uptimePct == null ? "slate" : uptimePct >= 99 ? "emerald" : uptimePct >= 90 ? "amber" : "rose"}
+                sub={usageBytes == null ? "" : `${fmtBytes(usageBytes)} through the gateway`}
+              />
+            </KpiGrid>
+
+            <Panel title="Clients" subtitle="Last 24 hours" icon={<Activity size={15} />} tone="navy">
+              {trendPts.length === 0 ? (
+                <EmptyState icon={Activity} title="No trend data yet" description="The monitor collects a sample every ~5 minutes." />
+              ) : (
+                <>
+                  <ChartStat
+                    value={fmtNum(trendPts[trendPts.length - 1]?.clients ?? 0)}
+                    unit="online now"
+                    caption={`Peak ${fmtNum(Math.max(...trendPts.map((p) => p.clients || 0)))} in the last 24 hours`}
+                  />
+                  <ResponsiveContainer width="100%" height={260}>
+                    <AreaChart data={trendPts} margin={{ top: 8, right: 8, left: -12, bottom: 0 }}>
+                      <defs><ChartGradient id="siteClients" color={CHART_COLORS.blue} /></defs>
+                      <CartesianGrid {...gridProps(ct)} />
+                      <XAxis dataKey="t" {...axisX(ct, { minTickGap: 24 })} />
+                      <YAxis {...axisY(ct, { width: 36 })} allowDecimals={false} />
+                      <Tooltip content={<ChartTooltip valueFormatter={fmtNum} />} cursor={{ stroke: ct.axisLine }} />
+                      <Area type="monotone" dataKey="clients" name="Clients" stroke={CHART_COLORS.blue} strokeWidth={2} fill="url(#siteClients)" isAnimationActive={false} />
+                    </AreaChart>
+                  </ResponsiveContainer>
+                </>
+              )}
+            </Panel>
+
+            <Panel
+              title="Network devices"
+              subtitle={health ? `${devices.length} device${devices.length === 1 ? "" : "s"}` : "Live data unavailable"}
+              icon={<Server size={15} />}
+              tone="indigo"
+              padding={false}
+            >
+              {devices.length === 0 ? (
+                <div className="p-5">
+                  <EmptyState
+                    icon={Server}
+                    title={health ? "No devices reported" : "Couldn't reach Ruijie Cloud"}
+                    description={health ? "" : "The live device list is temporarily unavailable."}
+                  />
+                </div>
+              ) : (
+                <DataTable>
                   <thead>
-                    <tr className="text-left border-b border-[var(--border-default)]">
-                      <Th>Device</Th><Th>Type</Th><Th>Status</Th><Th>Clients</Th><Th>Model</Th><Th>IP</Th>
+                    <tr>
+                      <Th>Device</Th>
+                      <Th>Type</Th>
+                      <Th>Status</Th>
+                      <Th align="right">Clients</Th>
+                      <Th>Model</Th>
+                      <Th>IP</Th>
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-[var(--border-default)]">
+                  <tbody>
                     {devices.map((d, i) => {
                       const Icon = DEVICE_ICON[d.type] || Cpu;
                       return (
-                        <tr key={d.sn || i} className="hover:bg-[var(--bg-surface)]">
-                          <td className="px-4 py-3">
-                            <div className="flex items-center gap-2.5">
-                              <span className="text-[var(--fg-muted)]"><Icon size={15} /></span>
-                              <span className="font-medium text-[var(--fg-primary)] truncate">{d.name || d.sn}</span>
-                            </div>
-                          </td>
-                          <td className="px-4 py-3 capitalize text-[var(--fg-secondary)]">{d.type}</td>
-                          <td className="px-4 py-3">
-                            <Badge tone={d.online ? "success" : "danger"} dot>{d.online ? "Online" : "Offline"}</Badge>
-                          </td>
-                          <td className="px-4 py-3 tabular-nums text-[var(--fg-secondary)]">{d.clientCount ?? "—"}</td>
-                          <td className="px-4 py-3 text-[var(--fg-secondary)]">{d.model || "—"}</td>
-                          <td className="px-4 py-3 font-mono text-xs text-[var(--fg-muted)]">{d.mgmtIp || d.publicIp || "—"}</td>
+                        <tr key={d.sn || i}>
+                          <Td>
+                            <RecordCell
+                              tone={DEVICE_TONE[d.type] || "slate"}
+                              icon={<Icon size={14} />}
+                              title={d.name || d.sn}
+                              subtitle={d.sn && d.name ? d.sn : undefined}
+                              mono
+                            />
+                          </Td>
+                          <Td className="capitalize">{d.type}</Td>
+                          <Td>
+                            <StatusPill tone={d.online ? "success" : "danger"}>{d.online ? "Online" : "Offline"}</StatusPill>
+                          </Td>
+                          <Td align="right" className="tabular-nums">{d.clientCount ?? "—"}</Td>
+                          <Td>{d.model || "—"}</Td>
+                          <Td mono muted>{d.mgmtIp || d.publicIp || "—"}</Td>
                         </tr>
                       );
                     })}
                   </tbody>
-                </table>
-              </div>
-            )}
-          </Panel>
-        </div>
-      )}
-    </div>
-  );
-}
-
-function Th({ children }) {
-  return <th className="px-4 py-2.5 text-label font-medium">{children}</th>;
-}
-
-function RevenueTooltip({ active, payload, label }) {
-  if (!active || !payload?.length) return null;
-  const d = payload[0].payload || {};
-  return (
-    <div className="rounded-lg px-3 py-2 text-sm bg-[var(--bg-elevated)] border border-[var(--border-default)] shadow-[var(--shadow-card)]">
-      <p className="text-xs font-medium text-[var(--fg-muted)] mb-1">{label}</p>
-      <p className="font-semibold text-[var(--fg-primary)] tabular-nums">{fmtMoney(d.revenue)}</p>
-      <p className="mt-0.5 text-xs text-[var(--fg-muted)]">
-        {Number(d.count || 0).toLocaleString()} sale{Number(d.count) === 1 ? "" : "s"}
-      </p>
-    </div>
+                </DataTable>
+              )}
+            </Panel>
+          </div>
+        )}
+      </div>
+    </PageShell>
   );
 }

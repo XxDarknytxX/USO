@@ -1,9 +1,19 @@
 // src/pages/NetworkPage.jsx
+//
 // Network monitoring. A grid of named "projects" (each = a Ruijie Cloud
-// network); selecting one opens its topology (Internet → Gateway → APs)
-// with device health and all-around stats.
+// network); selecting one opens its topology (Internet → Gateway → APs) with
+// device health, and the village's Starlink usage where a kit is linked.
+//
+// Two layout decisions worth stating:
+//  • the grid keeps cards rather than becoming a table, because a village is a
+//    *place* and the record layout (tile, name, hostname, state) is how the rest
+//    of the console names one — but with thirty-odd of them a search/state
+//    filter strip is no longer optional.
+//  • the detail page used to stack three full-width boxes, so the device table
+//    pushed everything else off screen. Topology and Devices are now two views
+//    of one "Site health" panel; nothing was removed, it is one click away.
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useMemo } from "react";
 import toast from "react-hot-toast";
 import {
   Network,
@@ -18,26 +28,41 @@ import {
   Cpu,
   Users,
   Trash2,
+  Pencil,
   ChevronRight,
   AlertTriangle,
+  MapPin,
 } from "lucide-react";
 
 import { networkApi } from "../services/api";
 import { useAuth } from "../hooks/useAuth";
 import { useSite } from "../hooks/useSite";
+import StarlinkPanel from "../components/StarlinkPanel";
 import {
   Modal,
   Field,
   Input,
   Select,
+  Toggle,
   Button,
   IconButton,
   Badge,
-  Card,
   EmptyState,
+  PageShell,
   PageHeader,
+  KpiGrid,
   StatCard,
   Panel,
+  GlassCard,
+  ObjectTile,
+  Toolbar,
+  SearchInput,
+  Segmented,
+  StatusPill,
+  DataTable,
+  Th,
+  Td,
+  RecordCell,
 } from "../components/ui";
 
 export default function NetworkPage() {
@@ -47,7 +72,10 @@ export default function NetworkPage() {
   const [loading, setLoading] = useState(true);
   const [selected, setSelected] = useState(null); // project object
   const [showAdd, setShowAdd] = useState(false);
+  const [editing, setEditing] = useState(null);
   const [confirmDelete, setConfirmDelete] = useState(null);
+  const [q, setQ] = useState("");
+  const [stateFilter, setStateFilter] = useState("all");
 
   const loadProjects = useCallback(async () => {
     setLoading(true);
@@ -88,90 +116,135 @@ export default function NetworkPage() {
 
   // Follow the scope switcher: a single village → just that one; All Villages →
   // the configured scope set (Settings).
-  const shownProjects = projects.filter((p) => isInScope(p.id));
+  const shownProjects = useMemo(() => projects.filter((p) => isInScope(p.id)), [projects, isInScope]);
+
+  const activeCount = shownProjects.filter((p) => p.isActive).length;
+  const stateOptions = [
+    { value: "all", label: "All", count: shownProjects.length },
+    { value: "active", label: "Active", count: activeCount },
+    { value: "paused", label: "Paused", count: shownProjects.length - activeCount },
+  ];
+
+  const visible = useMemo(() => {
+    const needle = q.trim().toLowerCase();
+    return shownProjects.filter((p) => {
+      if (stateFilter === "active" && !p.isActive) return false;
+      if (stateFilter === "paused" && p.isActive) return false;
+      if (!needle) return true;
+      return (
+        String(p.name || "").toLowerCase().includes(needle) ||
+        String(p.hostname || "").toLowerCase().includes(needle) ||
+        String(p.ruijieGroupId || "").toLowerCase().includes(needle)
+      );
+    });
+  }, [shownProjects, q, stateFilter]);
 
   // ---- Detail view ----
   if (selected) {
-    return (
-      <ProjectDetail
-        project={selected}
-        onBack={() => setSelected(null)}
-      />
-    );
+    return <ProjectDetail project={selected} onBack={() => setSelected(null)} />;
   }
 
   // ---- Project grid ----
   return (
-    <div className="p-4 sm:p-6 lg:p-8">
+    <PageShell>
       <PageHeader
         eyebrow="Infrastructure"
         title="Network"
         subtitle={`${shownProjects.length} of ${projects.length} project${projects.length !== 1 ? "s" : ""} · device health refreshed every ~5 min`}
-        icon={<Network size={20} />}
+        icon={<Network size={22} />}
+        tone="navy"
         actions={
           isAdmin && (
-            <Button
-              variant="primary"
-              size="md"
-              onClick={() => setShowAdd(true)}
-              iconLeft={<Plus size={14} />}
-            >
+            <Button variant="primary" size="md" onClick={() => setShowAdd(true)} iconLeft={<Plus size={14} />}>
               Add project
             </Button>
           )
         }
       />
 
-      <div className="mt-6">
-        {loading ? (
-          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-            {Array.from({ length: 3 }).map((_, i) => (
-              <div key={i} className="h-36 rounded-lg skeleton" />
-            ))}
-          </div>
-        ) : projects.length === 0 ? (
-          <div className="rounded-lg bg-[var(--surface-raised)] border border-[var(--border-default)]">
-            <EmptyState
-              icon={Network}
-              title="No projects yet"
-              description="Add a project to monitor its access points, gateway, and internet health."
-              action={
-                isAdmin && (
-                  <Button variant="primary" size="sm" onClick={() => setShowAdd(true)} iconLeft={<Plus size={13} />}>
-                    Add project
-                  </Button>
-                )
-              }
+      {!loading && projects.length > 0 && shownProjects.length > 0 && (
+        <Toolbar>
+          <SearchInput value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search villages…" />
+          <Segmented options={stateOptions} value={stateFilter} onChange={setStateFilter} size="sm" />
+          <span className="ml-auto text-[12px] text-[var(--fg-muted)] tabular-nums">
+            {visible.length} shown
+          </span>
+        </Toolbar>
+      )}
+
+      {loading ? (
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+          {Array.from({ length: 6 }).map((_, i) => (
+            <div key={i} className="h-[132px] rounded-xl skeleton" />
+          ))}
+        </div>
+      ) : projects.length === 0 ? (
+        <Panel padding={false}>
+          <EmptyState
+            icon={Network}
+            title="No projects yet"
+            description="Add a project to monitor its access points, gateway, and internet health."
+            action={
+              isAdmin && (
+                <Button variant="primary" size="sm" onClick={() => setShowAdd(true)} iconLeft={<Plus size={13} />}>
+                  Add project
+                </Button>
+              )
+            }
+          />
+        </Panel>
+      ) : shownProjects.length === 0 ? (
+        <Panel padding={false}>
+          <EmptyState
+            icon={Network}
+            title="No villages in scope"
+            description="Pick a village in the scope switcher, or adjust the All Villages scope in Settings."
+          />
+        </Panel>
+      ) : visible.length === 0 ? (
+        <Panel padding={false}>
+          <EmptyState
+            icon={Network}
+            title="No village matches"
+            description="Clear the search, or switch the state filter back to All."
+            action={
+              <Button variant="secondary" size="sm" onClick={() => { setQ(""); setStateFilter("all"); }}>
+                Clear filters
+              </Button>
+            }
+          />
+        </Panel>
+      ) : (
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+          {visible.map((p) => (
+            <ProjectCard
+              key={p.id}
+              project={p}
+              isAdmin={isAdmin}
+              onOpen={() => setSelected(p)}
+              onEdit={() => setEditing(p)}
+              onDelete={() => setConfirmDelete(p)}
             />
-          </div>
-        ) : shownProjects.length === 0 ? (
-          <div className="rounded-lg bg-[var(--surface-raised)] border border-[var(--border-default)]">
-            <EmptyState
-              icon={Network}
-              title="No villages in scope"
-              description="Pick a village in the scope switcher, or adjust the All Villages scope in Settings."
-            />
-          </div>
-        ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-            {shownProjects.map((p) => (
-              <ProjectCard
-                key={p.id}
-                project={p}
-                isAdmin={isAdmin}
-                onOpen={() => setSelected(p)}
-                onDelete={() => setConfirmDelete(p)}
-              />
-            ))}
-          </div>
-        )}
-      </div>
+          ))}
+        </div>
+      )}
 
       {showAdd && (
-        <AddProjectModal
+        <ProjectFormModal
           onClose={() => setShowAdd(false)}
           onSaved={() => {
             setShowAdd(false);
+            loadProjects();
+          }}
+        />
+      )}
+
+      {editing && (
+        <ProjectFormModal
+          project={editing}
+          onClose={() => setEditing(null)}
+          onSaved={() => {
+            setEditing(null);
             loadProjects();
           }}
         />
@@ -196,71 +269,82 @@ export default function NetworkPage() {
           </Modal.Footer>
         </Modal>
       )}
-    </div>
+    </PageShell>
   );
 }
 
 /* ------------ Project card ------------------------------------------------ */
-function ProjectCard({ project, isAdmin, onOpen, onDelete }) {
+// The whole card is one button so the card is reachable from the keyboard; the
+// admin controls sit outside it, because a button inside a button is invalid
+// markup and swallows the click.
+function ProjectCard({ project, isAdmin, onOpen, onEdit, onDelete }) {
   return (
-    <Card className="group hover:border-[var(--border-hover)] hover:shadow-[var(--shadow-card-hover)] transition-all cursor-pointer relative">
+    <GlassCard padding={false} className="group relative">
       <button
         onClick={onOpen}
-        className="w-full text-left p-5 focus-ring rounded-lg"
+        className="w-full text-left p-5 focus-ring rounded-xl"
         aria-label={`Open ${project.name}`}
       >
         <div className="flex items-start gap-3">
-          <span className="shrink-0 h-10 w-10 rounded-lg inline-flex items-center justify-center bg-[var(--accent)]/10 text-[var(--accent)] border border-[var(--accent)]/15">
-            <Globe size={18} />
-          </span>
+          <ObjectTile tone="navy" size="md">
+            <MapPin size={18} />
+          </ObjectTile>
           <div className="min-w-0 flex-1">
-            <h3 className="text-[14px] font-semibold text-[var(--fg-primary)] tracking-tight truncate">
+            <h3 className="font-display text-[15px] font-bold tracking-tight text-[var(--fg-primary)] truncate">
               {project.name}
             </h3>
-            {project.hostname && (
-              <p className="text-[12px] text-[var(--fg-muted)] font-mono truncate">
-                {project.hostname}
-              </p>
-            )}
+            <p className="text-[12px] text-[var(--fg-muted)] font-mono truncate mt-0.5">
+              {project.hostname || "no portal hostname"}
+            </p>
           </div>
           <ChevronRight
             size={16}
-            className="text-[var(--fg-muted)] group-hover:text-[var(--accent)] transition-colors shrink-0 mt-1"
+            className="text-[var(--fg-muted)] group-hover:text-[var(--brand)] transition-colors shrink-0 mt-1"
           />
         </div>
 
-        <div className="flex items-center gap-2 mt-4">
+        <div className="flex items-center gap-2 mt-4 pt-3.5 border-t border-[var(--border-subtle)]">
+          <StatusPill tone={project.isActive ? "success" : "neutral"}>
+            {project.isActive ? "Active" : "Paused"}
+          </StatusPill>
           <Badge tone="neutral" icon={<Cpu size={10} />}>
             Group {project.ruijieGroupId || "—"}
           </Badge>
-          {project.isActive ? (
-            <Badge tone="success">Active</Badge>
-          ) : (
-            <Badge tone="neutral">Paused</Badge>
-          )}
         </div>
       </button>
 
       {isAdmin && (
-        <div className="absolute top-3 right-3 opacity-0 group-hover:opacity-100 transition-opacity">
+        <div className="absolute top-3.5 right-3.5 flex items-center gap-1 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity">
+          <IconButton
+            size="sm"
+            title="Edit site"
+            aria-label={`Edit ${project.name}`}
+            onClick={(e) => {
+              e.stopPropagation();
+              onEdit();
+            }}
+          >
+            <Pencil size={14} />
+          </IconButton>
           <IconButton
             size="sm"
             title="Remove project"
+            aria-label={`Remove ${project.name}`}
             onClick={(e) => {
               e.stopPropagation();
               onDelete();
             }}
-            className="hover:text-[var(--accent)] hover:bg-[var(--accent)]/10"
+            className="hover:text-[var(--danger-fg)] hover:bg-[var(--danger-soft)]"
           >
             <Trash2 size={14} />
           </IconButton>
         </div>
       )}
-    </Card>
+    </GlassCard>
   );
 }
 
-/* ------------ Add project modal ------------------------------------------ */
+/* ------------ Add / edit project modal ------------------------------------ */
 // Village portals are served at <slug>.vodafonefiji.cloud (matches the hosts in
 // deploy/sites.json). Derive that default from the site name so admins don't
 // have to retype it for every village.
@@ -274,19 +358,22 @@ function deriveHostname(name) {
   return slug ? `${slug}.${PORTAL_DOMAIN}` : "";
 }
 
-function AddProjectModal({ onClose, onSaved }) {
+function ProjectFormModal({ project = null, onClose, onSaved }) {
+  const isEdit = !!project;
   const [form, setForm] = useState({
-    name: "",
-    hostname: "",
-    ruijieGroupId: "",
-    ruijieTenantId: "",
+    name: project?.name || "",
+    hostname: project?.hostname || "",
+    ruijieGroupId: project?.ruijieGroupId ? String(project.ruijieGroupId) : "",
+    ruijieTenantId: project?.ruijieTenantId ? String(project.ruijieTenantId) : "",
+    isActive: project ? project.isActive !== false : true,
   });
   const [saving, setSaving] = useState(false);
   const [discovered, setDiscovered] = useState([]);
   const [discovering, setDiscovering] = useState(false);
   // Tracks whether the admin has manually edited the hostname. Until they do,
   // the hostname auto-follows the site name; clearing it re-arms the default.
-  const [hostnameEdited, setHostnameEdited] = useState(false);
+  // An existing site starts "edited" so renaming never silently moves its host.
+  const [hostnameEdited, setHostnameEdited] = useState(!!project?.hostname);
   const set = (k, v) => setForm((p) => ({ ...p, [k]: v }));
 
   function onNameChange(value) {
@@ -335,8 +422,13 @@ function AddProjectModal({ onClose, onSaved }) {
     }
     setSaving(true);
     try {
-      await networkApi.createProject(form);
-      toast.success("Site added");
+      if (isEdit) {
+        await networkApi.updateProject(project.id, form);
+        toast.success("Site updated");
+      } else {
+        await networkApi.createProject(form);
+        toast.success("Site added");
+      }
       onSaved();
     } catch (err) {
       toast.error(err.message);
@@ -348,15 +440,15 @@ function AddProjectModal({ onClose, onSaved }) {
   return (
     <Modal open onClose={onClose} width="md">
       <Modal.Header
-        eyebrow="New site"
-        title="Add a site (village)"
+        eyebrow={isEdit ? "Edit site" : "New site"}
+        title={isEdit ? `Edit ${project.name}` : "Add a site (village)"}
         subtitle="Each site maps a named village to a Ruijie project (group) — its vouchers and devices are scoped to it."
         icon={Network}
         onClose={onClose}
       />
       <form onSubmit={submit}>
         <Modal.Body>
-          <div className="flex flex-col gap-4">
+          <div className="flex flex-col gap-5">
             <Field
               label="Discover from Ruijie"
               hint={
@@ -394,6 +486,9 @@ function AddProjectModal({ onClose, onSaved }) {
                 </Select>
               </div>
             </Field>
+
+            <div className="h-px bg-[var(--border-subtle)]" />
+
             <Field label="Site name" required hint="The village name shown in the switcher, e.g. “Nadi Village”.">
               <Input value={form.name} onChange={(e) => onNameChange(e.target.value)} placeholder="Nadi Village" />
             </Field>
@@ -423,6 +518,17 @@ function AddProjectModal({ onClose, onSaved }) {
                 />
               </Field>
             </div>
+
+            {/* Only on edit: a new site is always created active, and offering
+                the switch up front would just be a field to skip. */}
+            {isEdit && (
+              <Toggle
+                checked={form.isActive}
+                onChange={(v) => set("isActive", v)}
+                label="Active"
+                hint="Paused sites stay listed but are skipped by the background health collector."
+              />
+            )}
           </div>
         </Modal.Body>
         <Modal.Footer>
@@ -430,7 +536,7 @@ function AddProjectModal({ onClose, onSaved }) {
             Cancel
           </Button>
           <Button type="submit" variant="primary" size="sm" loading={saving}>
-            Add site
+            {isEdit ? "Save changes" : "Add site"}
           </Button>
         </Modal.Footer>
       </form>
@@ -453,6 +559,7 @@ function ProjectDetail({ project, onBack }) {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [view, setView] = useState("topology");
 
   const load = useCallback(
     async (isRefresh = false) => {
@@ -481,9 +588,10 @@ function ProjectDetail({ project, onBack }) {
   const s = data?.summary;
   const internet = data?.internet;
   const topo = data?.topology;
+  const devices = data?.devices || [];
 
   return (
-    <div className="p-4 sm:p-6 lg:p-8">
+    <PageShell>
       <PageHeader
         eyebrow={`Network · ${project.name}`}
         title={project.hostname || project.name}
@@ -492,15 +600,11 @@ function ProjectDetail({ project, onBack }) {
             ? `Access points, gateway, and internet health · updated ${relTime(data.collectedAt)}`
             : "Access points, gateway, and internet health."
         }
-        icon={<Globe size={20} />}
+        icon={<Globe size={22} />}
+        tone="navy"
         actions={
           <>
-            <Button
-              variant="ghost"
-              size="md"
-              onClick={onBack}
-              iconLeft={<ArrowLeft size={14} />}
-            >
+            <Button variant="ghost" size="md" onClick={onBack} iconLeft={<ArrowLeft size={14} />}>
               Back
             </Button>
             <Button
@@ -516,78 +620,104 @@ function ProjectDetail({ project, onBack }) {
         }
       />
 
-      <div className="mt-6 space-y-6">
-        {loading ? (
-          <div className="space-y-6">
-            <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
-              {Array.from({ length: 5 }).map((_, i) => (
-                <div key={i} className="h-20 rounded-lg skeleton" />
-              ))}
-            </div>
-            <div className="h-64 rounded-lg skeleton" />
-          </div>
-        ) : (
-          <>
-            {/* Notice when device scope/data is unavailable */}
-            {data && !data.cloudSync && (
-              <div className="flex items-start gap-2.5 px-4 py-3 rounded-lg bg-[var(--warning-soft)] border border-transparent">
-                <AlertTriangle size={15} className="text-[var(--warning-fg)] mt-0.5 shrink-0" />
-                <div className="text-[12.5px] text-[var(--warning-fg)]">
-                  <span className="font-semibold">No live device data.</span>{" "}
-                  {data.notice ||
-                    "The device API may not be enabled for this Ruijie app, or no devices are reporting."}
-                </div>
+      {loading ? (
+        <>
+          <KpiGrid cols={5}>
+            {Array.from({ length: 5 }).map((_, i) => (
+              <div key={i} className="h-[104px] rounded-xl skeleton" />
+            ))}
+          </KpiGrid>
+          <div className="h-80 rounded-xl skeleton" />
+        </>
+      ) : (
+        <>
+          {/* Notice when device scope/data is unavailable */}
+          {data && !data.cloudSync && (
+            <div className="flex items-start gap-2.5 px-4 py-3 rounded-xl bg-[var(--warning-soft)] border border-[var(--warning-border)]">
+              <AlertTriangle size={15} className="text-[var(--warning-fg)] mt-0.5 shrink-0" />
+              <div className="text-[12.5px] text-[var(--warning-fg)] leading-relaxed">
+                <span className="font-semibold font-display">No live device data.</span>{" "}
+                {data.notice ||
+                  "The device API may not be enabled for this Ruijie app, or no devices are reporting."}
               </div>
-            )}
-
-            {/* Stat tiles */}
-            <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
-              <StatTile
-                icon={<Cloud size={14} />}
-                label="Internet"
-                value={internet?.up == null ? "Unknown" : internet.up ? "Up" : "Down"}
-                tone={internet?.up == null ? "neutral" : internet.up ? "success" : "danger"}
-                sub={internet?.publicIp || "no public IP"}
-              />
-              <StatTile
-                icon={<Router size={14} />}
-                label="Gateway"
-                value={`${s?.gatewayOnline ?? 0} / ${s?.gatewayTotal ?? 0}`}
-                tone={s?.gatewayTotal ? (s.gatewayOnline === s.gatewayTotal ? "success" : "warning") : "neutral"}
-                sub="online"
-              />
-              <StatTile
-                icon={<Wifi size={14} />}
-                label="Access points"
-                value={`${s?.apOnline ?? 0} / ${s?.apTotal ?? 0}`}
-                tone={s?.apTotal ? (s.apOnline === s.apTotal ? "success" : "warning") : "neutral"}
-                sub="online"
-              />
-              <StatTile
-                icon={<Server size={14} />}
-                label="All devices"
-                value={`${s?.onlineDevices ?? 0} / ${s?.totalDevices ?? 0}`}
-                tone={s?.totalDevices ? (s.offlineDevices === 0 ? "success" : "warning") : "neutral"}
-                sub="online"
-              />
-              <StatTile
-                icon={<Users size={14} />}
-                label="Clients"
-                value={(s?.clients ?? 0).toLocaleString()}
-                tone="brand"
-                sub="connected"
-              />
             </div>
+          )}
 
-            {/* Topology */}
-            <Topology internet={internet} topo={topo} />
+          {/* Five tiles, not four: each is a different piece of kit, so none of
+              them restates another. */}
+          <KpiGrid cols={5}>
+            <StatTile
+              icon={<Cloud size={18} />}
+              label="Internet"
+              value={internet?.up == null ? "Unknown" : internet.up ? "Up" : "Down"}
+              tone={internet?.up == null ? "neutral" : internet.up ? "success" : "danger"}
+              sub={internet?.publicIp || "no public IP"}
+            />
+            <StatTile
+              icon={<Router size={18} />}
+              label="Gateway"
+              value={`${s?.gatewayOnline ?? 0} / ${s?.gatewayTotal ?? 0}`}
+              tone={s?.gatewayTotal ? (s.gatewayOnline === s.gatewayTotal ? "success" : "warning") : "neutral"}
+              sub="online"
+            />
+            <StatTile
+              icon={<Wifi size={18} />}
+              label="Access points"
+              value={`${s?.apOnline ?? 0} / ${s?.apTotal ?? 0}`}
+              tone={s?.apTotal ? (s.apOnline === s.apTotal ? "success" : "warning") : "neutral"}
+              sub="online"
+            />
+            <StatTile
+              icon={<Server size={18} />}
+              label="All devices"
+              value={`${s?.onlineDevices ?? 0} / ${s?.totalDevices ?? 0}`}
+              tone={s?.totalDevices ? (s.offlineDevices === 0 ? "success" : "warning") : "neutral"}
+              sub="online"
+            />
+            <StatTile
+              icon={<Users size={18} />}
+              label="Clients"
+              value={(s?.clients ?? 0).toLocaleString()}
+              tone="brand"
+              sub="connected"
+            />
+          </KpiGrid>
 
-            {/* Device table */}
-            <DeviceTable devices={data?.devices || []} />
-          </>
-        )}
-      </div>
-    </div>
+          <Panel
+            title="Site health"
+            subtitle={
+              view === "topology"
+                ? "Internet → gateway → access points"
+                : `${devices.length} device${devices.length === 1 ? "" : "s"} reported by Ruijie Cloud`
+            }
+            icon={<Network size={15} />}
+            tone="navy"
+            padding={view === "topology"}
+            actions={
+              <Segmented
+                size="sm"
+                value={view}
+                onChange={setView}
+                options={[
+                  { value: "topology", label: "Topology" },
+                  { value: "devices", label: "Devices", count: devices.length },
+                ]}
+              />
+            }
+          >
+            {view === "topology" ? (
+              <Topology internet={internet} topo={topo} />
+            ) : (
+              <DeviceTable devices={devices} />
+            )}
+          </Panel>
+
+          {/* Self-hiding: renders nothing unless this village has a Starlink
+              service line linked in Settings. */}
+          {project?.id && <StarlinkPanel projectId={project.id} />}
+        </>
+      )}
+    </PageShell>
   );
 }
 
@@ -601,136 +731,114 @@ const STAT_TONE_COLOR = {
 };
 
 function StatTile({ icon, label, value, sub, tone = "neutral" }) {
-  return (
-    <StatCard
-      icon={icon}
-      label={label}
-      value={value}
-      sub={sub}
-      color={STAT_TONE_COLOR[tone] || "slate"}
-    />
-  );
+  return <StatCard icon={icon} label={label} value={value} sub={sub} color={STAT_TONE_COLOR[tone] || "slate"} />;
 }
 
 /* ------------ Topology (Internet → Gateway → APs) ------------------------ */
+// Drawn as labelled tiers rather than an undifferentiated stack of boxes: with
+// no captions, a row of nine identical cards gave no clue whether you were
+// looking at gateways, APs or switches.
 function Topology({ internet, topo }) {
   const gateways = topo?.gateways || [];
   const aps = topo?.aps || [];
   const switches = topo?.switches || [];
 
   return (
-    <Panel title="Topology" icon={<Network size={15} />}>
-      <div className="flex flex-col items-center pt-1">
-        {/* Internet */}
+    <div className="flex flex-col items-center py-2">
+      <Tier label="Internet">
         <TopoNode
           icon={<Cloud size={18} />}
           label="Internet"
           sub={internet?.publicIp || "WAN"}
           state={internet?.up == null ? "unknown" : internet.up ? "up" : "down"}
         />
-        <Connector />
+      </Tier>
 
-        {/* Gateways */}
+      <Connector />
+
+      <Tier label="Gateway" count={gateways.length || null}>
         {gateways.length > 0 ? (
-          <div className="flex flex-wrap items-start justify-center gap-4">
-            {gateways.map((g) => (
-              <TopoNode
-                key={g.sn}
-                icon={<Router size={18} />}
-                label={g.name}
-                sub={g.model}
-                state={g.online ? "up" : "down"}
-              />
-            ))}
-          </div>
+          gateways.map((g) => (
+            <TopoNode key={g.sn} icon={<Router size={18} />} label={g.name} sub={g.model} state={g.online ? "up" : "down"} />
+          ))
         ) : (
           <TopoNode icon={<Router size={18} />} label="No gateway" sub="—" state="unknown" muted />
         )}
+      </Tier>
 
-        <Connector />
+      <Connector />
 
-        {/* Access points */}
+      <Tier label="Access points" count={aps.length || null}>
         {aps.length > 0 ? (
-          <div className="flex flex-wrap items-start justify-center gap-3 max-w-3xl">
-            {aps.map((ap) => (
-              <TopoNode
-                key={ap.sn}
-                icon={<Wifi size={16} />}
-                label={ap.name}
-                sub={`${ap.clientCount} client${ap.clientCount !== 1 ? "s" : ""}`}
-                state={ap.online ? "up" : "down"}
-                small
-              />
-            ))}
-          </div>
+          aps.map((ap) => (
+            <TopoNode
+              key={ap.sn}
+              icon={<Wifi size={16} />}
+              label={ap.name}
+              sub={`${ap.clientCount} client${ap.clientCount !== 1 ? "s" : ""}`}
+              state={ap.online ? "up" : "down"}
+              small
+            />
+          ))
         ) : (
           <TopoNode icon={<Wifi size={16} />} label="No access points" sub="—" state="unknown" small muted />
         )}
+      </Tier>
 
-        {/* Switches (if any) shown as a secondary row */}
-        {switches.length > 0 && (
-          <>
-            <Connector />
-            <div className="flex flex-wrap items-start justify-center gap-3 max-w-3xl">
-              {switches.map((sw) => (
-                <TopoNode
-                  key={sw.sn}
-                  icon={<Server size={16} />}
-                  label={sw.name}
-                  sub={sw.model}
-                  state={sw.online ? "up" : "down"}
-                  small
-                />
-              ))}
-            </div>
-          </>
-        )}
-      </div>
-    </Panel>
+      {/* Switches (if any) shown as a secondary row */}
+      {switches.length > 0 && (
+        <>
+          <Connector />
+          <Tier label="Switches" count={switches.length}>
+            {switches.map((sw) => (
+              <TopoNode key={sw.sn} icon={<Server size={16} />} label={sw.name} sub={sw.model} state={sw.online ? "up" : "down"} small />
+            ))}
+          </Tier>
+        </>
+      )}
+    </div>
+  );
+}
+
+function Tier({ label, count, children }) {
+  return (
+    <div className="w-full flex flex-col items-center gap-2.5">
+      <p className="text-label">
+        {label}
+        {count != null && ` · ${count}`}
+      </p>
+      <div className="flex flex-wrap items-start justify-center gap-3 max-w-3xl">{children}</div>
+    </div>
   );
 }
 
 function Connector() {
-  return <div className="w-px h-7 bg-[var(--border-strong)] my-1" />;
+  return <div className="w-px h-7 my-2 bg-gradient-to-b from-transparent via-[var(--border-strong)] to-transparent" />;
 }
 
-function TopoNode({ icon, label, sub, state, small, muted }) {
-  const ring =
-    state === "up"
-      ? "border-[var(--success-fg)]"
-      : state === "down"
-        ? "border-[var(--brand)]"
-        : "border-[var(--border-strong)]";
-  const dot =
-    state === "up"
-      ? "bg-[var(--success-fg)]"
-      : state === "down"
-        ? "bg-[var(--brand)]"
-        : "bg-[var(--text-quaternary)]";
-  const iconWrap = small ? "h-9 w-9" : "h-11 w-11";
+const TOPO_TONE = { up: "green", down: "red", unknown: "slate" };
+const TOPO_DOT = { up: "var(--success-fg)", down: "var(--danger-fg)", unknown: "var(--fg-subtle)" };
+
+function TopoNode({ icon, label, sub, state = "unknown", small, muted }) {
   return (
     <div
       className={
-        "relative flex flex-col items-center gap-1.5 px-3 py-2.5 rounded-lg " +
-        "bg-[var(--surface-sunken)] border " +
-        (muted ? "border-[var(--border-subtle)] opacity-70" : "border-[var(--border-default)]") +
-        " min-w-[92px] max-w-[120px]"
+        "flex flex-col items-center gap-2 rounded-xl px-3 py-3 min-w-[104px] max-w-[136px] " +
+        "bg-[var(--bg-elevated)] border " +
+        (muted
+          ? "border-dashed border-[var(--border-subtle)] opacity-75"
+          : "border-[var(--border-default)] shadow-[var(--shadow-xs)]")
       }
     >
-      <span
-        className={
-          `${iconWrap} rounded-lg inline-flex items-center justify-center border-2 ${ring} ` +
-          "bg-[var(--surface-raised)] text-[var(--text-secondary)]"
-        }
-      >
+      <ObjectTile tone={TOPO_TONE[state] || "slate"} size={small ? "sm" : "md"}>
         {icon}
-      </span>
-      <span className="text-[11.5px] font-medium text-[var(--text-primary)] text-center leading-tight truncate w-full">
+      </ObjectTile>
+      <span className="font-display text-[12.5px] font-semibold text-[var(--fg-primary)] text-center leading-tight truncate w-full">
         {label}
       </span>
-      <span className="flex items-center gap-1 text-[10.5px] text-[var(--text-quaternary)] font-mono truncate max-w-full">
-        <span className={`w-1.5 h-1.5 rounded-full ${dot} shrink-0`} />
-        <span className="truncate">{sub}</span>
+      <span className="flex items-center gap-1.5 text-[11px] text-[var(--fg-muted)] max-w-full">
+        <span className="h-1.5 w-1.5 rounded-full shrink-0" style={{ background: TOPO_DOT[state] }} />
+        <span className="truncate font-mono">{sub}</span>
       </span>
     </div>
   );
@@ -738,62 +846,62 @@ function TopoNode({ icon, label, sub, state, small, muted }) {
 
 /* ------------ Device table ------------------------------------------------ */
 const TYPE_LABEL = { gateway: "Gateway", ap: "Access point", switch: "Switch", other: "Device" };
+const TYPE_TONE = { gateway: "indigo", ap: "blue", switch: "teal", other: "slate" };
+
+function DeviceIcon({ type }) {
+  if (type === "gateway") return <Router size={15} />;
+  if (type === "ap") return <Wifi size={15} />;
+  if (type === "switch") return <Server size={15} />;
+  return <Cpu size={15} />;
+}
 
 function DeviceTable({ devices }) {
+  if (devices.length === 0) {
+    return (
+      <EmptyState
+        icon={Server}
+        title="No devices reporting"
+        description="Devices appear here once Ruijie Cloud reports them."
+      />
+    );
+  }
+
   return (
-    <Panel
-      title="Devices"
-      subtitle={`${devices.length} total`}
-      icon={<Server size={15} />}
-      padding={false}
-    >
-      {devices.length === 0 ? (
-        <EmptyState icon={Server} title="No devices reporting" description="Devices appear here once Ruijie Cloud reports them." />
-      ) : (
-        <div className="overflow-x-auto">
-          <table className="w-full text-[13px]">
-            <thead>
-              <tr className="text-left border-b border-[var(--border-default)]">
-                <th className="text-label px-5 py-3">Device</th>
-                <th className="text-label px-5 py-3">Type</th>
-                <th className="text-label px-5 py-3">Status</th>
-                <th className="text-label px-5 py-3">Model</th>
-                <th className="text-label px-5 py-3">Mgmt IP</th>
-                <th className="text-label px-5 py-3">Clients</th>
-                <th className="text-label px-5 py-3">Firmware</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-[var(--border-default)]">
-              {devices.map((d) => (
-                <tr key={d.sn} className="hover:bg-[var(--bg-surface)] transition-colors">
-                  <td className="px-5 py-2.5">
-                    <div className="flex flex-col">
-                      <span className="text-[13px] font-medium text-[var(--fg-primary)] truncate max-w-[200px]">
-                        {d.name}
-                      </span>
-                      <span className="text-[11px] text-[var(--fg-muted)] font-mono">{d.sn}</span>
-                    </div>
-                  </td>
-                  <td className="px-5 py-2.5 text-[12.5px] text-[var(--fg-secondary)]">
-                    {TYPE_LABEL[d.type] || "Device"}
-                  </td>
-                  <td className="px-5 py-2.5">
-                    <Badge tone={d.online ? "success" : "danger"}>
-                      {d.online ? "Online" : "Offline"}
-                    </Badge>
-                  </td>
-                  <td className="px-5 py-2.5 text-[12.5px] font-mono text-[var(--accent)]">{d.model}</td>
-                  <td className="px-5 py-2.5 text-[12.5px] font-mono text-[var(--fg-secondary)]">{d.mgmtIp}</td>
-                  <td className="px-5 py-2.5 text-[12.5px] font-mono text-[var(--fg-secondary)]">
-                    {d.type === "ap" ? d.clientCount : "—"}
-                  </td>
-                  <td className="px-5 py-2.5 text-[12px] font-mono text-[var(--fg-muted)]">{d.firmware}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
-    </Panel>
+    <DataTable>
+      <thead>
+        <tr>
+          <Th>Device</Th>
+          <Th>Type</Th>
+          <Th>Status</Th>
+          <Th>Model</Th>
+          <Th>Mgmt IP</Th>
+          <Th align="right">Clients</Th>
+          <Th>Firmware</Th>
+        </tr>
+      </thead>
+      <tbody>
+        {devices.map((d) => (
+          <tr key={d.sn}>
+            <Td>
+              <RecordCell
+                tone={TYPE_TONE[d.type] || "slate"}
+                icon={<DeviceIcon type={d.type} />}
+                title={d.name}
+                subtitle={d.sn}
+                mono
+              />
+            </Td>
+            <Td>{TYPE_LABEL[d.type] || "Device"}</Td>
+            <Td>
+              <StatusPill tone={d.online ? "success" : "danger"}>{d.online ? "Online" : "Offline"}</StatusPill>
+            </Td>
+            <Td mono nowrap>{d.model}</Td>
+            <Td mono nowrap>{d.mgmtIp}</Td>
+            <Td align="right" nowrap className="tabular-nums">{d.type === "ap" ? d.clientCount : "—"}</Td>
+            <Td mono muted nowrap>{d.firmware}</Td>
+          </tr>
+        ))}
+      </tbody>
+    </DataTable>
   );
 }

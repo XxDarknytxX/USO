@@ -1,13 +1,20 @@
 // src/components/MonthlyBreakdown.jsx
-// Everything about one month, dropped into a dashboard: pick a month and every
-// figure below it re-scopes. One backend call fills the whole section.
+// Everything about one reporting window, as panels a dashboard composes itself.
 //
-// Lives on the dashboards rather than on a page of its own, so the month you
-// are looking at is chosen in the same place you read the numbers.
+// Pick a window in the page header and every figure here re-scopes; one backend
+// call fills the lot.
+//
+// This used to render as a single ten-panel stack dropped under the KPI rail,
+// which is most of why the dashboard scrolled forever — and why revenue, sold
+// and average sale each appeared twice on one screen. The pieces are exported
+// individually now: the two that answer "are we earning" go in the dashboard's
+// primary chart row, the rest sit behind its analysis tabs. The default export
+// still stacks all of them, so a caller that wants the whole section unchanged
+// keeps working.
 //
 // Every figure here comes from the LOCAL database (portal_audit_logs +
-// voucher_claims), never from Ruijie or Starlink, so changing month is cheap
-// and cannot contribute to any upstream rate limit.
+// voucher_claims), never from Ruijie or Starlink, so changing the window is
+// cheap and cannot contribute to any upstream rate limit.
 
 import { useMemo } from "react";
 import {
@@ -21,16 +28,17 @@ import {
 
 import { rangeLabel } from "../hooks/useMonthlyBreakdown";
 import {
-  Panel, StatCard, EmptyState, Badge,
+  Panel, StatCard, EmptyState, Badge, KpiGrid,
+  DataTable, Th, Td,
   SkeletonKpis, SkeletonCard,
   CHART_COLORS, CHART_SERIES, ChartTooltip, ChartGradient, useChartTheme,
-  ChartStat, LegendRow, axisX, axisY, gridProps, BAR_RADIUS, BAR_MAX_SIZE, BAR_CATEGORY_GAP,
+  ChartStat, LegendRow, DONUT, DonutCenter,
+  axisX, axisY, gridProps, BAR_RADIUS, BAR_MAX_SIZE, BAR_CATEGORY_GAP,
 } from "./ui";
 
 const money = (n) =>
   "$" + Number(n || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const num = (n) => Number(n || 0).toLocaleString();
-
 
 /** Event types worth naming; anything else is shown raw. */
 const OUTCOME_LABEL = {
@@ -51,221 +59,366 @@ const outcomeTone = (t) =>
     : /manual|skipped/.test(t) ? CHART_COLORS.warning
     : CHART_COLORS.slate;
 
-export default function MonthlyBreakdown({ state, groupId = null }) {
-  const activeGroupId = groupId;
+/* ───────────────────────── Shared state helpers ─────────────────────────
+ * Each panel is dropped into a tab on its own, so each has to answer "still
+ * loading?" for itself rather than relying on one wrapper around the stack. */
+
+/** True before the first payload lands — panels render a skeleton instead. */
+const isCold = (state) => state.loading && !state.data;
+
+/**
+ * False only once we KNOW there has never been a sale. While the first payload
+ * is in flight it stays true, so a page shows the panels (and their skeletons)
+ * rather than flashing "no sales recorded yet" on every load.
+ */
+export function hasSalesHistory(state) {
+  if (state?.loading && !state?.data) return true;
+  return (state?.months?.length || 0) > 0;
+}
+
+/** The "nothing has ever been sold" state, for a page to show in place of the analysis. */
+export function BreakdownEmpty() {
+  return (
+    <EmptyState
+      icon={BarChart3}
+      title="No sales recorded yet"
+      description="Once a customer completes a purchase, the window appears here."
+    />
+  );
+}
+
+/* ───────────────────────── Primary row ───────────────────────── */
+
+/**
+ * The revenue trend — the one chart that belongs above the fold. Its headline
+ * also carries average sale, which used to occupy a KPI tile of its own.
+ */
+export function RevenueTrendPanel({ state, className }) {
   const ct = useChartTheme();
-  const { month, months, data, loading } = state;
+  const { data } = state;
+  const t = data?.totals || {};
+  const daily = data?.daily || [];
   // "All time" buckets by month, every other window by day — the wording and
   // the tooltip follow whatever the server actually bucketed by.
   const byMonthBuckets = (data?.dailyUnit || "day") === "month";
-  const windowLabel = rangeLabel(month);
+  const windowLabel = rangeLabel(state.month);
   const barLabel = (d) => (String(d).match(/^\d+$/) ? `Day ${d}` : String(d));
 
+  if (isCold(state)) return <SkeletonCard height="h-[400px]" className={className} />;
 
-  const t = data?.totals || {};
-  const daily = data?.daily || [];
-  const byPlan = data?.byPlan || [];
-  const byVillage = data?.byVillage || [];
-  const byHour = data?.byHour || [];
-  const outcomes = data?.outcomes || [];
-  const soldByPlan = data?.soldByPlan || [];
+  return (
+    <Panel
+      title={byMonthBuckets ? "Revenue by month" : "Revenue by day"}
+      subtitle={windowLabel}
+      icon={<DollarSign size={15} />}
+      tone="red"
+      className={className}
+    >
+      <ChartStat
+        value={money(t.revenue)}
+        unit={windowLabel}
+        caption={`${num(t.transactions)} paid transactions · ${money(t.avgSale)} average sale`}
+      />
+      <ResponsiveContainer width="100%" height={268}>
+        <BarChart data={daily} margin={{ top: 8, right: 8, left: -4, bottom: 0 }} barCategoryGap={BAR_CATEGORY_GAP}>
+          <CartesianGrid {...gridProps(ct)} />
+          <XAxis dataKey="d" {...axisX(ct)} />
+          <YAxis {...axisY(ct, { width: 52 })} tickFormatter={(v) => "$" + Number(v).toLocaleString(undefined, { maximumFractionDigits: 0 })} />
+          <Tooltip content={<ChartTooltip valueFormatter={(v, e) => (e?.dataKey === "revenue" ? money(v) : num(v))} labelFormatter={barLabel} />} cursor={{ fill: ct.cursor }} />
+          <defs><ChartGradient id="mbRevDay" color={CHART_COLORS.brand} from={0.95} to={0.45} /></defs>
+          <Bar dataKey="revenue" name="Revenue" fill="url(#mbRevDay)" radius={BAR_RADIUS} maxBarSize={BAR_MAX_SIZE} isAnimationActive={false} />
+        </BarChart>
+      </ResponsiveContainer>
+    </Panel>
+  );
+}
 
+/**
+ * Plan composition for the window. Stacked vertically (donut over legend)
+ * rather than side by side, because it now lives in the narrow column beside
+ * the revenue trend.
+ */
+export function RevenuePlanMix({ state, limit = 6, className }) {
+  const byPlan = state.data?.byPlan || [];
   const planTotal = useMemo(() => byPlan.reduce((a, p) => a + p.revenue, 0), [byPlan]);
-  const villageTotal = useMemo(() => byVillage.reduce((a, v) => a + v.revenue, 0), [byVillage]);
+
+  if (isCold(state)) return <SkeletonCard height="h-[400px]" className={className} />;
+
+  return (
+    <Panel title="Revenue by plan" subtitle={rangeLabel(state.month)} icon={<Ticket size={15} />} tone="violet" className={className}>
+      {byPlan.length === 0 ? (
+        <EmptyState icon={Ticket} title="No sales in this window" />
+      ) : (
+        <>
+          <div className="relative mx-auto" style={{ width: 196, height: 196 }}>
+            <ResponsiveContainer width="100%" height="100%">
+              <PieChart>
+                <Pie data={byPlan} dataKey="revenue" nameKey="name" {...DONUT} isAnimationActive={false}>
+                  {byPlan.map((_, i) => <Cell key={i} fill={CHART_SERIES[i % CHART_SERIES.length]} />)}
+                </Pie>
+                <Tooltip content={<ChartTooltip hideLabel valueFormatter={money} />} />
+              </PieChart>
+            </ResponsiveContainer>
+            <DonutCenter value={money(planTotal)} label="Total" />
+          </div>
+          <div className="mt-5 pt-4 border-t border-[var(--border-subtle)] space-y-2.5">
+            {byPlan.slice(0, limit).map((p, i) => (
+              <LegendRow
+                key={p.name}
+                color={CHART_SERIES[i % CHART_SERIES.length]}
+                label={p.name}
+                value={money(p.revenue)}
+                amount={p.revenue}
+                total={planTotal}
+              />
+            ))}
+          </div>
+        </>
+      )}
+    </Panel>
+  );
+}
+
+/* ───────────────────────── Sales analysis ───────────────────────── */
+
+/**
+ * The window's headline totals. Demoted from the page's KPI rail — the rail
+ * now carries only four figures — but kept in full here.
+ */
+export function SalesTotals({ state }) {
+  const t = state.data?.totals || {};
+  if (isCold(state)) return <SkeletonKpis count={4} />;
+  return (
+    <KpiGrid cols={4}>
+      <StatCard label="Revenue" value={money(t.revenue)} icon={<DollarSign size={18} />} color="accent" sub={`${num(t.transactions)} paid transactions`} />
+      <StatCard label="Vouchers sold" value={num(t.sold)} icon={<Ticket size={18} />} color="blue" sub={`${num(t.customers)} customers`} />
+      <StatCard label="Average sale" value={money(t.avgSale)} icon={<BarChart3 size={18} />} color="violet" />
+      <StatCard
+        label="Got online"
+        value={`${t.connectedPct ?? 0}%`}
+        icon={<Wifi size={18} />}
+        color={(t.connectedPct ?? 0) >= 95 ? "emerald" : (t.connectedPct ?? 0) >= 80 ? "amber" : "rose"}
+        sub={`${num(t.connected)} of ${num(t.transactions)}`}
+      />
+    </KpiGrid>
+  );
+}
+
+/**
+ * Money that did not turn into a connection. Renders nothing when every sale
+ * connected — an all-zero row of alarm tiles is worse than no row.
+ */
+export function RiskTotals({ state }) {
+  const t = state.data?.totals || {};
+  const byHour = state.data?.byHour || [];
   const busiestHour = useMemo(
     () => byHour.reduce((best, h) => (h.count > (best?.count ?? -1) ? h : best), null),
     [byHour]
   );
+  if (isCold(state)) return <SkeletonKpis count={4} />;
+  if (!(t.manualCases > 0 || t.paidNoVoucher > 0 || t.revenueAtRisk > 0)) return null;
+  return (
+    <KpiGrid cols={4}>
+      <StatCard label="Needed help" value={num(t.manualCases)} icon={<AlertTriangle size={18} />} color="amber" sub="paid, auth failed" />
+      <StatCard label="Paid, no voucher" value={num(t.paidNoVoucher)} icon={<Ticket size={18} />} color={t.paidNoVoucher ? "rose" : "slate"} />
+      <StatCard label="Revenue at risk" value={money(t.revenueAtRisk)} icon={<DollarSign size={18} />} color={t.revenueAtRisk ? "rose" : "slate"} sub="never connected" />
+      <StatCard label="Busiest hour" value={busiestHour ? `${busiestHour.h}:00` : "—"} icon={<Clock size={18} />} color="cyan" sub={busiestHour ? `${num(busiestHour.count)} sales` : ""} />
+    </KpiGrid>
+  );
+}
+
+export function SalesByHourPanel({ state, className }) {
+  const ct = useChartTheme();
+  const byHour = state.data?.byHour || [];
+  const busiest = useMemo(
+    () => byHour.reduce((best, h) => (h.count > (best?.count ?? -1) ? h : best), null),
+    [byHour]
+  );
+  if (isCold(state)) return <SkeletonCard height="h-80" className={className} />;
+  return (
+    <Panel title="Sales by hour" subtitle="When customers buy" icon={<Clock size={15} />} tone="violet" className={className}>
+      <ChartStat
+        value={busiest ? `${busiest.h}:00` : "—"}
+        unit="busiest"
+        caption={busiest ? `${num(busiest.count)} sales in that hour` : "No sales in this window"}
+      />
+      <ResponsiveContainer width="100%" height={232}>
+        <BarChart data={byHour} margin={{ top: 4, right: 8, left: -12, bottom: 0 }} barCategoryGap="14%">
+          <CartesianGrid {...gridProps(ct)} />
+          <XAxis dataKey="h" {...axisX(ct, { minTickGap: 8 })} />
+          <YAxis {...axisY(ct, { width: 32 })} allowDecimals={false} />
+          <Tooltip content={<ChartTooltip valueFormatter={num} labelFormatter={(h) => `${h}:00`} />} cursor={{ fill: ct.cursor }} />
+          <Bar dataKey="count" name="Sales" fill={CHART_COLORS.violet} radius={BAR_RADIUS} maxBarSize={18} isAnimationActive={false} />
+        </BarChart>
+      </ResponsiveContainer>
+    </Panel>
+  );
+}
+
+/** Units sold per plan, straight from the claim ledger. */
+export function SoldByPlanPanel({ state, className }) {
+  const ct = useChartTheme();
+  const soldByPlan = state.data?.soldByPlan || [];
+  const total = useMemo(() => soldByPlan.reduce((a, p) => a + Number(p.sold || 0), 0), [soldByPlan]);
+  if (isCold(state)) return <SkeletonCard height="h-80" className={className} />;
+  return (
+    <Panel title="Vouchers sold by plan" subtitle="From the claim ledger" icon={<Ticket size={15} />} tone="blue" className={className}>
+      {soldByPlan.length === 0 ? (
+        <EmptyState icon={Ticket} title="No vouchers claimed in this window" />
+      ) : (
+        <>
+          <ChartStat value={num(total)} unit="sold" caption={`Across ${num(soldByPlan.length)} plan${soldByPlan.length === 1 ? "" : "s"}`} />
+          <ResponsiveContainer width="100%" height={232}>
+            <BarChart data={soldByPlan} layout="vertical" margin={{ top: 4, right: 16, left: 8, bottom: 0 }} barCategoryGap={BAR_CATEGORY_GAP}>
+              <CartesianGrid {...gridProps(ct)} horizontal={false} vertical />
+              <XAxis type="number" {...axisX(ct)} allowDecimals={false} />
+              <YAxis type="category" dataKey="name" {...axisY(ct, { width: 104 })} />
+              <Tooltip content={<ChartTooltip valueFormatter={num} />} cursor={{ fill: ct.cursor }} />
+              <Bar dataKey="sold" name="Sold" fill={CHART_COLORS.blue} radius={[0, 6, 6, 0]} maxBarSize={BAR_MAX_SIZE} isAnimationActive={false} />
+            </BarChart>
+          </ResponsiveContainer>
+        </>
+      )}
+    </Panel>
+  );
+}
+
+/** Revenue per village — only meaningful across villages, so the estate scope only. */
+export function RevenueByVillagePanel({ state, className }) {
+  const ct = useChartTheme();
+  const byVillage = state.data?.byVillage || [];
+  if (isCold(state)) return <SkeletonCard height="h-80" className={className} />;
+  return (
+    <Panel title="Revenue by village" subtitle="Top 8 for the window" icon={<MapPin size={15} />} tone="navy" className={className}>
+      {byVillage.length === 0 ? (
+        <EmptyState icon={MapPin} title="No sales in this window" />
+      ) : (
+        <ResponsiveContainer width="100%" height={288}>
+          <BarChart data={byVillage.slice(0, 8)} layout="vertical" margin={{ top: 4, right: 16, left: 8, bottom: 0 }} barCategoryGap={BAR_CATEGORY_GAP}>
+            <CartesianGrid {...gridProps(ct)} horizontal={false} vertical />
+            <XAxis type="number" {...axisX(ct)} tickFormatter={(v) => "$" + Number(v).toLocaleString(undefined, { maximumFractionDigits: 0 })} />
+            <YAxis type="category" dataKey="name" {...axisY(ct, { width: 104 })} />
+            <Tooltip content={<ChartTooltip valueFormatter={money} />} cursor={{ fill: ct.cursor }} />
+            <defs><ChartGradient id="mbRevVillage" color={CHART_COLORS.brand} from={0.95} to={0.45} /></defs>
+            <Bar dataKey="revenue" name="Revenue" fill="url(#mbRevVillage)" radius={BAR_RADIUS} maxBarSize={BAR_MAX_SIZE} isAnimationActive={false} />
+          </BarChart>
+        </ResponsiveContainer>
+      )}
+    </Panel>
+  );
+}
+
+/** Every recorded event in the window, successes and failures alike. */
+export function OutcomesPanel({ state, className }) {
+  const outcomes = state.data?.outcomes || [];
+  const windowLabel = rangeLabel(state.month);
+  if (isCold(state)) return <SkeletonCard height="h-80" className={className} />;
+  return (
+    <Panel title="What happened" subtitle={`Every recorded event · ${windowLabel}`} icon={<Users size={15} />} tone="slate" className={className}>
+      {outcomes.length === 0 ? (
+        <EmptyState icon={Users} title="No activity in this window" />
+      ) : (
+        <div className="space-y-2.5 max-h-[288px] overflow-y-auto scrollbar-none pr-1">
+          {outcomes.slice(0, 12).map((o) => (
+            <LegendRow
+              key={o.type}
+              color={outcomeTone(o.type)}
+              label={OUTCOME_LABEL[o.type] || o.type.replace(/_/g, " ")}
+              value={num(o.count)}
+              amount={o.count}
+              total={outcomes[0]?.count || 0}
+            />
+          ))}
+        </div>
+      )}
+    </Panel>
+  );
+}
+
+/** The by-village numbers read exactly, rather than estimated off a bar. */
+export function VillageRevenuePanel({ state, className }) {
+  const byVillage = state.data?.byVillage || [];
+  const windowLabel = rangeLabel(state.month);
+  const villageTotal = useMemo(() => byVillage.reduce((a, v) => a + v.revenue, 0), [byVillage]);
+
+  if (isCold(state)) return <SkeletonCard height="h-80" className={className} />;
+  return (
+    <Panel
+      title="Village revenue detail"
+      subtitle={`${byVillage.length} village${byVillage.length === 1 ? "" : "s"} with sales · ${windowLabel}`}
+      icon={<MapPin size={15} />}
+      tone="navy"
+      padding={false}
+      className={className}
+    >
+      {byVillage.length === 0 ? (
+        <div className="p-5"><EmptyState icon={MapPin} title="No sales in this window" /></div>
+      ) : (
+        <DataTable>
+          <thead>
+            <tr>
+              <Th>Village</Th>
+              <Th align="right">Revenue</Th>
+              <Th align="right">Transactions</Th>
+              <Th align="right">Avg sale</Th>
+              <Th align="right">Share</Th>
+            </tr>
+          </thead>
+          <tbody>
+            {byVillage.map((v) => (
+              <tr key={v.name}>
+                <Td strong>{v.name}</Td>
+                <Td align="right" strong className="tabular-nums">{money(v.revenue)}</Td>
+                <Td align="right" className="tabular-nums">{num(v.count)}</Td>
+                <Td align="right" className="tabular-nums">{money(v.count ? v.revenue / v.count : 0)}</Td>
+                <Td align="right">
+                  <Badge tone="neutral">{villageTotal ? Math.round((v.revenue / villageTotal) * 100) : 0}%</Badge>
+                </Td>
+              </tr>
+            ))}
+          </tbody>
+        </DataTable>
+      )}
+    </Panel>
+  );
+}
+
+/* ───────────────────────── Full section ─────────────────────────
+ * The original stacked layout, preserved for any caller that wants the whole
+ * sales section in one drop-in. The dashboards compose the panels above
+ * instead, so the same numbers are not printed twice on one screen. */
+
+export default function MonthlyBreakdown({ state, groupId = null }) {
+  const activeGroupId = groupId;
+
+  if (isCold(state)) {
+    return (
+      <div className="space-y-6">
+        <SkeletonKpis count={4} />
+        <SkeletonCard height="h-80" />
+      </div>
+    );
+  }
+  if (!hasSalesHistory(state)) return <BreakdownEmpty />;
 
   return (
     <div className="space-y-6">
-      {loading && !data ? (
-        <div className="space-y-6">
-          <SkeletonKpis count={4} />
-          <SkeletonCard height="h-80" />
-        </div>
-      ) : months.length === 0 ? (
-        <div>
-          <EmptyState icon={BarChart3} title="No sales recorded yet" description="Once a customer completes a purchase, the month appears here." />
-        </div>
-      ) : (
-        <div className="space-y-6">
-          {/* Totals for the selected month */}
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-            <StatCard label="Revenue" value={money(t.revenue)} icon={<DollarSign size={18} />} color="accent" sub={`${num(t.transactions)} paid transactions`} />
-            <StatCard label="Vouchers sold" value={num(t.sold)} icon={<Ticket size={18} />} color="blue" sub={`${num(t.customers)} customers`} />
-            <StatCard label="Average sale" value={money(t.avgSale)} icon={<BarChart3 size={18} />} color="violet" />
-            <StatCard
-              label="Got online"
-              value={`${t.connectedPct ?? 0}%`}
-              icon={<Wifi size={18} />}
-              color={(t.connectedPct ?? 0) >= 95 ? "emerald" : (t.connectedPct ?? 0) >= 80 ? "amber" : "rose"}
-              sub={`${num(t.connected)} of ${num(t.transactions)}`}
-            />
-          </div>
+      <SalesTotals state={state} />
+      <RiskTotals state={state} />
+      <RevenueTrendPanel state={state} />
 
-          {/* Money that did not turn into a connection is the number worth
-              acting on, so it gets its own row rather than a footnote. */}
-          {(t.manualCases > 0 || t.paidNoVoucher > 0 || t.revenueAtRisk > 0) && (
-            <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-              <StatCard label="Needed help" value={num(t.manualCases)} icon={<AlertTriangle size={18} />} color="amber" sub="paid, auth failed" />
-              <StatCard label="Paid, no voucher" value={num(t.paidNoVoucher)} icon={<Ticket size={18} />} color={t.paidNoVoucher ? "rose" : "slate"} />
-              <StatCard label="Revenue at risk" value={money(t.revenueAtRisk)} icon={<DollarSign size={18} />} color={t.revenueAtRisk ? "rose" : "slate"} sub="never connected" />
-              <StatCard label="Busiest hour" value={busiestHour ? `${busiestHour.h}:00` : "—"} icon={<Clock size={18} />} color="cyan" sub={busiestHour ? `${num(busiestHour.count)} sales` : ""} />
-            </div>
-          )}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <RevenuePlanMix state={state} />
+        <SoldByPlanPanel state={state} />
+      </div>
 
-          {/* Revenue by day */}
-          <Panel title={byMonthBuckets ? "Revenue by month" : "Revenue by day"} subtitle={windowLabel} icon={<DollarSign size={15} />}>
-            <ChartStat value={money(t.revenue)} unit={windowLabel} caption={`${num(t.transactions)} paid transactions`} />
-            <ResponsiveContainer width="100%" height={260}>
-              <BarChart data={daily} margin={{ top: 8, right: 8, left: -4, bottom: 0 }} barCategoryGap={BAR_CATEGORY_GAP}>
-                <CartesianGrid {...gridProps(ct)} />
-                <XAxis dataKey="d" {...axisX(ct)} />
-                <YAxis {...axisY(ct, { width: 52 })} tickFormatter={(v) => "$" + Number(v).toLocaleString(undefined, { maximumFractionDigits: 0 })} />
-                <Tooltip content={<ChartTooltip valueFormatter={(v, e) => (e?.dataKey === "revenue" ? money(v) : num(v))} labelFormatter={barLabel} />} cursor={{ fill: ct.cursor }} />
-                <defs><ChartGradient id="revBar" color={CHART_COLORS.brand} from={0.95} to={0.45} /></defs>
-                <Bar dataKey="revenue" name="Revenue" fill="url(#revBar)" radius={BAR_RADIUS} maxBarSize={BAR_MAX_SIZE} isAnimationActive={false} />
-              </BarChart>
-            </ResponsiveContainer>
-          </Panel>
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <SalesByHourPanel state={state} />
+        {!activeGroupId && <RevenueByVillagePanel state={state} />}
+        <OutcomesPanel state={state} />
+      </div>
 
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            {/* Revenue by plan */}
-            <Panel title="Revenue by plan" icon={<Ticket size={15} />}>
-              {byPlan.length === 0 ? (
-                <EmptyState icon={Ticket} title="No sales in this window" />
-              ) : (
-                <div className="flex items-center gap-5">
-                  <div className="relative shrink-0" style={{ width: 168, height: 168 }}>
-                    <ResponsiveContainer width="100%" height="100%">
-                      <PieChart>
-                        <Pie data={byPlan} dataKey="revenue" nameKey="name" innerRadius={58} outerRadius={82} paddingAngle={2} cornerRadius={6} stroke="none" isAnimationActive={false}>
-                          {byPlan.map((_, i) => <Cell key={i} fill={CHART_SERIES[i % CHART_SERIES.length]} />)}
-                        </Pie>
-                        <Tooltip content={<ChartTooltip hideLabel valueFormatter={money} />} />
-                      </PieChart>
-                    </ResponsiveContainer>
-                    <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
-                      <span className="text-xl font-semibold text-[var(--fg-primary)] tabular-nums leading-none">{money(planTotal)}</span>
-                      <span className="text-[10.5px] uppercase tracking-wider text-[var(--fg-muted)] mt-1">Total</span>
-                    </div>
-                  </div>
-                  <div className="flex-1 min-w-0 space-y-2.5">
-                    {byPlan.slice(0, 6).map((p, i) => (
-                      <LegendRow key={p.name} color={CHART_SERIES[i % CHART_SERIES.length]} label={p.name} value={money(p.revenue)} total={planTotal} />
-                    ))}
-                  </div>
-                </div>
-              )}
-            </Panel>
-
-            {/* Vouchers sold by plan */}
-            <Panel title="Vouchers sold by plan" subtitle="From the claim ledger" icon={<Ticket size={15} />}>
-              {soldByPlan.length === 0 ? (
-                <EmptyState icon={Ticket} title="No vouchers claimed in this window" />
-              ) : (
-                <ResponsiveContainer width="100%" height={232}>
-                  <BarChart data={soldByPlan} layout="vertical" margin={{ top: 4, right: 16, left: 8, bottom: 0 }} barCategoryGap={BAR_CATEGORY_GAP}>
-                    <CartesianGrid {...gridProps(ct)} horizontal={false} vertical />
-                    <XAxis type="number" {...axisX(ct)} allowDecimals={false} />
-                    <YAxis type="category" dataKey="name" {...axisY(ct, { width: 104 })} />
-                    <Tooltip content={<ChartTooltip valueFormatter={num} />} cursor={{ fill: ct.cursor }} />
-                    <Bar dataKey="sold" name="Sold" fill={CHART_COLORS.blue} radius={[0, 6, 6, 0]} maxBarSize={BAR_MAX_SIZE} isAnimationActive={false} />
-                  </BarChart>
-                </ResponsiveContainer>
-              )}
-            </Panel>
-          </div>
-
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            {/* Sales by hour */}
-            <Panel title="Sales by hour" subtitle="When customers buy" icon={<Clock size={15} />}>
-              <ResponsiveContainer width="100%" height={232}>
-                <BarChart data={byHour} margin={{ top: 4, right: 8, left: -12, bottom: 0 }} barCategoryGap="14%">
-                  <CartesianGrid {...gridProps(ct)} />
-                  <XAxis dataKey="h" {...axisX(ct, { minTickGap: 8 })} />
-                  <YAxis {...axisY(ct, { width: 32 })} allowDecimals={false} />
-                  <Tooltip content={<ChartTooltip valueFormatter={num} labelFormatter={(h) => `${h}:00`} />} cursor={{ fill: ct.cursor }} />
-                  <Bar dataKey="count" name="Sales" fill={CHART_COLORS.violet} radius={BAR_RADIUS} maxBarSize={18} isAnimationActive={false} />
-                </BarChart>
-              </ResponsiveContainer>
-            </Panel>
-
-            {/* Revenue by village — only meaningful across villages */}
-            {!activeGroupId && (
-              <Panel title="Revenue by village" icon={<MapPin size={15} />}>
-                {byVillage.length === 0 ? (
-                  <EmptyState icon={MapPin} title="No sales in this window" />
-                ) : (
-                  <ResponsiveContainer width="100%" height={232}>
-                    <BarChart data={byVillage.slice(0, 8)} layout="vertical" margin={{ top: 4, right: 16, left: 8, bottom: 0 }} barCategoryGap={BAR_CATEGORY_GAP}>
-                      <CartesianGrid {...gridProps(ct)} horizontal={false} vertical />
-                      <XAxis type="number" {...axisX(ct)} tickFormatter={(v) => "$" + Number(v).toLocaleString(undefined, { maximumFractionDigits: 0 })} />
-                      <YAxis type="category" dataKey="name" {...axisY(ct, { width: 104 })} />
-                      <Tooltip content={<ChartTooltip valueFormatter={money} />} cursor={{ fill: ct.cursor }} />
-                      <defs><ChartGradient id="revBar" color={CHART_COLORS.brand} from={0.95} to={0.45} /></defs>
-                <Bar dataKey="revenue" name="Revenue" fill="url(#revBar)" radius={BAR_RADIUS} maxBarSize={BAR_MAX_SIZE} isAnimationActive={false} />
-                    </BarChart>
-                  </ResponsiveContainer>
-                )}
-              </Panel>
-            )}
-
-            {/* What happened, successes and failures alike */}
-            <Panel title="What happened" subtitle={`Every recorded event · ${windowLabel}`} icon={<Users size={15} />}>
-              {outcomes.length === 0 ? (
-                <EmptyState icon={Users} title="No activity in this window" />
-              ) : (
-                <div className="space-y-2.5 max-h-[232px] overflow-y-auto scrollbar-none pr-1">
-                  {outcomes.slice(0, 12).map((o) => (
-                    <LegendRow
-                      key={o.type}
-                      color={outcomeTone(o.type)}
-                      label={OUTCOME_LABEL[o.type] || o.type.replace(/_/g, " ")}
-                      value={num(o.count)}
-                      total={outcomes[0]?.count || 0}
-                    />
-                  ))}
-                </div>
-              )}
-            </Panel>
-          </div>
-
-          {/* Village table, so the numbers can be read exactly rather than
-              estimated off a bar. */}
-          {!activeGroupId && byVillage.length > 0 && (
-            <Panel title="Village detail" subtitle={`${byVillage.length} villages with sales · ${windowLabel}`} icon={<MapPin size={15} />} padding={false}>
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr className="text-left text-[var(--fg-muted)] border-b border-[var(--border-default)]">
-                      <th className="px-5 py-3 font-medium">Village</th>
-                      <th className="px-5 py-3 font-medium text-right">Revenue</th>
-                      <th className="px-5 py-3 font-medium text-right">Transactions</th>
-                      <th className="px-5 py-3 font-medium text-right">Avg sale</th>
-                      <th className="px-5 py-3 font-medium text-right">Share</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {byVillage.map((v) => (
-                      <tr key={v.name} className="border-b border-[var(--border-subtle)] hover:bg-[var(--bg-surface)] transition-colors">
-                        <td className="px-5 py-3 text-[var(--fg-primary)] font-medium">{v.name}</td>
-                        <td className="px-5 py-3 text-right tabular-nums">{money(v.revenue)}</td>
-                        <td className="px-5 py-3 text-right tabular-nums text-[var(--fg-secondary)]">{num(v.count)}</td>
-                        <td className="px-5 py-3 text-right tabular-nums text-[var(--fg-secondary)]">{money(v.count ? v.revenue / v.count : 0)}</td>
-                        <td className="px-5 py-3 text-right">
-                          <Badge tone="neutral">{villageTotal ? Math.round((v.revenue / villageTotal) * 100) : 0}%</Badge>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </Panel>
-          )}
-        </div>
-      )}
+      {!activeGroupId && <VillageRevenuePanel state={state} />}
     </div>
   );
 }

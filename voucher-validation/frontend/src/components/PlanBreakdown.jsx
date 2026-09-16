@@ -5,7 +5,13 @@
 //   Total · Sold · Active · Expired · Left (unused/available) · Data used
 // and flags plans that are running LOW on sellable stock so ops knows to
 // generate more of that voucher type.
+//
+// It renders the restock notice and a bare DataTable with no card chrome of its
+// own: the caller wraps it in an unpadded Panel, so the table's header row sits
+// flush against the panel head instead of a card inside a card.
+
 import { AlertTriangle, PackageOpen } from "lucide-react";
+import { DataTable, Th, Td, StatusPill, EmptyState, CHART_SERIES } from "./ui";
 
 const fmtNum = (n) => Number(n || 0).toLocaleString();
 
@@ -29,7 +35,9 @@ export default function PlanBreakdown({
   formatQuota = defaultFmtQuota,
   onSelect,
   lowPct = 0.15,
-  color = "var(--brand)",
+  // Null cycles the shared chart palette so a plan carries the same hue here as
+  // it does in the revenue donut. A caller may still pin one colour.
+  color = null,
 }) {
   const rows = packages
     .map((p) => {
@@ -51,12 +59,7 @@ export default function PlanBreakdown({
     .sort((a, b) => b.total - a.total);
 
   if (rows.length === 0) {
-    return (
-      <div className="flex flex-col items-center justify-center py-10 text-center">
-        <PackageOpen size={22} className="text-[var(--text-quaternary)] mb-2" />
-        <p className="text-[13px] text-[var(--text-tertiary)]">No voucher packages yet</p>
-      </div>
-    );
+    return <EmptyState icon={PackageOpen} title="No voucher packages yet" description="Plans appear once vouchers are synced." />;
   }
 
   const t = rows.reduce(
@@ -70,12 +73,13 @@ export default function PlanBreakdown({
 
   return (
     <div>
-      {/* Restock alert */}
+      {/* Restock notice — the one thing on this table that needs acting on, so
+          it sits above the header rather than inside a Stock column footnote. */}
       {lowPlans.length > 0 && (
-        <div className="flex items-start gap-2.5 mb-3 px-3.5 py-2.5 rounded-lg bg-[var(--warning-soft)] border border-transparent">
+        <div className="flex items-start gap-2.5 px-5 py-3.5 bg-[var(--warning-soft)] border-b border-[var(--warning-border)]">
           <AlertTriangle size={15} className="text-[var(--warning-fg)] mt-0.5 shrink-0" />
           <div className="text-[12.5px] text-[var(--warning-fg)] leading-relaxed">
-            <span className="font-semibold">
+            <span className="font-semibold font-display">
               {lowPlans.length} plan{lowPlans.length === 1 ? "" : "s"} need restocking.
             </span>{" "}
             {lowPlans
@@ -86,113 +90,84 @@ export default function PlanBreakdown({
         </div>
       )}
 
-      <div className="overflow-x-auto rounded-lg border border-[var(--border-default)]">
-        <table className="w-full text-[12.5px]">
-          <thead>
-            <tr className="text-left border-b border-[var(--border-default)] bg-[var(--surface-sunken)]">
-              <Th className="text-left">Plan</Th>
-              <Th>Total</Th>
-              <Th>Sold</Th>
-              <Th>Active</Th>
-              <Th>Expired</Th>
-              <Th>Left</Th>
-              <Th>Data used</Th>
-              <Th className="text-left">Stock</Th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-[var(--border-subtle)]">
-            {rows.map((r) => (
-              <tr
-                key={r.name}
-                onClick={onSelect ? () => onSelect(r.name) : undefined}
-                className={
-                  "transition-colors " +
-                  (onSelect ? "cursor-pointer hover:bg-[var(--surface-hover)]" : "")
-                }
-              >
-                <td className="px-3 py-2.5">
-                  <span className="flex items-center gap-2 font-medium text-[var(--text-primary)] truncate">
-                    <span className="w-2 h-2 rounded-full shrink-0" style={{ background: color }} />
-                    {r.name}
-                  </span>
-                </td>
-                <Td>{fmtNum(r.total)}</Td>
-                <Td>
-                  <span className="text-[var(--text-primary)] font-semibold">{fmtNum(r.sold)}</span>
-                  <span className="text-[var(--text-quaternary)] ml-1">· {r.soldPct}%</span>
-                </Td>
-                <Td className="text-[var(--success-fg)]">{fmtNum(r.active)}</Td>
-                <Td className="text-[var(--text-tertiary)]">{fmtNum(r.expired)}</Td>
-                <Td>
+      <DataTable>
+        <thead>
+          <tr>
+            <Th>Plan</Th>
+            <Th align="right">Total</Th>
+            <Th align="right">Sold</Th>
+            <Th align="right">Active</Th>
+            <Th align="right">Expired</Th>
+            <Th align="right">Left</Th>
+            <Th align="right">Data used</Th>
+            <Th>Stock</Th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((r, i) => (
+            <tr
+              key={r.name}
+              onClick={onSelect ? () => onSelect(r.name) : undefined}
+              title={onSelect ? `View ${r.name} vouchers` : undefined}
+              className={onSelect ? "cursor-pointer" : undefined}
+            >
+              <Td strong>
+                <span className="flex items-center gap-2.5 min-w-0">
                   <span
-                    className="font-semibold"
-                    style={{
-                      color:
-                        r.stock === "out"
-                          ? "var(--error, #dc2626)"
-                          : r.stock === "low"
-                          ? "var(--warning-fg)"
-                          : "var(--text-primary)",
-                    }}
-                  >
-                    {fmtNum(r.left)}
-                  </span>
-                </Td>
-                <Td className="text-[var(--text-secondary)]">{formatQuota(r.usedMb)}</Td>
-                <td className="px-3 py-2.5">
-                  <StockBadge stock={r.stock} />
-                </td>
-              </tr>
-            ))}
-          </tbody>
-          <tfoot>
-            <tr className="border-t-2 border-[var(--border-default)] bg-[var(--surface-sunken)] font-semibold text-[var(--text-primary)]">
-              <td className="px-3 py-2.5">All plans</td>
-              <Td>{fmtNum(t.total)}</Td>
-              <Td>{fmtNum(t.sold)}</Td>
-              <Td>{fmtNum(t.active)}</Td>
-              <Td>{fmtNum(t.expired)}</Td>
-              <Td>{fmtNum(t.left)}</Td>
-              <Td>{formatQuota(t.usedMb)}</Td>
-              <td className="px-3 py-2.5" />
+                    className="w-2.5 h-2.5 rounded-[3px] shrink-0"
+                    style={{ background: color || CHART_SERIES[i % CHART_SERIES.length] }}
+                  />
+                  <span className="truncate">{r.name}</span>
+                </span>
+              </Td>
+              <Td align="right" className="tabular-nums">{fmtNum(r.total)}</Td>
+              <Td align="right" className="tabular-nums">
+                <span className="font-semibold text-[var(--fg-primary)]">{fmtNum(r.sold)}</span>
+                <span className="text-[var(--fg-muted)] ml-1">· {r.soldPct}%</span>
+              </Td>
+              <Td align="right" className="tabular-nums text-[var(--success-fg)] font-semibold">{fmtNum(r.active)}</Td>
+              <Td align="right" className="tabular-nums" muted>{fmtNum(r.expired)}</Td>
+              <Td align="right" className="tabular-nums">
+                <span
+                  className="font-semibold"
+                  style={{
+                    color:
+                      r.stock === "out"
+                        ? "var(--danger-fg)"
+                        : r.stock === "low"
+                        ? "var(--warning-fg)"
+                        : "var(--fg-primary)",
+                  }}
+                >
+                  {fmtNum(r.left)}
+                </span>
+              </Td>
+              <Td align="right" className="tabular-nums">{formatQuota(r.usedMb)}</Td>
+              <Td>
+                <StockPill stock={r.stock} />
+              </Td>
             </tr>
-          </tfoot>
-        </table>
-      </div>
+          ))}
+          {/* Totals live in the tbody, not a tfoot: .sf-table only pads
+              `tbody td`, so a footer row would sit unpadded and out of grid. */}
+          <tr className="bg-[var(--bg-surface)]">
+            <Td strong>All plans</Td>
+            <Td align="right" strong className="tabular-nums">{fmtNum(t.total)}</Td>
+            <Td align="right" strong className="tabular-nums">{fmtNum(t.sold)}</Td>
+            <Td align="right" strong className="tabular-nums">{fmtNum(t.active)}</Td>
+            <Td align="right" strong className="tabular-nums">{fmtNum(t.expired)}</Td>
+            <Td align="right" strong className="tabular-nums">{fmtNum(t.left)}</Td>
+            <Td align="right" strong className="tabular-nums">{formatQuota(t.usedMb)}</Td>
+            <Td />
+          </tr>
+        </tbody>
+      </DataTable>
     </div>
   );
 }
 
-function Th({ children, className = "text-right" }) {
-  return (
-    <th className={`px-3 py-2 text-[10.5px] font-semibold uppercase tracking-wide text-[var(--text-quaternary)] ${className}`}>
-      {children}
-    </th>
-  );
-}
-
-function Td({ children, className = "text-[var(--text-secondary)]" }) {
-  return <td className={`px-3 py-2.5 text-right tabular-nums ${className}`}>{children}</td>;
-}
-
-function StockBadge({ stock }) {
-  if (stock === "out") {
-    return (
-      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10.5px] font-medium bg-[var(--error-soft,rgba(220,38,38,0.12))] text-[var(--error,#dc2626)]">
-        <span className="w-1.5 h-1.5 rounded-full bg-current" /> Sold out
-      </span>
-    );
-  }
-  if (stock === "low") {
-    return (
-      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10.5px] font-medium bg-[var(--warning-soft)] text-[var(--warning-fg)]">
-        <span className="w-1.5 h-1.5 rounded-full bg-current" /> Low
-      </span>
-    );
-  }
-  return (
-    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10.5px] font-medium bg-[var(--success-soft,rgba(22,163,74,0.1))] text-[var(--success-fg)]">
-      <span className="w-1.5 h-1.5 rounded-full bg-current" /> OK
-    </span>
-  );
+function StockPill({ stock }) {
+  if (stock === "out") return <StatusPill tone="danger">Sold out</StatusPill>;
+  if (stock === "low") return <StatusPill tone="warning">Low</StatusPill>;
+  return <StatusPill tone="success">OK</StatusPill>;
 }

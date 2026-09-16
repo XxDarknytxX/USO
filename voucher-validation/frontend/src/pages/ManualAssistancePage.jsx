@@ -1,22 +1,63 @@
 // src/pages/ManualAssistancePage.jsx
-// Paid-but-auth-failed cases. Each shows the customer's phone, amount, plan and
-// the voucher code that's RESERVED for them (they redeem it via the portal's
-// manual voucher-login). "Mark sorted" resolves the case.
-import { useEffect, useState, useCallback } from "react";
+//
+// Paid-but-auth-failed cases. Each one is a customer who has been charged and
+// has no internet: the voucher is already RESERVED for them, and the job here
+// is to get that code into their hands — read it out, email it — and then mark
+// the case sorted.
+//
+// Laid out as a queue rather than a report. The counts at the top are the ones
+// that decide whether to act now (how many are open, how much money is sitting
+// unfulfilled, how many cannot be emailed because we have no address), and the
+// list below is the work itself.
+
+import { useEffect, useMemo, useState, useCallback } from "react";
 import toast from "react-hot-toast";
-import { LifeBuoy, RefreshCw, CheckCircle2, Phone, Ticket, Copy, Mail, Send } from "lucide-react";
+import {
+  LifeBuoy,
+  RefreshCw,
+  CheckCircle2,
+  Phone,
+  Ticket,
+  Copy,
+  Mail,
+  Send,
+  CreditCard,
+} from "lucide-react";
 import { portalConfigApi } from "../services/api";
-import { PageHeader, Panel, Button, Badge, EmptyState, Modal, Field, Input } from "../components/ui";
+import {
+  PageHeader,
+  Panel,
+  Button,
+  EmptyState,
+  Modal,
+  Field,
+  Input,
+  PageShell,
+  KpiGrid,
+  StatCard,
+  Toolbar,
+  SearchInput,
+  Segmented,
+  StatusPill,
+  DataTable,
+  Th,
+  Td,
+  TableMessage,
+  RecordCell,
+} from "../components/ui";
 
 const fmtMoney = (n) =>
   "$" + Number(n || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const fmtDate = (d) => (d ? new Date(d).toLocaleString() : "—");
+
+const COLUMNS = 6;
 
 export default function ManualAssistancePage() {
   const [cases, setCases] = useState([]);
   const [unresolved, setUnresolved] = useState(0);
   const [loading, setLoading] = useState(true);
   const [statusFilter, setStatusFilter] = useState("open"); // open | resolved | all
+  const [query, setQuery] = useState("");
   const [resolving, setResolving] = useState(null);
   // Email-the-code dialog: the case being sent, plus the editable recipient
   // (prefilled from the M-PAiSA mapping when there is one).
@@ -82,13 +123,38 @@ export default function ManualAssistancePage() {
     }
   };
 
+  // The status segment refetches; the search box only narrows what came back,
+  // because a support agent is usually looking for one phone number in a list
+  // they can already see.
+  const shown = useMemo(() => {
+    const needle = query.trim().toLowerCase();
+    if (!needle) return cases;
+    return cases.filter((c) =>
+      [c.customerPhone, c.transactionId, c.voucherCode, c.planName, c.customerEmail]
+        .some((v) => String(v || "").toLowerCase().includes(needle))
+    );
+  }, [cases, query]);
+
+  const stats = useMemo(() => {
+    const value = cases.reduce((n, c) => n + Number(c.amount || 0), 0);
+    return {
+      value,
+      reserved: cases.filter((c) => c.voucherCode).length,
+      noEmail: cases.filter((c) => !c.customerEmail).length,
+    };
+  }, [cases]);
+
+  const viewLabel =
+    statusFilter === "open" ? "open cases" : statusFilter === "resolved" ? "resolved cases" : "all cases";
+
   return (
-    <div className="p-4 sm:p-6 lg:p-8">
+    <PageShell>
       <PageHeader
         eyebrow="Support"
         title="Manual Assistance"
         subtitle="Customers who paid but auth failed — hand them their reserved voucher, then mark sorted."
-        icon={<LifeBuoy size={20} />}
+        icon={<LifeBuoy size={22} />}
+        tone="orange"
         actions={
           <Button variant="secondary" size="sm" onClick={load} iconLeft={<RefreshCw size={14} />}>
             Refresh
@@ -96,130 +162,185 @@ export default function ManualAssistancePage() {
         }
       />
 
-      <div className="mt-6 inline-flex items-center rounded-md p-0.5 bg-[var(--surface-raised)] border border-[var(--border-default)]">
-        {[
-          { v: "open", l: `Open${unresolved ? ` · ${unresolved}` : ""}` },
-          { v: "resolved", l: "Resolved" },
-          { v: "all", l: "All" },
-        ].map(({ v, l }) => (
-          <button
-            key={v}
-            onClick={() => setStatusFilter(v)}
-            className={
-              "h-7 px-3 text-[12px] font-medium rounded transition-colors " +
-              (statusFilter === v
-                ? "bg-[var(--surface-hover)] text-[var(--text-primary)]"
-                : "text-[var(--text-tertiary)] hover:text-[var(--text-primary)]")
-            }
-          >
-            {l}
-          </button>
-        ))}
-      </div>
+      <KpiGrid>
+        <StatCard
+          label="Open cases"
+          value={unresolved}
+          sub={unresolved ? "waiting on someone" : "nothing outstanding"}
+          icon={<LifeBuoy size={18} />}
+          color="orange"
+        />
+        <StatCard
+          label="Value in this view"
+          value={fmtMoney(stats.value)}
+          sub={`${cases.length} ${viewLabel}`}
+          icon={<CreditCard size={18} />}
+          color="accent"
+        />
+        <StatCard
+          label="Vouchers reserved"
+          value={stats.reserved}
+          sub="ready to hand over"
+          icon={<Ticket size={18} />}
+          color="indigo"
+        />
+        <StatCard
+          label="No email on file"
+          value={stats.noEmail}
+          sub="need an M-PAiSA mapping"
+          icon={<Mail size={18} />}
+          color="slate"
+        />
+      </KpiGrid>
 
-      <div className="mt-5">
-        <Panel padding={false}>
-          {loading ? (
-            <div className="p-10 text-center text-[var(--fg-muted)]">Loading…</div>
-          ) : cases.length === 0 ? (
-            <div className="p-8">
-              <EmptyState
-                icon={CheckCircle2}
-                title={statusFilter === "open" ? "No open cases" : "No cases"}
-                description={statusFilter === "open" ? "Every paid customer got connected." : ""}
-              />
-            </div>
-          ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="text-left border-b border-[var(--border-default)]">
-                    <Th>Phone</Th>
-                    <Th>Amount</Th>
-                    <Th>Plan</Th>
-                    <Th>Voucher to assign</Th>
-                    <Th>Created</Th>
-                    <Th>Status</Th>
-                    <Th />
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-[var(--border-default)]">
-                  {cases.map((c) => (
-                    <tr key={c.transactionId} className="hover:bg-[var(--bg-surface)] transition-colors">
-                      <td className="px-4 py-3">
-                        <span className="flex items-center gap-1.5 font-mono text-[var(--fg-primary)]">
-                          <Phone size={12} className="text-[var(--fg-muted)]" />
-                          {c.customerPhone || "—"}
-                        </span>
-                        <span className="block text-[11px] font-mono text-[var(--fg-muted)] mt-0.5">{c.transactionId}</span>
-                      </td>
-                      <td className="px-4 py-3 font-semibold text-[var(--fg-primary)] tabular-nums">{fmtMoney(c.amount)}</td>
-                      <td className="px-4 py-3 text-[var(--fg-secondary)]">{c.planName || "—"}</td>
-                      <td className="px-4 py-3">
-                        {c.voucherCode ? (
-                          <button
-                            onClick={() => copy(c.voucherCode)}
-                            title="Copy code"
-                            className="inline-flex items-center gap-1.5 px-2 py-1 rounded font-mono text-[12.5px] font-semibold bg-[var(--brand-soft)] text-[var(--brand-fg-on-soft)] hover:opacity-80 transition-opacity"
-                          >
-                            <Ticket size={12} />
-                            {c.voucherCode}
-                            <Copy size={11} className="opacity-60" />
-                          </button>
-                        ) : (
-                          <span className="text-[var(--fg-muted)]">—</span>
-                        )}
-                      </td>
-                      <td className="px-4 py-3 text-[var(--fg-secondary)] text-[12.5px]">{fmtDate(c.createdAt)}</td>
-                      <td className="px-4 py-3">
-                        {c.resolved ? <Badge tone="success">Sorted</Badge> : <Badge tone="warning">Open</Badge>}
-                      </td>
-                      <td className="px-4 py-3">
-                        <div className="flex items-center justify-end gap-2">
-                          {/* Only offered when we actually have an address for
-                              this number — there is nothing to email otherwise.
-                              The reason is shown rather than the button simply
-                              vanishing, so it is clear a mapping would fix it. */}
-                          {c.voucherCode &&
-                            (c.customerEmail ? (
-                              <Button
-                                variant="secondary"
-                                size="sm"
-                                iconLeft={<Mail size={13} />}
-                                onClick={() => openEmail(c)}
-                                title={`Email the code to ${c.customerEmail}`}
-                              >
-                                Email code
-                              </Button>
-                            ) : (
-                              <span
-                                className="text-[11.5px] text-[var(--fg-muted)] whitespace-nowrap"
-                                title="Add this number under M-PAiSA Mapping to email their code"
-                              >
-                                No email on file
-                              </span>
-                            ))}
-                          {!c.resolved && (
+      <Toolbar>
+        <Segmented
+          value={statusFilter}
+          onChange={setStatusFilter}
+          options={[
+            { value: "open", label: "Open", count: unresolved || undefined },
+            { value: "resolved", label: "Resolved" },
+            { value: "all", label: "All" },
+          ]}
+        />
+        <SearchInput
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder="Search phone, transaction, voucher…"
+          width="w-72"
+        />
+        <span className="ml-auto text-[12px] text-[var(--fg-muted)] tabular-nums">
+          {shown.length} of {cases.length} {viewLabel}
+        </span>
+      </Toolbar>
+
+      <Panel
+        title="Case queue"
+        subtitle="Oldest first from the portal. Copy or email the reserved code, then mark sorted."
+        icon={<LifeBuoy size={15} />}
+        tone="orange"
+        padding={false}
+      >
+        {loading ? (
+          <div className="p-5 space-y-2.5">
+            {Array.from({ length: 5 }).map((_, i) => (
+              <div key={i} className="h-12 rounded-lg skeleton" style={{ opacity: 1 - i * 0.14 }} />
+            ))}
+          </div>
+        ) : cases.length === 0 ? (
+          <EmptyState
+            icon={CheckCircle2}
+            title={statusFilter === "open" ? "No open cases" : "No cases"}
+            description={statusFilter === "open" ? "Every paid customer got connected." : ""}
+          />
+        ) : (
+          <DataTable>
+            <thead>
+              <tr>
+                <Th>Customer</Th>
+                {/* What they bought and what they paid is one thought, and
+                    pairing them keeps both actions on screen without the row
+                    scrolling sideways. */}
+                <Th align="right">Plan &amp; amount</Th>
+                <Th>Voucher to assign</Th>
+                <Th>Created</Th>
+                <Th>Status</Th>
+                <Th align="right">Actions</Th>
+              </tr>
+            </thead>
+            <tbody>
+              {shown.length === 0 ? (
+                <TableMessage colSpan={COLUMNS}>No case matches “{query.trim()}”.</TableMessage>
+              ) : (
+                shown.map((c) => (
+                  <tr key={c.transactionId}>
+                    <Td>
+                      <RecordCell
+                        tone="orange"
+                        icon={<Phone size={14} />}
+                        title={c.customerPhone || "Unknown number"}
+                        subtitle={c.transactionId}
+                        mono
+                      />
+                    </Td>
+                    <Td align="right" nowrap>
+                      <span className="font-semibold text-[var(--fg-primary)] tabular-nums">
+                        {fmtMoney(c.amount)}
+                      </span>
+                      <span className="block text-[11.5px] text-[var(--fg-muted)]">
+                        {c.planName || "—"}
+                      </span>
+                    </Td>
+                    <Td>
+                      {c.voucherCode ? (
+                        <button
+                          onClick={() => copy(c.voucherCode)}
+                          title="Copy code"
+                          className="inline-flex items-center gap-1.5 px-2 py-1 rounded-md font-mono text-[12.5px] font-semibold bg-[var(--brand-soft)] text-[var(--brand-fg-on-soft)] hover:opacity-80 transition-opacity"
+                        >
+                          <Ticket size={12} />
+                          {c.voucherCode}
+                          <Copy size={11} className="opacity-60" />
+                        </button>
+                      ) : (
+                        <span className="text-[var(--fg-muted)]">—</span>
+                      )}
+                    </Td>
+                    <Td muted nowrap>
+                      {fmtDate(c.createdAt)}
+                    </Td>
+                    <Td>
+                      {c.resolved ? (
+                        <StatusPill tone="success">Sorted</StatusPill>
+                      ) : (
+                        <StatusPill tone="warning">Open</StatusPill>
+                      )}
+                    </Td>
+                    <Td align="right">
+                      <div className="flex items-center justify-end gap-2">
+                        {/* Only offered when we actually have an address for
+                            this number — there is nothing to email otherwise.
+                            The reason is shown rather than the button simply
+                            vanishing, so it is clear a mapping would fix it. */}
+                        {c.voucherCode &&
+                          (c.customerEmail ? (
                             <Button
                               variant="secondary"
                               size="sm"
-                              loading={resolving === c.transactionId}
-                              iconLeft={resolving !== c.transactionId && <CheckCircle2 size={13} />}
-                              onClick={() => resolve(c.transactionId)}
+                              iconLeft={<Mail size={13} />}
+                              onClick={() => openEmail(c)}
+                              title={`Email the code to ${c.customerEmail}`}
                             >
-                              Mark sorted
+                              Email code
                             </Button>
-                          )}
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </Panel>
-      </div>
+                          ) : (
+                            <span
+                              className="text-[11.5px] text-[var(--fg-muted)] whitespace-nowrap"
+                              title="Add this number under M-PAiSA Mapping to email their code"
+                            >
+                              No email on file
+                            </span>
+                          ))}
+                        {!c.resolved && (
+                          <Button
+                            variant="secondary"
+                            size="sm"
+                            loading={resolving === c.transactionId}
+                            iconLeft={resolving !== c.transactionId && <CheckCircle2 size={13} />}
+                            onClick={() => resolve(c.transactionId)}
+                          >
+                            Mark sorted
+                          </Button>
+                        )}
+                      </div>
+                    </Td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </DataTable>
+        )}
+      </Panel>
 
       {emailCase && (
         <Modal open onClose={() => !sending && setEmailCase(null)} width="lg">
@@ -231,7 +352,7 @@ export default function ManualAssistancePage() {
             onClose={() => !sending && setEmailCase(null)}
           />
           <Modal.Body>
-            <div className="rounded-lg border border-[var(--border-default)] bg-[var(--surface-sunken)] px-4 py-3 mb-5">
+            <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-surface)] px-4 py-3.5 mb-6">
               <dl className="grid grid-cols-[auto_1fr] gap-x-5 gap-y-2 text-[13px]">
                 <dt className="text-[var(--fg-muted)]">Phone</dt>
                 <dd className="font-mono text-[var(--fg-primary)]">{emailCase.customerPhone || "—"}</dd>
@@ -270,6 +391,7 @@ export default function ManualAssistancePage() {
               Cancel
             </Button>
             <Button
+              variant="primary"
               onClick={sendEmail}
               loading={sending}
               disabled={!emailTo.trim()}
@@ -280,10 +402,6 @@ export default function ManualAssistancePage() {
           </Modal.Footer>
         </Modal>
       )}
-    </div>
+    </PageShell>
   );
-}
-
-function Th({ children }) {
-  return <th className="px-4 py-2.5 text-label">{children}</th>;
 }

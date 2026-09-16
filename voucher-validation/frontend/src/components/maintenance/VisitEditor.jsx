@@ -14,20 +14,26 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import toast from "react-hot-toast";
 import {
-  ClipboardCheck, Camera, Send, Lock, Unlock, Save, AlertTriangle, CheckCircle2, X, Check,
+  ClipboardCheck, Camera, Send, Lock, Unlock, Save, AlertTriangle, CheckCircle2,
+  X, Check, CircleDashed, Images,
 } from "lucide-react";
 import { maintenanceApi, downscaleImage } from "../../services/api";
-import { Modal, Button, Badge, Field, Textarea, Input } from "../ui";
+import { Modal, Button, Field, Textarea, Input, StatusPill, ObjectTile, Segmented } from "../ui";
 import PhotoThumb from "./PhotoThumb";
 
 const CONDITION_UI = {
-  ok:        { label: "OK",              tone: "success", cls: "bg-[var(--success-fg)]" },
-  attention: { label: "Needs attention", tone: "warning", cls: "bg-[var(--warning-fg)]" },
-  faulty:    { label: "Faulty",          tone: "danger",  cls: "bg-[var(--brand)]" },
+  ok:        { label: "OK",              tone: "success", tile: "green",  Icon: CheckCircle2 },
+  attention: { label: "Needs attention", tone: "warning", tile: "orange", Icon: AlertTriangle },
+  faulty:    { label: "Faulty",          tone: "danger",  tile: "red",    Icon: AlertTriangle },
   // Not every village has every component. N/A is a real finding, but it has to
   // say why — there is no photograph to speak for it.
-  na:        { label: "N/A",             tone: "neutral", cls: "bg-[var(--text-quaternary)]" },
+  na:        { label: "N/A",             tone: "neutral", tile: "slate",  Icon: CircleDashed },
 };
+
+const CONDITION_OPTIONS = ["ok", "attention", "faulty", "na"].map((v) => ({
+  value: v,
+  label: CONDITION_UI[v].label,
+}));
 
 const fmtDate = (d) => (d ? new Date(d).toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" }) : "—");
 
@@ -173,6 +179,7 @@ export default function VisitEditor({ visitId, isAdmin, onClose, onChanged }) {
   const totalCount = (data?.checks || []).length;
   const photoTotal =
     (data?.generalPhotos?.length || 0) + (data?.checks || []).reduce((a, c) => a + c.photos.length, 0);
+  const progressPct = totalCount ? Math.round((filedCount / totalCount) * 100) : 0;
 
   return (
     <Modal open onClose={onClose} width="xl">
@@ -191,7 +198,7 @@ export default function VisitEditor({ visitId, isAdmin, onClose, onChanged }) {
       />
       <Modal.Body>
         {loading ? (
-          <div className="py-10 text-center text-[var(--fg-muted)]">Loading…</div>
+          <div className="py-10 text-center text-[13px] text-[var(--fg-muted)]">Loading…</div>
         ) : (
           <>
             <input
@@ -204,19 +211,37 @@ export default function VisitEditor({ visitId, isAdmin, onClose, onChanged }) {
               onChange={onFile}
             />
 
-            {readOnly && (
-              <div className="mb-5 flex flex-wrap items-center gap-2 text-[12.5px]">
-                <Badge tone={CONDITION_UI[visit.overallCondition]?.tone || "neutral"}>
+            {readOnly ? (
+              <div className="mb-5 flex flex-wrap items-center gap-x-3 gap-y-2 rounded-xl border border-[var(--border-default)] bg-[var(--bg-surface)] px-4 py-3">
+                <StatusPill tone={CONDITION_UI[visit.overallCondition]?.tone || "neutral"}>
                   Overall: {CONDITION_UI[visit.overallCondition]?.label || "—"}
-                </Badge>
-                <span className="text-[var(--fg-muted)]">
+                </StatusPill>
+                <span className="text-[12.5px] text-[var(--fg-muted)]">
                   Filed {fmtDate(visit.submittedAt)} · {photoTotal} photo{photoTotal === 1 ? "" : "s"}
                 </span>
                 {visit.reopenReason && (
-                  <span className="text-[var(--warning-fg)]">
+                  <span className="text-[12.5px] text-[var(--warning-fg)]">
                     Previously reopened: {visit.reopenReason}
                   </span>
                 )}
+              </div>
+            ) : (
+              /* Progress is stated once, at the top: an engineer filing component
+                 by component needs to know how much of the report is still open
+                 without counting locks down the list. */
+              <div className="mb-5 rounded-xl border border-[var(--border-default)] bg-[var(--bg-surface)] px-4 py-3">
+                <div className="flex items-center justify-between gap-3">
+                  <span className="text-label">Components filed</span>
+                  <span className="text-[12.5px] font-semibold tabular-nums text-[var(--fg-primary)] font-display">
+                    {filedCount} / {totalCount}
+                  </span>
+                </div>
+                <div className="mt-2 h-1.5 rounded-full bg-[var(--bg-surface-hover)] overflow-hidden">
+                  <span
+                    className="block h-full rounded-full bg-[var(--success-fg)] transition-[width] duration-500"
+                    style={{ width: `${progressPct}%` }}
+                  />
+                </div>
               </div>
             )}
 
@@ -237,139 +262,139 @@ export default function VisitEditor({ visitId, isAdmin, onClose, onChanged }) {
             )}
 
             <div className="space-y-3">
-              {(data?.checks || []).map((c) => (
-                <div
-                  key={c.key}
-                  className="rounded-lg border border-[var(--border-default)] bg-[var(--surface-sunken)] p-4"
-                >
-                  <div className="flex items-start justify-between gap-3 flex-wrap">
-                    <div className="min-w-0">
-                      <div className="text-[13.5px] font-semibold text-[var(--fg-primary)] flex items-center gap-1.5">
-                        {c.label}
-                        {c.status === "submitted" && (
-                          <span title={`Filed ${fmtDate(c.submittedAt)}`}>
-                            <Lock size={11} className="text-[var(--success-fg)]" />
-                          </span>
-                        )}
-                      </div>
-                      <div className="text-[11.5px] text-[var(--fg-muted)] mt-0.5">{c.hint}</div>
-                      {c.reopenReason && (
-                        <div className="text-[11px] text-[var(--warning-fg)] mt-0.5">
-                          Reopened: {c.reopenReason}
+              {(data?.checks || []).map((c) => {
+                const ui = CONDITION_UI[c.condition];
+                const locked = readOnly || c.status === "submitted";
+                const CondIcon = ui?.Icon || CircleDashed;
+                return (
+                  <div
+                    key={c.key}
+                    className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-elevated)] shadow-[var(--shadow-xs)] p-4"
+                  >
+                    <div className="flex items-start justify-between gap-3 flex-wrap">
+                      <div className="flex items-start gap-3 min-w-0">
+                        <ObjectTile tone={ui?.tile || "slate"} size="sm" className="mt-0.5">
+                          <CondIcon size={15} />
+                        </ObjectTile>
+                        <div className="min-w-0">
+                          <div className="text-[13.5px] font-semibold text-[var(--fg-primary)] flex items-center gap-1.5 font-display">
+                            {c.label}
+                            {c.status === "submitted" && (
+                              <span title={`Filed ${fmtDate(c.submittedAt)}`}>
+                                <Lock size={11} className="text-[var(--success-fg)]" />
+                              </span>
+                            )}
+                          </div>
+                          <div className="text-[11.5px] text-[var(--fg-muted)] mt-0.5">{c.hint}</div>
+                          {c.reopenReason && (
+                            <div className="text-[11px] text-[var(--warning-fg)] mt-0.5">
+                              Reopened: {c.reopenReason}
+                            </div>
+                          )}
                         </div>
-                      )}
-                    </div>
-                    {readOnly || c.status === "submitted" ? (
-                      <Badge tone={CONDITION_UI[c.condition]?.tone || "neutral"}>
-                        {CONDITION_UI[c.condition]?.label || "Not inspected"}
-                      </Badge>
-                    ) : (
-                      <div className="inline-flex rounded-md p-0.5 bg-[var(--surface-raised)] border border-[var(--border-default)]">
-                        {["ok", "attention", "faulty", "na"].map((v) => (
-                          <button
-                            key={v}
-                            type="button"
-                            onClick={() => setCheck(c.key, { condition: v })}
-                            className={
-                              "h-7 px-2.5 text-[11.5px] font-medium rounded transition-colors " +
-                              (c.condition === v
-                                ? "bg-[var(--surface-hover)] text-[var(--text-primary)]"
-                                : "text-[var(--text-tertiary)] hover:text-[var(--text-primary)]")
-                            }
-                          >
-                            {CONDITION_UI[v].label}
-                          </button>
-                        ))}
                       </div>
-                    )}
-                  </div>
-
-                  {(!(readOnly || c.status === "submitted") || c.notes) && (
-                    <div className="mt-3">
-                      {readOnly || c.status === "submitted" ? (
-                        <p className="text-[12.5px] text-[var(--fg-secondary)] whitespace-pre-wrap">{c.notes}</p>
+                      {locked ? (
+                        <StatusPill tone={ui?.tone || "neutral"}>
+                          {ui?.label || "Not inspected"}
+                        </StatusPill>
                       ) : (
-                        <Textarea
-                          rows={2}
-                          value={c.notes}
-                          placeholder="What did you find? Anything replaced or adjusted?"
-                          onChange={(e) => setCheck(c.key, { notes: e.target.value })}
+                        <Segmented
+                          size="sm"
+                          options={CONDITION_OPTIONS}
+                          value={c.condition}
+                          onChange={(v) => setCheck(c.key, { condition: v })}
                         />
                       )}
                     </div>
-                  )}
 
-                  <div className="mt-3 flex items-center gap-2 flex-wrap">
-                    {c.photos.map((p) => (
-                      <PhotoThumb
-                        key={p.id}
-                        photoId={p.id}
-                        caption={p.caption}
-                        onRemove={readOnly || c.status === "submitted" ? undefined : removePhoto}
-                        onOpen={(url) => setLightbox({ url, caption: c.label })}
-                      />
-                    ))}
-                    {!readOnly && c.status !== "submitted" && (
-                      <Button
-                        variant="secondary"
-                        size="sm"
-                        onClick={() => pickPhoto(c.key)}
-                        loading={uploading === c.key}
-                        iconLeft={uploading !== c.key && <Camera size={13} />}
-                      >
-                        Add photo
-                      </Button>
-                    )}
-                    {(readOnly || c.status === "submitted") && c.photos.length === 0 && (
-                      <span className="text-[11.5px] text-[var(--fg-muted)]">No photo</span>
+                    {(!locked || c.notes) && (
+                      <div className="mt-3">
+                        {locked ? (
+                          <p className="text-[12.5px] text-[var(--fg-secondary)] whitespace-pre-wrap leading-relaxed">{c.notes}</p>
+                        ) : (
+                          <Textarea
+                            rows={2}
+                            value={c.notes}
+                            placeholder="What did you find? Anything replaced or adjusted?"
+                            onChange={(e) => setCheck(c.key, { notes: e.target.value })}
+                          />
+                        )}
+                      </div>
                     )}
 
-                    <span className="ml-auto flex items-center gap-2">
-                      {c.status === "submitted" ? (
-                        <>
-                          <span className="text-[11.5px] text-[var(--success-fg)] flex items-center gap-1">
-                            <Check size={12} /> Filed {fmtDate(c.submittedAt)}
-                          </span>
-                          {isAdmin && !readOnly && (
-                            <Button variant="ghost" size="sm" onClick={() => reopenComponent(c.key)} iconLeft={<Unlock size={12} />}>
-                              Reopen
-                            </Button>
-                          )}
-                        </>
-                      ) : (
-                        !readOnly && (
-                          <Button
-                            variant="primary"
-                            size="sm"
-                            onClick={() => fileComponent(c.key)}
-                            loading={filing === c.key}
-                            disabled={
-                              filing === c.key ||
-                              (c.condition === "na"
-                                ? !String(c.notes || "").trim()
-                                : c.photos.length === 0)
-                            }
-                            iconLeft={filing !== c.key && <Send size={12} />}
-                            title={
-                              c.condition === "na"
-                                ? "Not applicable — say why in the notes"
-                                : "Needs a condition and at least one photo"
-                            }
-                          >
-                            File this
-                          </Button>
-                        )
+                    <div className="mt-3 flex items-center gap-2 flex-wrap">
+                      {c.photos.map((p) => (
+                        <PhotoThumb
+                          key={p.id}
+                          photoId={p.id}
+                          caption={p.caption}
+                          size="sm"
+                          onRemove={locked ? undefined : removePhoto}
+                          onOpen={(url) => setLightbox({ url, caption: c.label })}
+                        />
+                      ))}
+                      {!locked && (
+                        <Button
+                          variant="secondary"
+                          size="sm"
+                          onClick={() => pickPhoto(c.key)}
+                          loading={uploading === c.key}
+                          iconLeft={uploading !== c.key && <Camera size={13} />}
+                        >
+                          Add photo
+                        </Button>
                       )}
-                    </span>
+                      {locked && c.photos.length === 0 && (
+                        <span className="text-[11.5px] text-[var(--fg-muted)]">No photo</span>
+                      )}
+
+                      <span className="ml-auto flex items-center gap-2">
+                        {c.status === "submitted" ? (
+                          <>
+                            <span className="text-[11.5px] text-[var(--success-fg)] flex items-center gap-1">
+                              <Check size={12} /> Filed {fmtDate(c.submittedAt)}
+                            </span>
+                            {isAdmin && !readOnly && (
+                              <Button variant="ghost" size="sm" onClick={() => reopenComponent(c.key)} iconLeft={<Unlock size={12} />}>
+                                Reopen
+                              </Button>
+                            )}
+                          </>
+                        ) : (
+                          !readOnly && (
+                            <Button
+                              variant="primary"
+                              size="sm"
+                              onClick={() => fileComponent(c.key)}
+                              loading={filing === c.key}
+                              disabled={
+                                filing === c.key ||
+                                (c.condition === "na"
+                                  ? !String(c.notes || "").trim()
+                                  : c.photos.length === 0)
+                              }
+                              iconLeft={filing !== c.key && <Send size={12} />}
+                              title={
+                                c.condition === "na"
+                                  ? "Not applicable — say why in the notes"
+                                  : "Needs a condition and at least one photo"
+                              }
+                            >
+                              File this
+                            </Button>
+                          )
+                        )}
+                      </span>
+                    </div>
                   </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
 
             <div className="mt-5">
               <Field label="Overall summary" hint={readOnly ? undefined : "Anything the site needs, follow-up required, parts to order."}>
                 {readOnly ? (
-                  <p className="text-[12.5px] text-[var(--fg-secondary)] whitespace-pre-wrap">
+                  <p className="text-[12.5px] text-[var(--fg-secondary)] whitespace-pre-wrap leading-relaxed">
                     {visit?.summary || "—"}
                   </p>
                 ) : (
@@ -382,14 +407,21 @@ export default function VisitEditor({ visitId, isAdmin, onClose, onChanged }) {
               </Field>
             </div>
 
-            <div className="mt-5">
+            {/* General photos are the ones that belong to the visit rather than
+                to any one component — site access, the approach road, the mess
+                someone left behind. */}
+            <div className="mt-5 rounded-xl border border-[var(--border-default)] bg-[var(--bg-surface)] p-4">
+              <div className="flex items-center gap-2 mb-3">
+                <Images size={13} className="text-[var(--fg-muted)]" />
+                <span className="text-label">General photos</span>
+              </div>
               <div className="flex items-center gap-2 flex-wrap">
-                <span className="text-[11.5px] text-[var(--fg-muted)] uppercase tracking-wide">General photos</span>
                 {(data?.generalPhotos || []).map((p) => (
                   <PhotoThumb
                     key={p.id}
                     photoId={p.id}
                     caption={p.caption}
+                    size="sm"
                     onRemove={readOnly ? undefined : removePhoto}
                     onOpen={(url) => setLightbox({ url, caption: "General" })}
                   />
@@ -404,6 +436,9 @@ export default function VisitEditor({ visitId, isAdmin, onClose, onChanged }) {
                   >
                     Add photo
                   </Button>
+                )}
+                {readOnly && (data?.generalPhotos || []).length === 0 && (
+                  <span className="text-[11.5px] text-[var(--fg-muted)]">No general photos</span>
                 )}
               </div>
             </div>

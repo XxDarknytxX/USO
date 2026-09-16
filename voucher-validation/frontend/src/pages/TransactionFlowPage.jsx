@@ -1,5 +1,14 @@
 // src/pages/TransactionFlowPage.jsx
-// Per-transaction event timeline view.
+//
+// One row per transaction, opening onto the full event timeline — payment,
+// handshake, voucher claim, auth — for that one customer.
+//
+// The old build made every transaction a card, so thirty transactions were
+// thirty headings and nothing lined up; you could not compare two amounts or
+// spot the run of failures at 14:05. It is a list now, and the timeline that
+// was the good part of the card moved inside the expanded row, where it reads
+// as an actual timeline: one rail, one dot per step, coloured from the shared
+// STATUS_COLORS so "failed" is the same red it is in every chart on the site.
 
 import { useEffect, useState, useCallback } from "react";
 import { useSearchParams } from "react-router-dom";
@@ -8,28 +17,40 @@ import { format } from "date-fns";
 import toast from "react-hot-toast";
 import {
   GitBranch,
-  Search,
-  Filter,
   RotateCcw,
-  X,
+  RefreshCw,
   ChevronDown,
   ChevronUp,
   CheckCircle2,
   XCircle,
   AlertTriangle,
   Clock,
-  Phone,
-  Wifi,
-  CreditCard,
-  Tag,
-  ArrowRight,
   Ticket,
   Mail,
 } from "lucide-react";
 
 import { portalAuditApi, portalConfigApi } from "../services/api";
 import Pagination from "../components/shared/Pagination";
-import { Badge, EmptyState, PageHeader, Panel, Modal, Button } from "../components/ui";
+import {
+  Badge,
+  Button,
+  EmptyState,
+  PageHeader,
+  Panel,
+  Modal,
+  PageShell,
+  Toolbar,
+  SearchInput,
+  Select,
+  Input,
+  StatusPill,
+  DataTable,
+  Th,
+  Td,
+  RecordCell,
+  STATUS_COLORS,
+  CHART_COLORS,
+} from "../components/ui";
 
 const STATUS_OPTIONS = [
   { value: "", label: "All statuses" },
@@ -80,6 +101,34 @@ const STEP_TONE = {
   case_creation_failed: "danger",
   system_error: "danger",
 };
+
+/** Tile colour for the row's status glyph. */
+const TONE_TILE = {
+  success: "green",
+  warning: "orange",
+  danger: "red",
+  info: "blue",
+  brand: "brand",
+  neutral: "slate",
+};
+
+/** Timeline dot colour. Taken from the chart kit so a failed step is the same
+ *  red as a failed slice, rather than a hex invented on this page. */
+const TONE_DOT = {
+  success: STATUS_COLORS.success,
+  warning: STATUS_COLORS.warning,
+  danger: STATUS_COLORS.failed,
+  info: STATUS_COLORS.unused,
+  brand: CHART_COLORS.brand, // a claimed voucher is the one on-brand moment
+  neutral: STATUS_COLORS.unknown,
+};
+
+// Toolbar controls are 36px pills; the Field primitives default to 40px and a
+// small radius. Inline is the one override Tailwind's class ordering cannot
+// undo, so the filter strip stays a single height.
+const PILL = { height: 36, borderRadius: 999 };
+
+const COLUMNS = 8;
 
 function formatTs(iso) {
   try {
@@ -164,292 +213,253 @@ export default function TransactionFlowPage() {
   };
 
   return (
-    <div className="p-4 sm:p-6 lg:p-8">
+    <PageShell>
       <PageHeader
         eyebrow="Portal"
         title="Txn Flows"
         subtitle={`${total.toLocaleString()} transaction${total !== 1 ? "s" : ""} — every step from payment to internet access.`}
-        icon={<GitBranch size={20} />}
+        icon={<GitBranch size={22} />}
+        tone="blue"
+        actions={
+          <Button variant="secondary" size="sm" onClick={fetchFlows} iconLeft={<RefreshCw size={14} />}>
+            Refresh
+          </Button>
+        }
       />
 
-      <div className="mt-6 space-y-4">
-        {/* Filters */}
-        <Panel
-          title="Filters"
-          icon={<Filter size={15} />}
-          actions={
-            hasFilters ? (
-              <button
-                onClick={clearFilters}
-                className="inline-flex items-center gap-1 text-[11.5px] text-[var(--accent)] hover:opacity-80 transition-opacity"
-              >
-                <RotateCcw size={11} /> Clear all
-              </button>
-            ) : null
-          }
+      <Toolbar>
+        <SearchInput
+          value={transactionId}
+          onChange={(e) => {
+            setTransactionId(e.target.value);
+            setPage(1);
+          }}
+          placeholder="Transaction ID…"
+          width="w-48"
+        />
+        <SearchInput
+          value={sessionId}
+          onChange={(e) => {
+            setSessionId(e.target.value);
+            setPage(1);
+          }}
+          placeholder="Session ID…"
+          width="w-48"
+        />
+        <SearchInput
+          value={voucherCode}
+          onChange={(e) => {
+            setVoucherCode(e.target.value);
+            setPage(1);
+          }}
+          placeholder="Voucher ID…"
+          width="w-44"
+        />
+        <SearchInput
+          value={phone}
+          onChange={(e) => {
+            setPhone(e.target.value);
+            setPage(1);
+          }}
+          placeholder="Phone number…"
+          width="w-44"
+        />
+        <Select
+          value={status}
+          onChange={(e) => {
+            setStatus(e.target.value);
+            setPage(1);
+          }}
+          style={{ ...PILL, width: 190 }}
+          aria-label="Filter by status"
         >
-          <div className="flex flex-wrap items-end gap-3">
-            <FilterSearch
-              label="Transaction ID"
-              placeholder="Search txn…"
-              value={transactionId}
-              onChange={(v) => {
-                setTransactionId(v);
-                setPage(1);
-              }}
-            />
-            <FilterSearch
-              label="Session ID"
-              placeholder="Search session…"
-              value={sessionId}
-              onChange={(v) => {
-                setSessionId(v);
-                setPage(1);
-              }}
-            />
-            <FilterSearch
-              label="Voucher ID"
-              placeholder="Search voucher…"
-              value={voucherCode}
-              onChange={(v) => {
-                setVoucherCode(v);
-                setPage(1);
-              }}
-            />
-            <FilterSearch
-              label="Phone number"
-              placeholder="Search number…"
-              value={phone}
-              onChange={(v) => {
-                setPhone(v);
-                setPage(1);
-              }}
-            />
-            <FilterField label="Status">
-              <select
-                value={status}
-                onChange={(e) => {
-                  setStatus(e.target.value);
-                  setPage(1);
-                }}
-                className={filterClass()}
-              >
-                {STATUS_OPTIONS.map((o) => (
-                  <option key={o.value} value={o.value}>
-                    {o.label}
-                  </option>
-                ))}
-              </select>
-            </FilterField>
-            <FilterField label="Start date">
-              <input
-                type="date"
-                value={startDate}
-                onChange={(e) => {
-                  setStartDate(e.target.value);
-                  setPage(1);
-                }}
-                className={filterClass()}
-              />
-            </FilterField>
-            <FilterField label="End date">
-              <input
-                type="date"
-                value={endDate}
-                onChange={(e) => {
-                  setEndDate(e.target.value);
-                  setPage(1);
-                }}
-                className={filterClass()}
-              />
-            </FilterField>
-          </div>
-        </Panel>
+          {STATUS_OPTIONS.map((o) => (
+            <option key={o.value} value={o.value}>
+              {o.label}
+            </option>
+          ))}
+        </Select>
+        <DateFilter
+          label="From"
+          value={startDate}
+          onChange={(v) => {
+            setStartDate(v);
+            setPage(1);
+          }}
+        />
+        <DateFilter
+          label="To"
+          value={endDate}
+          onChange={(v) => {
+            setEndDate(v);
+            setPage(1);
+          }}
+        />
+        {hasFilters && (
+          <Button variant="ghost" size="sm" iconLeft={<RotateCcw size={13} />} onClick={clearFilters}>
+            Clear all
+          </Button>
+        )}
+      </Toolbar>
 
-        {/* List */}
+      <Panel
+        title="Transactions"
+        subtitle="Open a row for its event timeline. An amber rail marks a payment with no voucher against it."
+        icon={<GitBranch size={15} />}
+        tone="blue"
+        padding={false}
+      >
         {loading ? (
-          <div
-            className={
-              "rounded-lg p-4 space-y-2 " +
-              "surface-card border border-[var(--border-default)]"
-            }
-          >
+          <div className="p-5 space-y-2.5">
             {Array.from({ length: 6 }).map((_, i) => (
-              <div key={i} className="h-16 rounded skeleton" />
+              <div key={i} className="h-12 rounded-lg skeleton" style={{ opacity: 1 - i * 0.12 }} />
             ))}
           </div>
         ) : transactions.length === 0 ? (
-          <Panel padding={false}>
-            <EmptyState
-              icon={GitBranch}
-              title="No transactions"
-              description={hasFilters ? "Try clearing filters." : "Transactions will appear as the portal processes payments."}
-            />
-          </Panel>
+          <EmptyState
+            icon={GitBranch}
+            title="No transactions"
+            description={hasFilters ? "Try clearing filters." : "Transactions will appear as the portal processes payments."}
+          />
         ) : (
-          <div className="space-y-2">
-            {transactions.map((txn) => (
-              <TransactionCard
-                key={txn.transactionId}
-                txn={txn}
-                isExpanded={expandedTxn === txn.transactionId}
-                onToggle={() =>
-                  setExpandedTxn((prev) =>
-                    prev === txn.transactionId ? null : txn.transactionId
-                  )
-                }
-              />
-            ))}
-          </div>
+          <DataTable>
+            <thead>
+              <tr>
+                <Th className="w-8" />
+                <Th>Transaction</Th>
+                <Th>Status</Th>
+                <Th>Voucher</Th>
+                <Th>Plan</Th>
+                <Th>Phone</Th>
+                <Th align="right">Amount</Th>
+                {/* When it started and how much happened travel together, as
+                    they did on the old card — and eight columns fit where nine
+                    pushed the last one off the right edge. */}
+                <Th>Started</Th>
+              </tr>
+            </thead>
+            <tbody>
+              {transactions.map((txn) => (
+                <TransactionRow
+                  key={txn.transactionId}
+                  txn={txn}
+                  isExpanded={expandedTxn === txn.transactionId}
+                  onToggle={() =>
+                    setExpandedTxn((prev) => (prev === txn.transactionId ? null : txn.transactionId))
+                  }
+                />
+              ))}
+            </tbody>
+          </DataTable>
         )}
 
-        {!loading && transactions.length > 0 && (
-          <div
-            className={
-              "rounded-lg overflow-hidden " +
-              "surface-card border border-[var(--border-default)]"
-            }
-          >
-            <Pagination
-              page={page}
-              totalPages={totalPages}
-              total={total}
-              onPageChange={setPage}
-            />
-          </div>
-        )}
-      </div>
-    </div>
+        <Pagination page={page} totalPages={totalPages} total={total} onPageChange={setPage} />
+      </Panel>
+    </PageShell>
   );
 }
 
-function TransactionCard({ txn, isExpanded, onToggle }) {
+function TransactionRow({ txn, isExpanded, onToggle }) {
   const cfg = STATUS_CFG[txn.overallStatus] || STATUS_CFG.in_progress;
   const Icon = cfg.icon;
 
   return (
-    <div
-      className={
-        "rounded-lg overflow-hidden transition-colors " +
-        (txn.paidUnclaimed
-          ? "bg-[var(--warning-soft)] ring-2 ring-inset ring-[var(--warning-fg)]"
-          : "surface-card border border-[var(--border-default)] hover:border-[var(--border-hover)]")
-      }
-    >
-      <button
-        onClick={onToggle}
-        className="w-full text-left px-4 py-3 flex items-center gap-3 hover:bg-[var(--bg-surface)] transition-colors"
-      >
-        <span
-          className={
-            "h-9 w-9 rounded-md inline-flex items-center justify-center shrink-0 " +
-            (cfg.tone === "success"
-              ? "bg-[var(--success-soft)] text-[var(--success-fg)]"
-              : cfg.tone === "warning"
-                ? "bg-[var(--warning-soft)] text-[var(--warning-fg)]"
-                : cfg.tone === "danger"
-                  ? "bg-[var(--danger-soft)] text-[var(--danger-fg)]"
-                  : "bg-[var(--info-soft)] text-[var(--info-fg)]")
-          }
+    <>
+      <tr onClick={onToggle} className="cursor-pointer">
+        {/* "Paid but no voucher" used to tint the whole card amber. A tinted row
+            loses its tint to the table's hover rule, so the alert became a left
+            rail — which survives hover and still reads down the column. A raw
+            <td> here because the rail is an inline style and Td takes none;
+            .sf-table still supplies the cell padding. */}
+        <td
+          className="text-[var(--fg-muted)]"
+          style={txn.paidUnclaimed ? { boxShadow: "inset 3px 0 0 var(--warning-fg)" } : undefined}
         >
-          <Icon size={16} />
-        </span>
-
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2 flex-wrap">
-            <span className="font-mono text-[13px] font-semibold text-[var(--text-primary)]">
-              {txn.transactionId}
-            </span>
-            <Badge tone={cfg.tone}>{cfg.label}</Badge>
-            {/* Payment ↔ voucher binding */}
-            {txn.paidUnclaimed ? (
-              <Badge tone="warning" icon={<AlertTriangle size={11} />}>
-                Paid · no voucher
-              </Badge>
-            ) : txn.claimed && txn.voucherCode ? (
-              <Badge tone="brand" icon={<Ticket size={11} />}>
-                {txn.voucherCode}
-              </Badge>
-            ) : txn.claimed ? (
-              <Badge tone="brand" icon={<Ticket size={11} />}>Voucher claimed</Badge>
-            ) : null}
-          </div>
-          <div className="flex items-center gap-3 mt-1 text-[12px] text-[var(--text-tertiary)]">
-            {txn.planKey && (
-              <span className="flex items-center gap-1">
-                <Tag size={10} />
-                {txn.planKey}
-              </span>
-            )}
-            {txn.customerPhone && (
-              <span className="flex items-center gap-1">
-                <Phone size={10} />
-                {txn.customerPhone}
-              </span>
-            )}
-            {txn.amount != null && (
-              <span className="flex items-center gap-1">
-                <CreditCard size={10} />${Number(txn.amount).toFixed(2)}
-              </span>
-            )}
-            {txn.sessionId && (
-              <span className="flex items-center gap-1 truncate">
-                <Wifi size={10} />
-                {txn.sessionId.slice(0, 16)}…
-              </span>
-            )}
-          </div>
-        </div>
-
-        <div className="text-right shrink-0 mr-1">
-          <p className="text-[12px] text-[var(--text-tertiary)]">
-            {formatDate(txn.startedAt)}
-          </p>
-          <p className="text-[12px] font-medium text-[var(--text-tertiary)] mt-0.5">
-            {txn.eventCount} event{txn.eventCount !== 1 ? "s" : ""}
-          </p>
-        </div>
-
-        <span className="text-[var(--text-quaternary)] shrink-0">
           {isExpanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
-        </span>
-      </button>
+        </td>
+        <Td>
+          <RecordCell
+            tone={TONE_TILE[cfg.tone] || "slate"}
+            icon={<Icon size={14} />}
+            title={txn.transactionId}
+            subtitle={txn.sessionId ? `${txn.sessionId.slice(0, 20)}…` : "No session"}
+            mono
+          />
+        </Td>
+        <Td>
+          <div className="flex flex-wrap items-center gap-1.5">
+            <StatusPill tone={cfg.tone}>{cfg.label}</StatusPill>
+            {txn.paidUnclaimed && (
+              <StatusPill tone="warning" dot={false}>
+                Paid · no voucher
+              </StatusPill>
+            )}
+          </div>
+        </Td>
+        <Td>
+          {txn.claimed && txn.voucherCode ? (
+            <Badge tone="brand" icon={<Ticket size={11} />}>
+              {txn.voucherCode}
+            </Badge>
+          ) : txn.claimed ? (
+            <Badge tone="brand" icon={<Ticket size={11} />}>
+              Voucher claimed
+            </Badge>
+          ) : (
+            <span className="text-[var(--fg-muted)]">—</span>
+          )}
+        </Td>
+        <Td>{txn.planKey || "—"}</Td>
+        <Td mono>{txn.customerPhone || "—"}</Td>
+        <Td align="right" nowrap strong className="tabular-nums">
+          {txn.amount != null ? `$${Number(txn.amount).toFixed(2)}` : "—"}
+        </Td>
+        <Td nowrap muted>
+          {formatDate(txn.startedAt)}
+          <span className="block text-[11.5px] text-[var(--fg-muted)] tabular-nums">
+            {txn.eventCount} event{txn.eventCount !== 1 ? "s" : ""}
+          </span>
+        </Td>
+      </tr>
 
       <AnimatePresence>
         {isExpanded && (
-          <motion.div
-            initial={{ height: 0, opacity: 0 }}
-            animate={{ height: "auto", opacity: 1 }}
-            exit={{ height: 0, opacity: 0 }}
-            transition={{ duration: 0.22 }}
-            className="overflow-hidden"
-          >
-            <div className="border-t border-[var(--border-subtle)] px-5 py-5 bg-[var(--surface-sunken)]">
-              <div className="flex items-center gap-1.5 mb-4 text-[12px] font-medium text-[var(--text-tertiary)]">
-                <ArrowRight size={10} /> Event timeline
-              </div>
+          <tr>
+            {/* sf-table pads every cell; the timeline supplies its own padding
+                and must sit flush, and inline is the only padding the table's
+                own rule cannot win back. */}
+            <td colSpan={COLUMNS} style={{ padding: 0 }}>
+              <motion.div
+                initial={{ height: 0, opacity: 0 }}
+                animate={{ height: "auto", opacity: 1 }}
+                exit={{ height: 0, opacity: 0 }}
+                transition={{ duration: 0.22 }}
+                className="overflow-hidden"
+              >
+                <div className="border-t border-[var(--border-subtle)] bg-[var(--bg-surface)] px-6 py-6">
+                  <p className="text-label mb-5">
+                    Event timeline · {txn.eventCount} event{txn.eventCount !== 1 ? "s" : ""}
+                  </p>
 
-              <div className="relative ml-3">
-                <div className="absolute left-[6px] top-2 bottom-2 w-px bg-[var(--border-default)]" />
-                {txn.events.map((ev, i) => (
-                  <TimelineStep
-                    key={ev.id || i}
-                    event={ev}
-                    isLast={i === txn.events.length - 1}
-                  />
-                ))}
-              </div>
-            </div>
-          </motion.div>
+                  <ol className="relative max-w-3xl">
+                    {txn.events.map((ev, i) => (
+                      <TimelineStep key={ev.id || i} event={ev} isLast={i === txn.events.length - 1} />
+                    ))}
+                  </ol>
+                </div>
+              </motion.div>
+            </td>
+          </tr>
         )}
       </AnimatePresence>
-    </div>
+    </>
   );
 }
 
 function TimelineStep({ event, isLast }) {
   const [open, setOpen] = useState(false);
   const tone = STEP_TONE[event.event_type] || "neutral";
+  const color = TONE_DOT[tone] || TONE_DOT.neutral;
   const msg = event.event_data?.message;
   const hasError = event.event_data?.error;
 
@@ -470,35 +480,28 @@ function TimelineStep({ event, isLast }) {
     }
   };
 
-  const dotClass =
-    tone === "success"
-      ? "bg-[var(--success-fg)]"
-      : tone === "warning"
-        ? "bg-[var(--warning-fg)]"
-        : tone === "danger"
-          ? "bg-[var(--brand)]"
-          : tone === "info"
-            ? "bg-[var(--info-fg)]"
-            : tone === "brand"
-              ? "bg-[var(--brand)]"
-              : "bg-[var(--text-quaternary)]";
-
   return (
-    <div className={`relative pl-7 ${isLast ? "" : "pb-5"}`}>
-      <div
-        className={
-          "absolute left-0 top-1 w-[13px] h-[13px] rounded-full border-2 shadow-sm " +
-          "border-[var(--surface-sunken)] " +
-          dotClass
-        }
+    <li className={`relative pl-8 ${isLast ? "" : "pb-6"}`}>
+      {/* The rail stops at the last dot rather than running past it — a line
+          that continues into nothing reads as "more steps coming". */}
+      {!isLast && (
+        <span
+          aria-hidden="true"
+          className="absolute left-[5.5px] top-[18px] bottom-0 w-[2px] rounded-full bg-[var(--border-default)]"
+        />
+      )}
+      <span
+        aria-hidden="true"
+        className="absolute left-0 top-[4px] h-[13px] w-[13px] rounded-full"
+        style={{ background: color, boxShadow: "0 0 0 3px var(--bg-surface)" }}
       />
 
-      <div>
+      <div className="min-w-0">
         <div className="flex items-center gap-2 flex-wrap">
-          <span className="text-[12.5px] font-semibold text-[var(--text-primary)]">
+          <span className="font-display text-[13px] font-semibold text-[var(--fg-primary)]">
             {formatLabel(event.event_type)}
           </span>
-          <span className="text-[11.5px] text-[var(--text-quaternary)]">
+          <span className="text-[11.5px] font-mono text-[var(--fg-muted)]">
             {formatTs(event.event_timestamp)}
           </span>
           {event.voucher_code && (
@@ -507,23 +510,19 @@ function TimelineStep({ event, isLast }) {
             </span>
           )}
           {hasError && (
-            <span className="text-[10.5px] font-medium text-[var(--brand)] flex items-center gap-0.5">
-              <XCircle size={10} /> Error
+            <span className="text-[11px] font-semibold text-[var(--brand)] flex items-center gap-0.5">
+              <XCircle size={11} /> Error
             </span>
           )}
         </div>
 
-        {msg && (
-          <p className="text-[12px] text-[var(--text-secondary)] mt-0.5 leading-relaxed">
-            {msg}
-          </p>
-        )}
+        {msg && <p className="text-[12.5px] text-[var(--fg-secondary)] mt-1 leading-relaxed">{msg}</p>}
 
-        <div className="flex items-center gap-3 mt-1">
+        <div className="flex items-center gap-4 mt-1.5">
           {event.event_data && (
             <button
               onClick={() => setOpen(!open)}
-              className="text-[12px] font-medium text-[var(--text-tertiary)] hover:text-[var(--text-secondary)] transition-colors"
+              className="text-[12px] font-semibold text-[var(--fg-muted)] hover:text-[var(--fg-primary)] transition-colors font-display"
             >
               {open ? "Hide details" : "Show details"}
             </button>
@@ -532,7 +531,7 @@ function TimelineStep({ event, isLast }) {
             <button
               onClick={openPreview}
               disabled={loadingPreview}
-              className="text-[12px] font-medium text-[var(--brand)] hover:opacity-80 transition-opacity inline-flex items-center gap-1 disabled:opacity-50"
+              className="text-[12px] font-semibold text-[var(--brand)] hover:opacity-80 transition-opacity inline-flex items-center gap-1 disabled:opacity-50 font-display"
             >
               <Mail size={11} />
               {loadingPreview ? "Loading…" : "View email"}
@@ -551,9 +550,9 @@ function TimelineStep({ event, isLast }) {
             >
               <pre
                 className={
-                  "text-[10.5px] leading-relaxed font-mono mt-2 p-3 rounded-md " +
-                  "bg-[var(--surface-raised)] border border-[var(--border-subtle)] " +
-                  "text-[var(--text-secondary)] overflow-x-auto max-h-48 " +
+                  "text-[10.5px] leading-relaxed font-mono mt-2 p-3 rounded-lg " +
+                  "bg-[var(--bg-elevated)] border border-[var(--border-subtle)] " +
+                  "text-[var(--fg-secondary)] overflow-x-auto max-h-48 " +
                   "whitespace-pre-wrap break-words"
                 }
               >
@@ -598,66 +597,33 @@ function TimelineStep({ event, isLast }) {
               title="Email preview"
               sandbox=""
               srcDoc={preview.html}
-              className="w-full h-[60vh] rounded-md border border-[var(--border-default)] bg-white"
+              className="w-full h-[60vh] rounded-lg border border-[var(--border-default)] bg-white"
             />
           </Modal.Body>
           <Modal.Footer>
-            <Button variant="secondary" onClick={() => setPreview(null)}>Close</Button>
+            <Button variant="secondary" onClick={() => setPreview(null)}>
+              Close
+            </Button>
           </Modal.Footer>
         </Modal>
       )}
-    </div>
+    </li>
   );
 }
 
-function FilterField({ label, children }) {
+/** A date bound in the Toolbar. The word carries the meaning; a stacked label
+ *  would make the strip a row taller for no gain. */
+function DateFilter({ label, value, onChange }) {
   return (
-    <div className="flex flex-col gap-1">
-      <label className="text-[12px] font-medium text-[var(--text-tertiary)]">
-        {label}
-      </label>
-      {children}
-    </div>
-  );
-}
-
-function FilterSearch({ label, placeholder, value, onChange }) {
-  return (
-    <FilterField label={label}>
-      <div className="relative">
-        <Search
-          size={12}
-          className="absolute left-2.5 top-1/2 -translate-y-1/2 text-[var(--text-quaternary)] pointer-events-none"
-        />
-        <input
-          type="text"
-          placeholder={placeholder}
-          value={value}
-          onChange={(e) => onChange(e.target.value)}
-          className={
-            "h-8 pl-7 pr-7 text-[12.5px] rounded-md w-48 font-mono " +
-            "bg-[var(--input-bg)] border border-[var(--input-border)] " +
-            "text-[var(--text-primary)] placeholder:text-[var(--text-quaternary)] " +
-            "hover:border-[var(--input-border-hover)] focus-input"
-          }
-        />
-        {value && (
-          <button
-            onClick={() => onChange("")}
-            className="absolute right-2 top-1/2 -translate-y-1/2 text-[var(--text-quaternary)] hover:text-[var(--text-secondary)]"
-          >
-            <X size={11} />
-          </button>
-        )}
-      </div>
-    </FilterField>
-  );
-}
-
-function filterClass() {
-  return (
-    "h-8 px-3 text-[12.5px] rounded-md " +
-    "bg-[var(--input-bg)] border border-[var(--input-border)] " +
-    "text-[var(--text-primary)] hover:border-[var(--input-border-hover)] focus-input"
+    <label className="inline-flex items-center gap-2 font-display text-[11.5px] font-bold uppercase tracking-[0.07em] text-[var(--fg-muted)]">
+      {label}
+      <Input
+        type="date"
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        style={{ ...PILL, width: 152 }}
+        className="font-sans text-[12.5px] normal-case tracking-normal"
+      />
+    </label>
   );
 }

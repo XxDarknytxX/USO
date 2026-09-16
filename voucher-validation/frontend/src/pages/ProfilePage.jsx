@@ -1,20 +1,28 @@
 // src/pages/ProfilePage.jsx
-// Account + appearance. Mirrors the Service Desk profile: identity header and a
-// Dark/Light "Appearance" theme selector (the theme switch lives here, not in
-// the header chrome). Reachable by every signed-in user (incl. viewers).
+// Account + appearance. Reachable by every signed-in user (incl. viewers and
+// field engineers), so it is the one page that must make sense with no
+// permissions at all.
+//
+// Laid out as a Lightning record home: the person IS the page header — their
+// initial is the object tile, their name the title — rather than an identity
+// card stacked under a header that only said "Profile". What is left is two
+// short panels side by side, which is what stops a three-fact page reading as
+// an afterthought.
 
 import { useNavigate } from "react-router-dom";
-import { UserCircle, Shield, Eye, Moon, Sun, Check, LogOut } from "lucide-react";
+import { UserCircle, Shield, Eye, Moon, Sun, Check, LogOut, Wrench, Mail, IdCard } from "lucide-react";
 
 import { useAuth } from "../hooks/useAuth";
 import { useTheme } from "../hooks/useTheme";
-import { PageHeader, Panel, Button } from "../components/ui";
+import { PageShell, PageHeader, Panel, Button, StatusPill, ObjectTile } from "../components/ui";
 
 function cn(...p) {
   return p.filter(Boolean).join(" ");
 }
 
-/* One theme option — a mini-UI preview card that lights up when selected. */
+/* One theme option — a mini-UI preview card that lights up when selected. The
+   preview is worth the markup: "Dark" and "Light" as radio labels tell you the
+   name of the choice, not what it does to the console you are looking at. */
 function ThemeCard({ mode, active, onClick }) {
   const isDark = mode === "dark";
   return (
@@ -65,7 +73,7 @@ function ThemeCard({ mode, active, onClick }) {
           ) : (
             <Sun size={16} className={active ? "text-[var(--accent)]" : "text-[var(--fg-muted)]"} />
           )}
-          <span className={cn("text-sm font-medium", active ? "text-[var(--fg-primary)]" : "text-[var(--fg-secondary)]")}>
+          <span className={cn("text-[13.5px] font-semibold font-display", active ? "text-[var(--fg-primary)]" : "text-[var(--fg-secondary)]")}>
             {isDark ? "Dark" : "Light"}
           </span>
         </div>
@@ -79,41 +87,47 @@ function ThemeCard({ mode, active, onClick }) {
   );
 }
 
+/** One fact about the account: what it is, and what it says. */
+function DetailRow({ icon, tone = "slate", label, children }) {
+  return (
+    <div className="flex items-center gap-3 px-5 py-3.5">
+      <ObjectTile tone={tone} size="sm">{icon}</ObjectTile>
+      <div className="min-w-0 flex-1">
+        <p className="text-label">{label}</p>
+        <div className="mt-1 min-w-0 text-[13px] text-[var(--fg-primary)]">{children}</div>
+      </div>
+    </div>
+  );
+}
+
 export default function ProfilePage() {
   const navigate = useNavigate();
-  const { email, name, role, isAdmin, logout } = useAuth();
+  const { email, name, role, isAdmin, isEngineer, logout } = useAuth();
   const { theme, setTheme } = useTheme();
 
   const displayName = name?.trim() || (email ? email.split("@")[0] : "User");
   const initial = displayName[0].toUpperCase();
   const roleLabel = role ? role.charAt(0).toUpperCase() + role.slice(1) : "User";
+  const RoleIcon = isAdmin ? Shield : isEngineer ? Wrench : Eye;
+  const roleBlurb = isAdmin
+    ? "Full administrative access to every village, setting and account."
+    : isEngineer
+      ? "Files maintenance reports for any village; nothing else in the console."
+      : "Read-only access to the villages an administrator has assigned to you.";
 
   return (
-    <div className="p-4 sm:p-6 lg:p-8">
+    <PageShell width="narrow">
       <PageHeader
-        eyebrow="Account"
-        title="Profile"
-        subtitle="Your account details and appearance preferences."
-        icon={<UserCircle size={20} />}
-      />
-
-      <div className="mt-6 max-w-3xl space-y-5">
-        {/* Identity */}
-        <Panel title="Account" icon={<UserCircle size={15} />} padding={false}>
-          <div className="flex items-center gap-4 px-5 py-5">
-            <div className="relative h-14 w-14 shrink-0 rounded-2xl flex items-center justify-center bg-[var(--accent)]/10 text-[var(--accent)] border border-[var(--accent)]/15 text-xl font-semibold">
-              {initial}
-              <span className="absolute bottom-0 right-0 h-3.5 w-3.5 rounded-full bg-emerald-500 border-2 border-[var(--bg-elevated)]" />
-            </div>
-            <div className="min-w-0 flex-1">
-              <p className="text-base font-semibold text-[var(--fg-primary)] truncate leading-snug">{displayName}</p>
-              {email && <p className="text-[13px] text-[var(--fg-muted)] truncate mt-0.5">{email}</p>}
-              <span className="inline-flex items-center gap-1.5 mt-2 px-2.5 py-1 rounded-full text-[11px] font-medium bg-[var(--accent)]/10 text-[var(--accent)]">
-                {isAdmin ? <Shield size={11} /> : <Eye size={11} />} {roleLabel}
-              </span>
-            </div>
+        eyebrow="Your account"
+        title={displayName}
+        subtitle={email || "Signed in to the USO operations console."}
+        icon={<span className="text-[18px] font-bold font-display leading-none">{initial}</span>}
+        tone="pink"
+        actions={
+          <>
+            <StatusPill tone="success">Signed in</StatusPill>
             <Button
-              variant="ghost"
+              variant="secondary"
               size="sm"
               onClick={() => {
                 logout();
@@ -123,17 +137,43 @@ export default function ProfilePage() {
             >
               Sign out
             </Button>
+          </>
+        }
+      />
+
+      {/* Two short panels rather than a stack: neither has enough in it to earn
+          a full-width row of its own. */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-5 items-start">
+        <Panel title="Account" subtitle="What the console knows about you." icon={<UserCircle size={15} />} tone="pink" padding={false}>
+          <div className="divide-y divide-[var(--border-subtle)]">
+            <DetailRow icon={<IdCard size={13} />} tone="pink" label="Name">
+              <span className="block truncate">{displayName}</span>
+            </DetailRow>
+            <DetailRow icon={<Mail size={13} />} tone="blue" label="Email">
+              <span className="block truncate">{email || "—"}</span>
+            </DetailRow>
+            <DetailRow icon={<RoleIcon size={13} />} tone={isAdmin ? "violet" : isEngineer ? "orange" : "teal"} label="Role">
+              <span className="flex flex-col gap-1.5">
+                <StatusPill tone={isAdmin ? "brand" : isEngineer ? "warning" : "info"} dot={false} className="self-start">
+                  <RoleIcon size={11} />
+                  {roleLabel}
+                </StatusPill>
+                <span className="text-[12px] text-[var(--fg-muted)] whitespace-normal leading-relaxed">
+                  {roleBlurb}
+                </span>
+              </span>
+            </DetailRow>
           </div>
         </Panel>
 
-        {/* Appearance — the theme switch */}
-        <Panel title="Appearance" subtitle="Choose how the dashboard looks." icon={<Sun size={15} />}>
+        {/* Appearance — the theme switch lives here, not in the header chrome. */}
+        <Panel title="Appearance" subtitle="Choose how the console looks on this device." icon={<Sun size={15} />} tone="orange">
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <ThemeCard mode="dark" active={theme === "dark"} onClick={() => setTheme("dark")} />
             <ThemeCard mode="light" active={theme === "light"} onClick={() => setTheme("light")} />
           </div>
         </Panel>
       </div>
-    </div>
+    </PageShell>
   );
 }

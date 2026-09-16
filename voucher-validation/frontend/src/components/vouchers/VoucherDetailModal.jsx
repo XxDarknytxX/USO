@@ -1,7 +1,14 @@
 // src/components/vouchers/VoucherDetailModal.jsx
-// Voucher inspection / edit modal. Wide centered modal (2xl) so we can
-// breathe the user info into a real 2-column form and surface lifecycle
-// activity without a cramped slide-out.
+//
+// The voucher record — inspect, edit, toggle, delete.
+//
+// This is the most-opened surface in the console, and it used to be one long
+// column of labelled rows: six sections, all weighted the same, so finding
+// "how much data is left" meant reading the whole thing. It is now a Salesforce
+// record page in miniature — an identity header that never scrolls away, then
+// grouped panels (usage, customer, timeline, technical, activity) so each
+// question has a place to look. Every field and every action is still here;
+// they have addresses now.
 
 import { useEffect, useState } from "react";
 import toast from "react-hot-toast";
@@ -16,11 +23,12 @@ import {
   Wifi,
   HardDrive,
   Users,
-  ChevronDown,
-  ChevronUp,
   Copy,
   Calendar,
   Shield,
+  History,
+  User,
+  Gauge,
   X,
 } from "lucide-react";
 
@@ -35,15 +43,12 @@ import {
   Button,
   IconButton,
   Badge,
-  Section,
+  Panel,
+  ObjectTile,
+  Disclosure,
 } from "../ui";
 
-export default function VoucherDetailModal({
-  uuid,
-  onClose,
-  onRefresh,
-  readOnly = false,
-}) {
+export default function VoucherDetailModal({ uuid, onClose, onRefresh, readOnly = false }) {
   const [voucher, setVoucher] = useState(null);
   const [events, setEvents] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -51,7 +56,6 @@ export default function VoucherDetailModal({
   const [editData, setEditData] = useState({});
   const [saving, setSaving] = useState(false);
   const [confirm, setConfirm] = useState(null);
-  const [rawOpen, setRawOpen] = useState(false);
 
   useEffect(() => {
     loadDetail();
@@ -143,29 +147,18 @@ export default function VoucherDetailModal({
   if (loading) {
     return (
       <Modal open onClose={onClose} width="2xl">
-        <Modal.Header
-          eyebrow="Voucher"
-          title="Loading…"
-          icon={Ticket}
-          onClose={onClose}
-        />
+        <Modal.Header eyebrow="Voucher" title="Loading…" icon={Ticket} onClose={onClose} />
         <Modal.Body>
-          <div className="space-y-3">
-            <div className="h-9 w-2/3 rounded-md skeleton bg-[var(--surface-sunken)]" />
+          <div className="space-y-4">
+            <div className="h-9 w-2/3 rounded-lg skeleton bg-[var(--bg-surface)]" />
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
               {Array.from({ length: 4 }).map((_, i) => (
-                <div
-                  key={i}
-                  className="h-[78px] rounded-md skeleton bg-[var(--surface-sunken)]"
-                />
+                <div key={i} className="h-[86px] rounded-xl skeleton bg-[var(--bg-surface)]" />
               ))}
             </div>
             <div className="grid grid-cols-2 gap-3 pt-2">
               {Array.from({ length: 6 }).map((_, i) => (
-                <div
-                  key={i}
-                  className="h-12 rounded-md skeleton bg-[var(--surface-sunken)]"
-                />
+                <div key={i} className="h-12 rounded-xl skeleton bg-[var(--bg-surface)]" />
               ))}
             </div>
           </div>
@@ -180,33 +173,36 @@ export default function VoucherDetailModal({
   return (
     <>
       <Modal open onClose={onClose} width="2xl">
-        {/* ---- Header: code + status + actions ----------------------- */}
+        {/* ---- Identity: the code, what state it is in, what you can do to it ---- */}
         <div className="relative px-7 pt-6 pb-5 border-b border-[var(--border-subtle)]">
           <div className="flex items-start justify-between gap-4">
-            <div className="min-w-0 flex-1">
-              <span className="text-label block mb-1.5">Voucher</span>
-              <button
-                onClick={copyCode}
-                title="Copy code"
-                className={
-                  "group inline-flex items-center gap-2 -ml-1 px-1 py-0.5 rounded " +
-                  "hover:bg-[var(--surface-hover)] focus-ring transition-colors"
-                }
-              >
-                <h2 className="text-[20px] font-semibold tracking-tight text-[var(--text-primary)] font-mono truncate">
-                  {voucher.voucher_code}
-                </h2>
-                <Copy
-                  size={14}
-                  className="text-[var(--text-quaternary)] group-hover:text-[var(--brand)] transition-colors shrink-0"
-                />
-              </button>
-              <div className="flex items-center gap-2 mt-2 flex-wrap">
-                <StatusBadge status={voucher.status} />
-                {isDisabled && <Badge tone="danger">Disabled</Badge>}
-                {voucher.package_name && (
-                  <Badge tone="outline">{voucher.package_name}</Badge>
-                )}
+            <div className="flex items-start gap-4 min-w-0 flex-1">
+              <ObjectTile tone="indigo" size="lg" className="mt-0.5 shadow-[var(--shadow-xs)]">
+                <Ticket size={20} />
+              </ObjectTile>
+              <div className="min-w-0">
+                <span className="text-label block mb-1">Voucher</span>
+                <button
+                  onClick={copyCode}
+                  title="Copy code"
+                  className={
+                    "group inline-flex items-center gap-2 -ml-1 px-1 py-0.5 rounded-md max-w-full " +
+                    "hover:bg-[var(--bg-surface)] focus-ring transition-colors"
+                  }
+                >
+                  <h2 className="text-[21px] font-semibold tracking-tight text-[var(--fg-primary)] font-mono truncate">
+                    {voucher.voucher_code}
+                  </h2>
+                  <Copy
+                    size={14}
+                    className="text-[var(--fg-subtle)] group-hover:text-[var(--brand)] transition-colors shrink-0"
+                  />
+                </button>
+                <div className="flex items-center gap-2 mt-2 flex-wrap">
+                  <StatusBadge status={voucher.status} />
+                  {isDisabled && <Badge tone="danger">Disabled</Badge>}
+                  {voucher.package_name && <Badge tone="outline">{voucher.package_name}</Badge>}
+                </div>
               </div>
             </div>
 
@@ -216,16 +212,8 @@ export default function VoucherDetailModal({
                   <IconButton onClick={startEdit} title="Edit" size="sm">
                     <Edit3 size={15} />
                   </IconButton>
-                  <IconButton
-                    onClick={handleToggle}
-                    title={isDisabled ? "Enable" : "Disable"}
-                    size="sm"
-                  >
-                    {isDisabled ? (
-                      <ToggleRight size={15} />
-                    ) : (
-                      <ToggleLeft size={15} />
-                    )}
+                  <IconButton onClick={handleToggle} title={isDisabled ? "Enable" : "Disable"} size="sm">
+                    {isDisabled ? <ToggleRight size={15} /> : <ToggleLeft size={15} />}
                   </IconButton>
                   <IconButton
                     onClick={handleDelete}
@@ -244,63 +232,65 @@ export default function VoucherDetailModal({
           </div>
         </div>
 
-        <Modal.Body>
-          <div className="flex flex-col gap-7">
-            {/* ---- Usage stats ---------------------------------------- */}
-            <Section label="Usage">
+        <Modal.Body className="bg-[var(--bg-base)]">
+          <div className="flex flex-col gap-4">
+            {/* ---- Usage: what is left, which is why most people open this ---- */}
+            <Panel title="Usage" subtitle="Consumption against the plan" icon={<Gauge size={15} />} tone="indigo">
               <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-                <StatCard
-                  icon={<Clock size={14} />}
+                <UsageTile
+                  icon={<Clock size={13} />}
                   label="Time used"
-                  value={`${formatMin(voucher.used_time)} / ${formatMin(
-                    voucher.time_period
-                  )}`}
+                  value={`${formatMin(voucher.used_time)} / ${formatMin(voucher.time_period)}`}
                   pct={pct(voucher.used_time, voucher.time_period)}
                 />
-                <StatCard
-                  icon={<HardDrive size={14} />}
+                <UsageTile
+                  icon={<HardDrive size={13} />}
                   label="Data used"
-                  value={`${formatMB(voucher.used_quota)} / ${formatMB(
-                    voucher.quota
-                  )}`}
+                  value={`${formatMB(voucher.used_quota)} / ${formatMB(voucher.quota)}`}
                   pct={pct(voucher.used_quota, voucher.quota)}
                 />
-                <StatCard
-                  icon={<Users size={14} />}
+                <UsageTile
+                  icon={<Users size={13} />}
                   label="Clients"
                   value={`${voucher.current_clients} / ${voucher.max_clients}`}
                   pct={pct(voucher.current_clients, voucher.max_clients)}
                 />
-                <StatCard
-                  icon={<Wifi size={14} />}
+                <UsageTile
+                  icon={<Wifi size={13} />}
                   label="Rate limit"
-                  value={`${voucher.download_rate_limit || 0} / ${
-                    voucher.upload_rate_limit || 0
-                  } Kbps`}
+                  value={`${voucher.download_rate_limit || 0} / ${voucher.upload_rate_limit || 0} Kbps`}
                 />
               </div>
-            </Section>
+            </Panel>
 
-            {/* ---- User info ------------------------------------------ */}
-            <Section label="User information">
+            {/* ---- Customer: the only editable block on the record ---- */}
+            <Panel
+              title="Customer"
+              subtitle={editing ? "Editing — unsaved" : "Details captured against this voucher"}
+              icon={<User size={15} />}
+              tone="teal"
+              actions={
+                !readOnly && !editing ? (
+                  <Button variant="ghost" size="xs" onClick={startEdit} iconLeft={<Edit3 size={12} />}>
+                    Edit
+                  </Button>
+                ) : null
+              }
+            >
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <EditableField
                   label="First name"
                   value={voucher.first_name}
                   editing={editing}
                   editValue={editData.first_name || ""}
-                  onChange={(v) =>
-                    setEditData({ ...editData, first_name: v })
-                  }
+                  onChange={(v) => setEditData({ ...editData, first_name: v })}
                 />
                 <EditableField
                   label="Last name"
                   value={voucher.last_name}
                   editing={editing}
                   editValue={editData.last_name || ""}
-                  onChange={(v) =>
-                    setEditData({ ...editData, last_name: v })
-                  }
+                  onChange={(v) => setEditData({ ...editData, last_name: v })}
                 />
                 <EditableField
                   label="Email"
@@ -328,102 +318,66 @@ export default function VoucherDetailModal({
                   />
                 </div>
               </div>
-            </Section>
+            </Panel>
 
-            {/* ---- Timestamps ----------------------------------------- */}
-            <Section label="Timestamps">
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                <TimeField
-                  icon={<Calendar size={12} />}
-                  label="Created"
-                  value={voucher.create_time}
-                />
-                <TimeField
-                  icon={<Clock size={12} />}
-                  label="First login"
-                  value={voucher.login_time}
-                />
-                <TimeField
-                  icon={<Shield size={12} />}
-                  label="Expires"
-                  value={voucher.expiry_time}
-                />
-              </div>
-            </Section>
+            {/* Timeline and technical sit side by side: both are reference
+                detail, and neither deserves a full-width band to itself. */}
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+              <Panel title="Timeline" icon={<Calendar size={15} />} tone="blue">
+                <div className="flex flex-col divide-y divide-[var(--border-subtle)]">
+                  <TimeRow icon={<Calendar size={12} />} label="Created" value={voucher.create_time} />
+                  <TimeRow icon={<Clock size={12} />} label="First login" value={voucher.login_time} />
+                  <TimeRow icon={<Shield size={12} />} label="Expires" value={voucher.expiry_time} />
+                </div>
+              </Panel>
 
-            {/* ---- Technical ------------------------------------------ */}
-            <Section label="Technical">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-3">
-                <InfoField label="UUID" value={voucher.uuid} mono />
-                <InfoField label="Tenant ID" value={voucher.tenant_id} mono />
-                <InfoField
-                  label="User group"
-                  value={voucher.user_group_name || voucher.user_group_id}
-                />
-                <InfoField
-                  label="Bind MAC"
-                  value={voucher.bind_mac ? "Yes" : "No"}
-                />
-              </div>
-            </Section>
+              <Panel title="Technical" icon={<Shield size={15} />} tone="slate">
+                <div className="flex flex-col divide-y divide-[var(--border-subtle)]">
+                  <InfoRow label="UUID" value={voucher.uuid} mono />
+                  <InfoRow label="Tenant ID" value={voucher.tenant_id} mono />
+                  <InfoRow label="User group" value={voucher.user_group_name || voucher.user_group_id} />
+                  <InfoRow label="Bind MAC" value={voucher.bind_mac ? "Yes" : "No"} />
+                </div>
+              </Panel>
+            </div>
 
-            {/* ---- Activity timeline ---------------------------------- */}
+            {/* ---- Lifecycle events ---- */}
             {events.length > 0 && (
-              <Section label={`Activity (${events.length})`}>
-                <div className="space-y-1.5 max-h-44 overflow-y-auto pr-1">
+              <Panel
+                title="Activity"
+                subtitle={`${events.length} event${events.length === 1 ? "" : "s"}`}
+                icon={<History size={15} />}
+                tone="slate"
+                padding={false}
+              >
+                <div className="max-h-52 overflow-y-auto divide-y divide-[var(--border-subtle)]">
                   {events.map((evt) => (
-                    <div
-                      key={evt.id}
-                      className="flex items-start gap-2.5 p-2.5 surface-card"
-                    >
-                      <span className="w-1.5 h-1.5 rounded-full bg-[var(--brand)] mt-[7px] shrink-0" />
+                    <div key={evt.id} className="flex items-start gap-2.5 px-5 py-2.5">
+                      <span className="w-1.5 h-1.5 rounded-full bg-[var(--tile-indigo)] mt-[7px] shrink-0" />
                       <div className="min-w-0 flex-1">
-                        <span className="text-[12.5px] font-medium text-[var(--text-secondary)] capitalize">
+                        <span className="text-[12.5px] font-semibold text-[var(--fg-secondary)] capitalize">
                           {evt.event_type.replace(/_/g, " ")}
                         </span>
                         {evt.notes && (
-                          <span className="text-[12px] text-[var(--text-tertiary)] ml-1.5">
-                            · {evt.notes}
-                          </span>
+                          <span className="text-[12px] text-[var(--fg-muted)] ml-1.5">· {evt.notes}</span>
                         )}
-                        <p className="text-[11px] text-[var(--text-quaternary)] mt-0.5 font-mono">
+                        <p className="text-[11px] text-[var(--fg-subtle)] mt-0.5 font-mono tabular-nums">
                           {new Date(evt.event_timestamp).toLocaleString()}
                         </p>
                       </div>
                     </div>
                   ))}
                 </div>
-              </Section>
+              </Panel>
             )}
 
-            {/* ---- Raw JSON disclosure -------------------------------- */}
-            <div>
-              <button
-                onClick={() => setRawOpen(!rawOpen)}
-                className={
-                  "inline-flex items-center gap-1.5 text-[11.5px] font-medium " +
-                  "text-[var(--text-quaternary)] hover:text-[var(--text-secondary)] transition-colors"
-                }
-              >
-                {rawOpen ? (
-                  <ChevronUp size={14} />
-                ) : (
-                  <ChevronDown size={14} />
-                )}
-                Raw JSON
-              </button>
-              {rawOpen && (
-                <pre
-                  className={
-                    "mt-2 px-3 py-2.5 text-[11px] surface-card " +
-                    "text-[var(--text-tertiary)] overflow-auto max-h-56 " +
-                    "font-mono leading-relaxed"
-                  }
-                >
-                  {JSON.stringify(voucher.raw_data || voucher, null, 2)}
-                </pre>
-              )}
-            </div>
+            {/* Raw payload stays collapsed — it is for the one support call a
+                month where the mapped fields are not enough. */}
+            <Disclosure summary="Raw JSON">
+              <pre className="mt-1 px-3 py-2.5 rounded-lg bg-[var(--bg-surface)] text-[11px] text-[var(--fg-secondary)] overflow-auto max-h-56 font-mono leading-relaxed">
+                {JSON.stringify(voucher.raw_data || voucher, null, 2)}
+              </pre>
+            </Disclosure>
           </div>
         </Modal.Body>
 
@@ -431,15 +385,8 @@ export default function VoucherDetailModal({
         <Modal.Footer>
           {editing ? (
             <>
-              <span className="mr-auto text-[12.5px] text-[var(--text-tertiary)]">
-                Editing user details
-              </span>
-              <Button
-                variant="secondary"
-                size="sm"
-                onClick={cancelEdit}
-                disabled={saving}
-              >
+              <span className="mr-auto text-[12.5px] text-[var(--fg-muted)]">Editing customer details</span>
+              <Button variant="secondary" size="sm" onClick={cancelEdit} disabled={saving}>
                 Cancel
               </Button>
               <Button
@@ -475,28 +422,28 @@ export default function VoucherDetailModal({
   );
 }
 
-/* ------------ Stat card -------------------------------------------------- */
-function StatCard({ icon, label, value, pct: percent }) {
+/* ------------ Usage tile -------------------------------------------------- */
+// The bar only turns red at 90%: red on every tile would make a healthy voucher
+// look like an incident.
+function UsageTile({ icon, label, value, pct: percent }) {
   const near = percent !== undefined && percent >= 90;
   return (
-    <div className="surface-card p-3.5">
+    <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-surface)] p-3.5">
       <div className="flex items-center justify-between gap-2 mb-2.5">
         <span className="text-label truncate">{label}</span>
-        <span className="w-7 h-7 rounded-md flex items-center justify-center bg-[var(--brand)]/10 text-[var(--brand)] border border-[var(--border-default)] shrink-0">
-          {icon}
-        </span>
+        <span className="text-[var(--fg-muted)] shrink-0">{icon}</span>
       </div>
-      <p className="text-[14px] font-semibold text-[var(--text-primary)] font-mono tabular-nums leading-none">
+      <p className="text-[14px] font-semibold text-[var(--fg-primary)] font-mono tabular-nums leading-none">
         {value}
       </p>
       {percent !== undefined && (
-        <div className="mt-2.5 h-1.5 bg-[var(--surface-hover)] rounded-full overflow-hidden">
+        <div className="mt-2.5 h-1.5 bg-[var(--bg-surface-hover)] rounded-full overflow-hidden">
           <div
-            className={
-              "h-full rounded-full transition-[width] duration-500 " +
-              (near ? "bg-[var(--brand)]" : "bg-[var(--accent)]")
-            }
-            style={{ width: `${Math.min(percent, 100)}%` }}
+            className="h-full rounded-full transition-[width] duration-500"
+            style={{
+              width: `${Math.min(percent, 100)}%`,
+              background: near ? "var(--danger-fg)" : "var(--tile-indigo)",
+            }}
           />
         </div>
       )}
@@ -505,74 +452,50 @@ function StatCard({ icon, label, value, pct: percent }) {
 }
 
 /* ------------ Editable field (read OR edit) ------------------------------ */
-function EditableField({
-  label,
-  value,
-  editing,
-  editValue,
-  onChange,
-  multiline,
-  type = "text",
-}) {
+function EditableField({ label, value, editing, editValue, onChange, multiline, type = "text" }) {
   if (editing) {
     return (
       <Field label={label}>
         {multiline ? (
-          <Textarea
-            value={editValue}
-            onChange={(e) => onChange(e.target.value)}
-            rows={2}
-          />
+          <Textarea value={editValue} onChange={(e) => onChange(e.target.value)} rows={2} />
         ) : (
-          <Input
-            type={type}
-            value={editValue}
-            onChange={(e) => onChange(e.target.value)}
-          />
+          <Input type={type} value={editValue} onChange={(e) => onChange(e.target.value)} />
         )}
       </Field>
     );
   }
   return (
     <div className="flex flex-col gap-1">
-      <span className="text-[12.5px] font-medium text-[var(--text-tertiary)]">
-        {label}
-      </span>
-      <span className="text-[13px] text-[var(--text-primary)]">
-        {value || (
-          <span className="text-[var(--text-quaternary)]">—</span>
-        )}
+      <span className="text-[12px] font-medium text-[var(--fg-muted)]">{label}</span>
+      <span className="text-[13px] text-[var(--fg-primary)] break-words">
+        {value || <span className="text-[var(--fg-subtle)]">—</span>}
       </span>
     </div>
   );
 }
 
-/* ------------ Timestamp tile --------------------------------------------- */
-function TimeField({ icon, label, value }) {
+/* ------------ Timestamp row ----------------------------------------------- */
+function TimeRow({ icon, label, value }) {
   return (
-    <div className="surface-card p-3.5">
-      <div className="flex items-center gap-1.5 text-[var(--text-quaternary)] mb-1.5">
-        {icon}
-        <span className="text-label">{label}</span>
-      </div>
-      <p className="text-[12.5px] text-[var(--text-secondary)] font-mono tabular-nums">
+    <div className="flex items-center justify-between gap-3 py-2 first:pt-0 last:pb-0">
+      <span className="flex items-center gap-2 text-[12.5px] text-[var(--fg-secondary)]">
+        <span className="text-[var(--fg-subtle)]">{icon}</span>
+        {label}
+      </span>
+      <span className="text-[12px] text-[var(--fg-primary)] font-mono tabular-nums text-right">
         {value ? new Date(Number(value)).toLocaleString() : "—"}
-      </p>
+      </span>
     </div>
   );
 }
 
-/* ------------ Plain info field ------------------------------------------- */
-function InfoField({ label, value, mono }) {
+/* ------------ Plain info row ---------------------------------------------- */
+function InfoRow({ label, value, mono }) {
   return (
-    <div className="flex flex-col gap-0.5">
-      <span className="text-[12px] font-medium text-[var(--text-tertiary)]">
-        {label}
-      </span>
+    <div className="flex items-start justify-between gap-3 py-2 first:pt-0 last:pb-0">
+      <span className="text-[12.5px] text-[var(--fg-secondary)] shrink-0">{label}</span>
       <span
-        className={`text-[12.5px] text-[var(--text-secondary)] break-all ${
-          mono ? "font-mono" : ""
-        }`}
+        className={`text-[12px] text-[var(--fg-primary)] break-all text-right ${mono ? "font-mono" : ""}`}
       >
         {value || "—"}
       </span>

@@ -5,13 +5,19 @@
 //
 // One row per NUMBER, not per transaction: the list exists to be actioned per
 // customer, so how many times they bought is a column, not extra rows.
+//
+// It renders as a single Panel rather than a page: the M-PAiSA page already
+// owns the header and the Mappings/Unmapped switch, so this component's own
+// controls sit in the card header where they belong to this list alone.
 
 import { useCallback, useEffect, useState } from "react";
 import toast from "react-hot-toast";
-import { Search, Download, RefreshCw, UserX } from "lucide-react";
+import { Download, RefreshCw, UserX, Phone } from "lucide-react";
 import { format } from "date-fns";
 import { mpaisaApi } from "../services/api";
-import { Panel, Button, EmptyState } from "./ui";
+import {
+  Panel, Button, EmptyState, SearchInput, DataTable, Th, Td, TableMessage,
+} from "./ui";
 import Pagination from "./shared/Pagination";
 
 const PAGE_SIZE = 25;
@@ -36,7 +42,7 @@ function buildCsv(rows) {
   // Leading BOM so Excel reads it as UTF-8 rather than the local codepage,
   // which otherwise mangles village names. Written as an escape because the
   // literal character is invisible in source and gets stripped by tooling.
-  return "\uFEFF" + [header, ...body].map((r) => r.map(csvCell).join(",")).join("\r\n");
+  return "﻿" + [header, ...body].map((r) => r.map(csvCell).join(",")).join("\r\n");
 }
 
 export default function UnmappedTransactions() {
@@ -120,17 +126,15 @@ export default function UnmappedTransactions() {
           : `${total.toLocaleString()} number${total === 1 ? "" : "s"} seen in transactions with no email mapping`
       }
       icon={<UserX size={15} />}
+      tone="orange"
       actions={
-        <div className="flex items-center gap-2">
-          <div className="relative">
-            <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--fg-muted)] pointer-events-none" />
-            <input
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search number…"
-              className="h-8 pl-8 pr-3 w-56 text-[12.5px] rounded-md bg-[var(--surface-sunken)] border border-[var(--border-default)] text-[var(--fg-primary)] placeholder:text-[var(--fg-muted)] focus:outline-none focus:border-[var(--brand)]"
-            />
-          </div>
+        <div className="flex flex-wrap items-center justify-end gap-2">
+          <SearchInput
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search number…"
+            width="w-56"
+          />
           <Button variant="secondary" size="sm" onClick={load} disabled={loading} iconLeft={<RefreshCw size={14} />}>
             Refresh
           </Button>
@@ -147,53 +151,49 @@ export default function UnmappedTransactions() {
         </div>
       }
     >
-      <div className="overflow-x-auto">
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="text-left border-b border-[var(--border-default)]">
-              <Th>Phone</Th>
-              <Th>Transactions</Th>
-              <Th>Total spent</Th>
-              <Th>Last seen</Th>
+      <DataTable>
+        <thead>
+          <tr>
+            <Th>Phone</Th>
+            <Th align="right">Transactions</Th>
+            <Th align="right">Total spent</Th>
+            <Th>Last seen</Th>
+          </tr>
+        </thead>
+        <tbody>
+          {loading ? (
+            <TableMessage colSpan={4}>Loading…</TableMessage>
+          ) : rows.length === 0 ? (
+            <tr>
+              <td colSpan={4}>
+                <EmptyState
+                  icon={UserX}
+                  title={debounced ? "No matches" : "Every number is mapped"}
+                  description={
+                    debounced
+                      ? "No unmapped number matches that search."
+                      : "Every number seen in a transaction has an email address on file."
+                  }
+                />
+              </td>
             </tr>
-          </thead>
-          <tbody className="divide-y divide-[var(--border-default)]">
-            {loading ? (
-              <tr>
-                <td colSpan={4} className="px-5 py-10 text-center text-[var(--fg-muted)]">Loading…</td>
+          ) : (
+            rows.map((r) => (
+              <tr key={r.phone}>
+                <Td nowrap>
+                  <span className="font-mono text-[13px] font-semibold text-[var(--fg-primary)]">
+                    {r.phone}
+                  </span>
+                </Td>
+                <Td align="right" className="tabular-nums">{r.transactions.toLocaleString()}</Td>
+                <Td align="right" strong className="tabular-nums">{fmtMoney(r.totalAmount)}</Td>
+                <Td nowrap>{fmtDate(r.lastAt)}</Td>
               </tr>
-            ) : rows.length === 0 ? (
-              <tr>
-                <td colSpan={4} className="px-5 py-8">
-                  <EmptyState
-                    icon={UserX}
-                    title={debounced ? "No matches" : "Every number is mapped"}
-                    description={
-                      debounced
-                        ? "No unmapped number matches that search."
-                        : "Every number seen in a transaction has an email address on file."
-                    }
-                  />
-                </td>
-              </tr>
-            ) : (
-              rows.map((r) => (
-                <tr key={r.phone} className="hover:bg-[var(--bg-surface)] transition-colors">
-                  <td className="px-5 py-3 font-mono font-semibold text-[var(--fg-primary)]">{r.phone}</td>
-                  <td className="px-5 py-3 tabular-nums text-[var(--fg-secondary)]">{r.transactions.toLocaleString()}</td>
-                  <td className="px-5 py-3 tabular-nums text-[var(--fg-primary)]">{fmtMoney(r.totalAmount)}</td>
-                  <td className="px-5 py-3 text-[var(--fg-secondary)] whitespace-nowrap text-[12.5px]">{fmtDate(r.lastAt)}</td>
-                </tr>
-              ))
-            )}
-          </tbody>
-        </table>
-      </div>
+            ))
+          )}
+        </tbody>
+      </DataTable>
       <Pagination page={page} totalPages={totalPages} total={total} onPageChange={setPage} />
     </Panel>
   );
-}
-
-function Th({ children }) {
-  return <th className="px-5 py-2.5 text-label">{children}</th>;
 }
