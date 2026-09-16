@@ -15,11 +15,19 @@
 // SKIPPED rather than overwritten. A migration that mangles what it cannot
 // understand is how an estate loses its second factors.
 
-import "./_db.mjs";
-import { getPool } from "../src/config/db.js";
-import {
-  seal, open as unseal, needsReseal, isSealed, encryptionEnabled, activeKeyId,
-} from "../src/services/secretBox.js";
+// openPool, NOT config/db.js's getPool: that one issues CREATE DATABASE and
+// runs every migration on the way up, which a maintenance script should need
+// neither the privilege nor the side effects of.
+//
+// secretBox reads its key at import time, so it is imported DYNAMICALLY, after
+// _db.mjs has loaded the .env. A static import would be evaluated before the
+// env exists and the script would report "no key" while the key sits in the
+// file next to it.
+import { openPool } from "./_db.mjs";
+
+const {
+  seal, open: unseal, needsReseal, isSealed, encryptionEnabled, activeKeyId,
+} = await import("../src/services/secretBox.js");
 
 const apply = process.argv.includes("--apply");
 
@@ -32,7 +40,7 @@ if (!encryptionEnabled) {
   process.exit(1);
 }
 
-const pool = await getPool();
+const pool = openPool();
 const [rows] = await pool.query(
   "SELECT id, email, totp_secret FROM users WHERE totp_secret IS NOT NULL ORDER BY id"
 );
