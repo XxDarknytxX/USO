@@ -76,7 +76,7 @@ export default function SetPassword() {
   const [token] = useState(takeTokenFromUrl);
   const navigate = useNavigate();
 
-  const [state, setState] = useState("checking"); // checking | ready | dead
+  const [state, setState] = useState("checking"); // checking | ready | dead | unreachable
   const [account, setAccount] = useState(null);
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
@@ -86,13 +86,22 @@ export default function SetPassword() {
 
   const check = useCallback(async () => {
     if (!token) { setErr("This link is missing its code."); setState("dead"); return; }
+    setState("checking");
     try {
       const r = await inviteApi.check(token);
       setAccount(r);
       setState("ready");
     } catch (e) {
-      setErr(e.message);
-      setState("dead");
+      // Only a 400 means the LINK is bad. Anything else — a 5xx, a timeout, no
+      // network — says nothing about the link, and telling someone it expired
+      // sends them off to ask for a new one they did not need.
+      if (e.status === 400) {
+        setErr("");
+        setState("dead");
+      } else {
+        setErr(e.message);
+        setState("unreachable");
+      }
     }
   }, [token]);
 
@@ -200,14 +209,34 @@ export default function SetPassword() {
                   This link has expired
                 </h1>
                 <p className="mt-2.5 text-[13.5px] leading-relaxed text-[var(--fg-secondary)]">
-                  {err || "It may already have been used, or it may be older than the few hours it was good for."}{" "}
-                  These links only last a few hours on purpose. Ask your administrator to send another — it
-                  takes them a moment.
+                  It may already have been used, or be older than the few hours these links last — they
+                  are short on purpose. Ask your administrator to send another; it takes them a moment.
                 </p>
               </div>
               <Button variant="secondary" onClick={() => navigate("/login")}>
                 Go to sign in
               </Button>
+            </div>
+          )}
+
+          {state === "unreachable" && (
+            <div className="flex flex-col items-start gap-5">
+              <span className="grid h-12 w-12 place-items-center rounded-[15px] border border-[var(--warning-border)] bg-[var(--warning-soft)] text-[var(--warning-fg)]">
+                <AlertTriangle size={20} />
+              </span>
+              <div>
+                <h1 className="font-display text-[26px] font-extrabold leading-tight tracking-[-0.025em]">
+                  Could not check your link
+                </h1>
+                <p className="mt-2.5 text-[13.5px] leading-relaxed text-[var(--fg-secondary)]">
+                  The console did not answer, so this says nothing about whether your link is still good.
+                  Try again in a moment.
+                </p>
+                {err && <p className="mt-2 font-mono text-[11.5px] text-[var(--fg-muted)]">{err}</p>}
+              </div>
+              {/* The token was already taken off the URL, so reloading the page
+                  would lose it. Retry re-runs the check with the one in memory. */}
+              <Button variant="primary" onClick={check}>Try again</Button>
             </div>
           )}
 

@@ -78,6 +78,15 @@ export async function getPool() {
     // in the Users list, and the set-password page cannot tell someone whether
     // they are finishing setup or recovering an account.
     `ALTER TABLE users ADD COLUMN password_set_purpose VARCHAR(16) NULL`,
+    // When the account's password was made unusable (an invite that has not
+    // been accepted, or a reset that has not been completed), and NULL while it
+    // has a password somebody can type. This is what "locked" means, recorded
+    // directly. The Users list used to infer it from the purpose of the last
+    // link sent — which went wrong the moment two links overlapped: onboarding
+    // sent over an expired reset showed an ordinary "invite expired" for an
+    // account that could not be signed into, and onboarding sent to a working
+    // account relabelled it "invited" for good.
+    `ALTER TABLE users ADD COLUMN password_retired_at TIMESTAMP NULL`,
 
     // The last TOTP time-step this account successfully used. A code stays
     // valid for about ninety seconds across the accepted window, and without
@@ -685,6 +694,45 @@ export async function getPool() {
     }
   } catch (e) {
     console.log('Network project seed note:', e.message);
+  }
+
+  // ── One-time: bring existing link state in line with the link-based flow ──
+  // Two corrections, run once behind a marker.
+  //
+  //  1. Accounts invited under the old flow and never set up have an unusable
+  //     password but no password_retired_at (the column did not exist). Without
+  //     this they would show as working accounts.
+  //  2. Links issued under the old flow were valid for SEVEN DAYS and travel as
+  //     ?token=, which the web server logs. They are cut to the new onboarding
+  //     window rather than left live for up to a week.
+  try {
+    const [[marker]] = await pool.query(
+      "SELECT setting_value FROM app_settings WHERE setting_key = 'password_links_v2_backfilled'"
+    );
+    if (!marker) {
+      const [a] = await pool.query(
+        `UPDATE users SET password_retired_at = COALESCE(invited_at, NOW())
+          WHERE password_set_token IS NOT NULL
+            AND last_login_at IS NULL
+            AND password_retired_at IS NULL`
+      );
+      const [b] = await pool.query(
+        `UPDATE users
+            SET password_set_expires = LEAST(password_set_expires, DATE_ADD(NOW(), INTERVAL 8 HOUR))
+          WHERE password_set_token IS NOT NULL AND password_set_expires IS NOT NULL`
+      );
+      await pool.query(
+        `INSERT INTO app_settings (setting_key, setting_value, setting_type, description)
+         VALUES ('password_links_v2_backfilled', '1', 'boolean',
+                 'Outstanding invites marked as locked accounts, and old 7-day links shortened.')
+         ON DUPLICATE KEY UPDATE setting_value = '1'`
+      );
+      if (a.affectedRows || b.affectedRows) {
+        console.log(`Password links backfill: ${a.affectedRows} pending account(s) marked, ${b.affectedRows} link(s) shortened`);
+      }
+    }
+  } catch (e) {
+    console.log('Password links backfill note:', e.message);
   }
 
   return pool;

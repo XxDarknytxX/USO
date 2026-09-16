@@ -38,11 +38,10 @@ export function makeAuthRouter(controller, attachScope) {
      Neither route reveals whether a token ever existed — expired, spent and
      never-real all answer identically. */
   router.post("/invite/check", controller.checkInvite);
-  router.post(
-    "/invite/accept",
-    [body("password").isLength({ min: 8 }).withMessage("Choose a password of at least 8 characters")],
-    controller.acceptInvite
-  );
+  // The password rules live in passwordPolicy.js and are checked in the
+  // handler. A validator here that the handler never read was a second
+  // definition that looked authoritative and decided nothing.
+  router.post("/invite/accept", controller.acceptInvite);
 
   /* ── Two-factor ───────────────────────────────────────────────────────
      login-verify is UNAUTHENTICATED by design: the caller holds only a

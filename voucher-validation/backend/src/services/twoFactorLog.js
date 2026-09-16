@@ -35,6 +35,17 @@ export const TWO_FACTOR_EVENTS = new Set([
   "policy_on",          // the estate-wide requirement switched on
   "policy_off",         //   ... and off
   "throttled",          // too many attempts; the caller was refused outright
+
+  // Password links. They live in this log, not a separate one, because the
+  // question they answer is the same — who got a way into this account, and
+  // when. The reset email tells its recipient "if you did not ask for this,
+  // contact your administrator", and that conversation needs to start from a
+  // row saying which administrator sent it. (The table keeps its original name;
+  // renaming a table under a live login path is not worth the risk.)
+  "reset_sent",         // an admin emailed a reset link
+  "reset_used",         // a reset link was used to set a password
+  "onboarding_sent",    // an onboarding link was emailed
+  "onboarding_used",    // an onboarding link was used
 ]);
 
 const trim = (v, n) => (v == null ? null : String(v).slice(0, n));

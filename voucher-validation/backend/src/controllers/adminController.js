@@ -10,11 +10,11 @@ import {
   loadSmtpTransport, buildPasswordResetLink, buildTwoFactorReset, buildInvite,
 } from "../services/mailer.js";
 import {
-  issuePasswordLink, discardPasswordLink, consumeInvite, findInvitee, revokeInvite, unusablePasswordHash, LINK_HOURS,
-  hashToken,
+  mintToken, storePasswordLink, consumeInvite, findInvitee, revokeInvite, unusablePasswordHash, LINK_HOURS,
 } from "../services/invites.js";
 import { makeAttemptLimiter, clientIp, pause } from "../services/attemptLimiter.js";
 import { logTwoFactorEvent, readTwoFactorEvents } from "../services/twoFactorLog.js";
+import { passwordProblem } from "../services/passwordPolicy.js";
 import { validationResult } from "express-validator";
 
 /** Local response helpers */
@@ -179,23 +179,20 @@ const tooMany = (res, seconds) => {
 };
 
 /**
- * Issues a one-time password link and emails it. Returns { sent, error }.
+ * Emails a one-time password link, and makes it live only once the mail server
+ * has accepted it. Returns { sent, error }.
  *
- * A link whose email could not be sent is DISCARDED before this returns. A live
- * credential that nobody was given is not "harmless because nobody has it" — it
- * is a live credential with no owner, and it also makes the Users list report
- * an invite or reset as outstanding when nothing is on its way to anyone.
+ * On a failed send NOTHING is written. That is the whole point of the order: a
+ * resend that stored first would already have overwritten the link that DID
+ * arrive, so a transient SMTP error cost the person the working link in their
+ * inbox and left the account with none.
  */
 async function sendPasswordLink(pool, user, purpose) {
-  const token = await issuePasswordLink(pool, user.id, purpose);
+  const token = mintToken();
   const mail = await sendAccountMail(pool, user, purpose, { linkToken: token });
-  if (!mail.sent) {
-    await discardPasswordLink(pool, user.id, token).catch((e) =>
-      console.error(`[users] could not discard undelivered ${purpose} link:`, e.message)
-    );
-    return { sent: false, error: mail.error };
-  }
-  return { sent: true, error: null, token };
+  if (!mail.sent) return { sent: false, error: mail.error };
+  await storePasswordLink(pool, user.id, purpose, token);
+  return { sent: true, error: null };
 }
 
 export function makeAdminController(pool) {
@@ -291,41 +288,68 @@ export function makeAdminController(pool) {
 
     // POST /api/users/:id/reset-password  (admin)
     //
-    // Emails a one-time link to choose a new password. NOT a new password: a
-    // mailed password stays readable for as long as the mailbox exists, and the
-    // account can be entered with it the whole time.
+    // Emails a one-time link to choose a new password, then retires the current
+    // one. Not a new password: a mailed password stays readable for as long as
+    // the mailbox exists, and opens the account the whole time.
     //
-    // Order matters. The link goes out FIRST, and only once the mail server has
-    // accepted it is the current password retired. The other way round, an SMTP
-    // failure leaves an account whose old password is dead and whose new link
-    // went nowhere — locked, with nobody told. If the email fails here, the link
-    // is discarded and the account is exactly as it was.
+    // Three rules, each from a way this went wrong:
+    //
+    //  • Not on your OWN account. The mail server accepting a message is not the
+    //    message arriving — a stale address, a quarantine, a silent drop — and
+    //    the old password is gone either way. Resetting yourself that way can
+    //    leave the console with no administrator able to sign in. Your own
+    //    password changes from Profile, which asks for the current one.
+    //
+    //  • Link first, retire second. If the email fails nothing changes: the old
+    //    password still works and no link is stored.
+    //
+    //  • Retire only if the password has not changed since this reset began.
+    //    Guarding on "our link is still outstanding" was not enough: a second
+    //    link issued meanwhile replaces ours, the guard then matched nothing, and
+    //    the admin was told the old password was dead while it still worked.
+    //    Guarding on the change time instead covers every case — the person used
+    //    the link, another admin set a password, a newer link was used — and a
+    //    newer link merely SENT does not stop the retire, which is what the
+    //    admin asked for.
     resetUserPassword: async (req, res) => {
       try {
         const [rows] = await pool.query("SELECT id, email, name, role FROM users WHERE id = ?", [req.params.id]);
         const user = rows[0];
         if (!user) return send.notFound(res, "User not found");
 
+        if (Number(user.id) === Number(req.user.id)) {
+          return send.bad(
+            res,
+            "To change your own password, use Profile → Security. A reset link sent to yourself retires your password before you know the email arrived."
+          );
+        }
+
+        // The database's clock, as text, so the comparison below never passes
+        // through a JavaScript Date and a timezone conversion.
+        const [[{ startedAt }]] = await pool.query(
+          "SELECT DATE_FORMAT(NOW(), '%Y-%m-%d %H:%i:%s') AS startedAt"
+        );
+
         const r = await sendPasswordLink(pool, user, "reset");
         if (!r.sent) {
           return send.ok(res, { success: false, emailed: false, emailError: r.error, changed: false });
         }
 
-        // The link is in their inbox; now the old password stops working.
-        // must_change_password is cleared rather than set — the new password
-        // will be one they chose themselves, which is the whole point.
-        //
-        // CONDITIONAL on this reset's link still being outstanding. Unguarded,
-        // someone who opened the email and chose a password before this line
-        // ran would have that new password silently overwritten with one
-        // nobody holds — locked out by the act of doing what they were asked.
-        // A consumed link has cleared the hash, so this then matches nothing.
-        await pool.query(
-          `UPDATE users SET password_hash = ?, must_change_password = 0, password_changed_at = NOW()
-            WHERE id = ? AND password_set_token = ?`,
-          [await unusablePasswordHash(), user.id, hashToken(r.token)]
+        const [retire] = await pool.query(
+          `UPDATE users
+              SET password_hash = ?, must_change_password = 0,
+                  password_changed_at = NOW(), password_retired_at = NOW()
+            WHERE id = ?
+              AND (password_changed_at IS NULL OR password_changed_at < ?)`,
+          [await unusablePasswordHash(), user.id, startedAt]
         );
-        return send.ok(res, { success: true, emailed: true, expiresHours: LINK_HOURS.reset });
+        const retired = retire.affectedRows === 1;
+
+        logTwoFactorEvent(pool, {
+          userId: user.id, userEmail: user.email, actor: req.user, req, event: "reset_sent",
+          detail: retired ? `valid ${LINK_HOURS.reset}h, old password retired` : `valid ${LINK_HOURS.reset}h, password had just changed`,
+        });
+        return send.ok(res, { success: true, emailed: true, retired, expiresHours: LINK_HOURS.reset });
       } catch (e) {
         console.error("[users] password reset failed:", e.message);
         return send.serverErr(res);
@@ -392,6 +416,12 @@ export function makeAdminController(pool) {
         if (!user) return send.notFound(res, "User not found");
 
         const r = await sendPasswordLink(pool, user, "invite");
+        if (r.sent) {
+          logTwoFactorEvent(pool, {
+            userId: user.id, userEmail: user.email, actor: req.user, req, event: "onboarding_sent",
+            detail: `valid ${LINK_HOURS.invite}h`,
+          });
+        }
         return send.ok(res, {
           success: r.sent,
           emailed: r.sent,
@@ -446,12 +476,33 @@ export function makeAdminController(pool) {
     // POST /api/invite/accept — set the password and burn the token.
     acceptInvite: async (req, res) => {
       const { token, password } = req.body || {};
-      if (!password || String(password).length < 8) {
-        return send.bad(res, "Choose a password of at least 8 characters");
-      }
+      // The same rules the page shows, decided here. Enforced only in the
+      // browser they were suggestions: anyone posting directly, or any page
+      // that forgot to copy them, could set a password the page would refuse.
+      const problem = passwordProblem(password);
+      if (problem) return send.bad(res, problem);
+
+      // Unauthenticated, so throttled per address on failures. A token is 256
+      // bits and not guessable; this is about not letting an anonymous caller
+      // spend server time without limit.
+      const ip = clientIp(req);
+      const acct = "invite-accept";
       try {
-        const ok = await consumeInvite(pool, token, password);
-        if (!ok) return send.bad(res, "This link is no longer valid. Ask your administrator to send a new one.");
+        const wait = limiter.retryAfter(ip, acct);
+        if (wait) return tooMany(res, wait);
+
+        const account = await consumeInvite(pool, token, password);
+        if (!account) {
+          const blockedFor = await penalise(ip, acct);
+          if (blockedFor) return tooMany(res, blockedFor);
+          return send.bad(res, "This link is no longer valid. Ask your administrator to send a new one.");
+        }
+        limiter.succeed(ip, acct);
+
+        logTwoFactorEvent(pool, {
+          userId: account.id, userEmail: account.email, req,
+          event: account.purpose === "reset" ? "reset_used" : "onboarding_used",
+        });
         // Deliberately does NOT return a session. Signing in straight after is
         // one extra step and it is the step that proves the password works —
         // and it routes through the 2FA policy instead of duplicating it here.
@@ -920,6 +971,7 @@ export function makeAdminController(pool) {
                   password_set_token IS NOT NULL AS has_invite,
                   password_set_purpose,
                   password_set_expires,
+                  password_retired_at,
                   (password_set_token IS NOT NULL AND password_set_expires > NOW()) AS invite_live
              FROM users
             ORDER BY created_at DESC`
@@ -935,17 +987,28 @@ export function makeAdminController(pool) {
           twoFactorEnabled: !!u.totp_enabled,
           mustChangePassword: !!u.must_change_password,
           inviteExpiresAt: u.has_invite ? u.password_set_expires : null,
-          // States an admin acts on differently: waiting on the person, waiting
-          // on a resend, or done. A reset is distinguished from an invite
-          // because an expired RESET is an account whose old password is
-          // already gone — locked until someone sends another link.
-          status: !u.has_invite
+          // Status is decided by what is TRUE about the password, not by the
+          // purpose of the last link sent — that inference broke whenever two
+          // links overlapped. Locked means password_retired_at is set: nobody
+          // can sign in until a link is used. Whether that reads as an invite or
+          // a reset depends on whether the account has ever been used.
+          //
+          //   usable password                  -> active   (a live link, if any,
+          //                                                 is reported alongside)
+          //   locked, live link                -> invited | reset-sent
+          //   locked, no live link             -> invite-expired | reset-expired
+          status: !u.password_retired_at
             ? "active"
-            : u.password_set_purpose === "reset"
-              ? (u.invite_live ? "reset-sent" : "reset-expired")
-              : (u.invite_live ? "invited" : "invite-expired"),
+            : u.invite_live
+              ? (u.last_login_at ? "reset-sent" : "invited")
+              : (u.last_login_at ? "reset-expired" : "invite-expired"),
+          // A live link on an account that can ALSO still sign in: onboarding
+          // sent to a working account. Worth showing; not worth a status.
+          linkLive: !!u.invite_live,
         }));
-        return send.ok(res, { users });
+        // The configured lifetimes, so the admin UI can state them instead of
+        // hard-coding "a couple of hours" beside a value somebody configured.
+        return send.ok(res, { users, linkHours: LINK_HOURS });
       } catch (e) {
         console.error(e);
         return send.serverErr(res);
@@ -990,9 +1053,11 @@ export function makeAdminController(pool) {
 
         await conn.beginTransaction();
         const [ins] = await conn.query(
-          `INSERT INTO users (email, password_hash, name, role, must_change_password)
-           VALUES (?, ?, ?, ?, ?)`,
-          [email, passwordHash, name || null, effRole, password ? 1 : 0]
+          `INSERT INTO users (email, password_hash, name, role, must_change_password, password_retired_at)
+           VALUES (?, ?, ?, ?, ?, ?)`,
+          // No password given = invite path = nobody can sign in until the link
+          // is used. Recorded, so the list says so rather than inferring it.
+          [email, passwordHash, name || null, effRole, password ? 1 : 0, password ? null : new Date()]
         );
         userId = ins.insertId;
         await conn.commit();
@@ -1014,6 +1079,12 @@ export function makeAdminController(pool) {
       // still exists, with a password nobody holds, and the admin is told to
       // send the onboarding link again once mail is working.
       const r = await sendPasswordLink(pool, created, "invite");
+      if (r.sent) {
+        logTwoFactorEvent(pool, {
+          userId: created.id, userEmail: created.email, actor: req.user, req, event: "onboarding_sent",
+          detail: `new account, valid ${LINK_HOURS.invite}h`,
+        });
+      }
       return send.created(res, {
         ...created,
         invited: true,
@@ -1044,13 +1115,32 @@ export function makeAdminController(pool) {
         // Build dynamic SET clause
         const sets = [];
         const params = [];
+        const emailChanged = email !== undefined && email !== existing[0].email;
         if (email !== undefined) { sets.push("email = ?"); params.push(email); }
         if (name !== undefined) { sets.push("name = ?"); params.push(name); }
         // Same whitelist as insertUser: this previously took the raw value.
         if (role !== undefined) { sets.push("role = ?"); params.push(safeRoleOf(role)); }
         if (password) {
-          sets.push("password_hash = ?");
+          // A password an administrator typed is a password an administrator
+          // knows. The modal has always said they would be asked to change it;
+          // until now nothing made that true.
+          sets.push("password_hash = ?", "must_change_password = 1",
+                    "password_changed_at = NOW()", "password_retired_at = NULL");
           params.push(await bcrypt.hash(password, 10));
+        }
+
+        // Any outstanding link is cancelled when the thing it was sent FOR
+        // changes:
+        //  • the email — or a link already delivered to the WRONG address stays
+        //    usable, and whoever holds it sets the password on the corrected
+        //    account. Fixing a typo in someone's address was a takeover.
+        //  • the password — or the link, used later, silently replaces the one
+        //    just set by hand, while the list still reports a reset outstanding.
+        // A role change deliberately does not: promoting someone before they
+        // have accepted their invite is ordinary, and the link is theirs.
+        const cancelLink = emailChanged || Boolean(password);
+        if (cancelLink) {
+          sets.push("password_set_token = NULL", "password_set_expires = NULL", "password_set_purpose = NULL");
         }
 
         // Effective role AFTER this update decides village handling. Run
@@ -1087,7 +1177,8 @@ export function makeAdminController(pool) {
           [targetId]
         );
         conn.release();
-        return send.ok(res, { user: rows[0] });
+        // Said, so the admin knows to send a fresh link to the corrected address.
+        return send.ok(res, { user: rows[0], linkCancelled: cancelLink });
       } catch (e) {
         try { await conn.rollback(); } catch { /* ignore */ }
         conn.release();

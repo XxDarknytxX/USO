@@ -30,7 +30,13 @@ export async function api(path, { method = "GET", body, auth = true, headers } =
 
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
-    throw new Error(data.error || `HTTP ${res.status}`);
+    // The status travels with the error. A caller that can only see the message
+    // cannot tell "that link is not valid" (400) from "the server is down"
+    // (5xx, or no response) — and told someone their link had expired when it
+    // was the network that failed.
+    const err = new Error(data.error || `HTTP ${res.status}`);
+    err.status = res.status;
+    throw err;
   }
   return data;
 }

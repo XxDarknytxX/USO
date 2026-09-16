@@ -1385,6 +1385,10 @@ const EVENT_COPY = {
   policy_on:          { label: "Policy switched on", tone: "brand",   Icon: Shield },
   policy_off:         { label: "Policy switched off", tone: "danger", Icon: Shield },
   throttled:          { label: "Too many attempts",  tone: "danger",  Icon: AlertTriangle },
+  reset_sent:         { label: "Reset link sent",    tone: "warning", Icon: KeyRound },
+  reset_used:         { label: "Password reset",     tone: "success", Icon: KeyRound },
+  onboarding_sent:    { label: "Onboarding link sent", tone: "info",  Icon: Send },
+  onboarding_used:    { label: "Password set",       tone: "success", Icon: Check },
 };
 
 function TwoFactorLog() {
@@ -1409,13 +1413,13 @@ function TwoFactorLog() {
 
   // The filter people actually want: everything that did not go smoothly.
   const shown = (events || []).filter(
-    (e) => !onlyProblems || !e.success || e.event === "admin_reset" || e.event === "disabled" || e.event === "policy_off"
+    (e) => !onlyProblems || !e.success || ["admin_reset", "disabled", "policy_off", "reset_sent"].includes(e.event)
   );
 
   return (
     <Panel
-      title="Two-factor activity"
-      subtitle="Every code accepted or rejected, every reset, and every change to the policy. Kept for a year."
+      title="Security activity"
+      subtitle="Two-factor codes accepted and rejected, password links sent and used, resets, and policy changes — with who did it. Kept for a year."
       icon={<History size={15} />}
       tone="slate"
       padding={false}

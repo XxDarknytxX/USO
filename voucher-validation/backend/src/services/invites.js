@@ -1,42 +1,36 @@
 // src/services/invites.js
 //
-// Invitations: an account is created with no usable password, and the person
-// sets their own through a one-time link.
+// One-time password links: onboarding ("an account was made for you; choose a
+// password") and reset ("your password was reset; choose a new one").
 //
-// This is deliberately not "mail them a temporary password". A password in an
-// inbox is a password that stays readable for as long as the mailbox exists,
-// gets forwarded, and turns up in backups — and the account is reachable with
-// it the whole time. A link that expires and dies on first use is reachable
-// for as long as it takes someone to click it once.
+// Never a password in an email. A mailed password stays readable for as long as
+// the mailbox exists, gets forwarded, turns up in backups, and opens the account
+// the whole time. A link dies on first use and within hours regardless.
 //
-// Only the SHA-256 of the token is stored. The token itself exists in the mail
-// and nowhere else, so reading the database does not hand anyone a way in.
-// SHA-256 rather than bcrypt on purpose: these are 32 random bytes, not a
-// human-chosen secret, so there is nothing to slow an attacker down about —
-// and the lookup has to find a user FROM the token, which a per-row salt
-// makes impossible without scanning every account.
+// Only the SHA-256 of a token is stored; the token exists in the mail and
+// nowhere else, so reading the database hands nobody a way in. SHA-256 rather
+// than bcrypt on purpose: these are 32 random bytes, not a human-chosen secret,
+// so there is nothing for a work factor to slow down — and the lookup must find
+// the account FROM the token, which a per-row salt would make a full scan.
+//
+// ── Send, THEN store ─────────────────────────────────────────────────────
+// A token is minted in memory, emailed, and only stored once the mail server
+// has accepted it. The obvious order — store, then send — has a bad failure:
+// storing overwrites whatever link the account already had, so a resend that
+// fails to send has already destroyed the link that DID arrive, and discarding
+// the new one afterwards leaves the account with no working link at all.
+// Stored after sending, a failed send changes nothing.
+//
+// The cost is a window of milliseconds between the mail being accepted and the
+// link becoming valid. Nobody receives, opens and submits an email that fast.
 
 import crypto from "node:crypto";
 import bcrypt from "bcryptjs";
 
 /*
- * One-time password links, for two purposes:
- *
- *   invite — onboarding. "An account was made for you; choose a password."
- *            Does not touch any password the account already has.
- *   reset  — "Your password has been reset; choose a new one." The caller
- *            retires the current password once the email has gone.
- *
- * Neither ever puts a password in an email. A mailed password stays readable
- * for as long as the mailbox exists, gets forwarded and turns up in backups,
- * and the account can be entered with it the whole time. A link dies on first
- * use and within hours regardless.
- *
- * HOURS, not days. The link is the credential for as long as it lives, and a
- * week is a long time for a credential to sit in an inbox. Reset is shorter
- * than onboarding because the person asked for it (or an admin did, on their
- * behalf) and is expected to act now; onboarding may land while someone is off
- * shift. Both are configurable, and clamped so a typo cannot mint a link that
+ * HOURS, not days: the link is the credential for as long as it lives. Reset is
+ * shorter than onboarding because it is acted on now; onboarding may land while
+ * someone is off shift. Configurable, clamped so a typo cannot mint a link that
  * lives for a year.
  */
 const hoursFromEnv = (name, fallback) => {
@@ -55,16 +49,19 @@ export function hashToken(token) {
   return crypto.createHash("sha256").update(String(token)).digest("hex");
 }
 
+/** A fresh token, in memory only. Nothing is written until storePasswordLink. */
+export function mintToken() {
+  return crypto.randomBytes(32).toString("base64url");
+}
+
 /**
- * Mints a one-time link for a user and stores only its hash. Returns the CLEAR
- * token — the only time it exists — for the caller to put in the mail.
+ * Makes a minted token live for a user. Call only AFTER its email was accepted.
  *
- * One outstanding link per account: issuing a new one overwrites the stored
- * hash, so any earlier link — of either purpose — dies at that moment.
+ * One outstanding link per account: this overwrites the stored hash, so any
+ * earlier link — of either purpose — stops working at this moment.
  */
-export async function issuePasswordLink(pool, userId, purpose) {
+export async function storePasswordLink(pool, userId, purpose, token) {
   if (!PURPOSES.has(purpose)) throw new Error(`Unknown password link purpose "${purpose}"`);
-  const token = crypto.randomBytes(32).toString("base64url");
   await pool.query(
     `UPDATE users
         SET password_set_token = ?,
@@ -74,23 +71,21 @@ export async function issuePasswordLink(pool, userId, purpose) {
       WHERE id = ?`,
     [hashToken(token), LINK_HOURS[purpose], purpose, purpose, userId]
   );
-  return token;
 }
 
-
 /**
- * A password nobody holds. Used as the stored hash for an invited account so
- * the NOT NULL column is satisfied without the account being reachable: every
- * password anyone could type fails against it.
+ * A password nobody holds. Stored for an account that must not be enterable
+ * until its owner uses a link: invited and never set up, or reset and not yet
+ * recovered. Every password anyone could type fails against it.
  */
 export async function unusablePasswordHash() {
   return bcrypt.hash(crypto.randomBytes(32).toString("hex"), 10);
 }
 
 /**
- * Looks up the account an invite belongs to. Returns null for a token that is
- * unknown, already used, or past its expiry — the caller must not distinguish
- * between those, or the endpoint becomes a way to ask whether a token existed.
+ * The account a live token belongs to, or null. Unknown, spent and expired all
+ * return null — callers must not tell them apart, or the endpoint becomes a way
+ * to ask whether a token existed.
  */
 export async function findInvitee(pool, token) {
   if (!token || typeof token !== "string") return null;
@@ -107,21 +102,31 @@ export async function findInvitee(pool, token) {
 }
 
 /**
- * Sets the password and consumes the invite in ONE statement, matched on the
- * token hash again. Two admins clicking the same link at once cannot both
- * succeed: the second UPDATE matches nothing, because the first cleared it.
+ * Sets the password and burns the token. Returns the account on success, or
+ * null when the token is not live.
  *
- * must_change_password is cleared as well — the whole point of this path is
- * that the password was chosen by the person who will use it, so there is
- * nothing to make them change on the way in.
+ * The token is checked BEFORE the password is hashed. This route is
+ * unauthenticated, and bcrypt is deliberately slow, so hashing first meant any
+ * anonymous caller could buy a full bcrypt of server CPU per request by posting
+ * garbage. A bad token now costs one indexed SELECT.
+ *
+ * The write is still conditional on the token itself, so two tabs submitting
+ * the same link cannot both win: the second UPDATE matches nothing.
+ *
+ * password_retired_at is cleared — the account has a password its owner chose —
+ * and must_change_password is cleared for the same reason.
  */
 export async function consumeInvite(pool, token, newPassword) {
+  const account = await findInvitee(pool, token);
+  if (!account) return null;
+
   const passwordHash = await bcrypt.hash(String(newPassword), 10);
   const [res] = await pool.query(
     `UPDATE users
         SET password_hash = ?,
             must_change_password = 0,
             password_changed_at = NOW(),
+            password_retired_at = NULL,
             password_set_token = NULL,
             password_set_expires = NULL,
             password_set_purpose = NULL
@@ -130,27 +135,14 @@ export async function consumeInvite(pool, token, newPassword) {
         AND password_set_expires > NOW()`,
     [passwordHash, hashToken(token)]
   );
-  return res.affectedRows === 1;
+  return res.affectedRows === 1 ? account : null;
 }
 
 /**
- * Discards ONE specific link — the one this caller issued — and nothing newer.
- *
- * Used when the email carrying a link could not be sent. Matching on the hash
- * rather than the user id matters: if a second link was issued for the same
- * account in the meantime, a plain "clear this user's link" would kill the one
- * that DID get delivered.
+ * Cancels whatever link is outstanding, without touching the password.
+ * Used when the thing the link was sent FOR has changed — the address it went
+ * to, or the password it would replace.
  */
-export async function discardPasswordLink(pool, userId, token) {
-  await pool.query(
-    `UPDATE users
-        SET password_set_token = NULL, password_set_expires = NULL, password_set_purpose = NULL
-      WHERE id = ? AND password_set_token = ?`,
-    [userId, hashToken(token)]
-  );
-}
-
-/** Drops a pending invite without touching the password. */
 export async function revokeInvite(pool, userId) {
   await pool.query(
     "UPDATE users SET password_set_token = NULL, password_set_expires = NULL, password_set_purpose = NULL WHERE id = ?",

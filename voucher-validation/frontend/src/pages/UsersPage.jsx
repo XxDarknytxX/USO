@@ -155,10 +155,13 @@ function StatusCell({ user }) {
   }
   if (!user.lastLoginAt) {
     return (
-      <StatusPill tone="neutral" dot={false}>
-        <Clock size={11} />
-        Never signed in
-      </StatusPill>
+      <span className="inline-flex flex-col gap-1">
+        <StatusPill tone="neutral" dot={false}>
+          <Clock size={11} />
+          Never signed in
+        </StatusPill>
+        {user.linkLive && <LinkOut at={user.inviteExpiresAt} />}
+      </span>
     );
   }
   return (
@@ -170,6 +173,21 @@ function StatusCell({ user }) {
       <span className="text-[11px] text-[var(--fg-subtle)]">
         {new Date(user.lastLoginAt).toLocaleDateString("en-AU", { day: "numeric", month: "short", year: "numeric" })}
       </span>
+      {user.linkLive && <LinkOut at={user.inviteExpiresAt} />}
+    </span>
+  );
+}
+
+/**
+ * A working account that ALSO has a live password link — onboarding sent to
+ * someone who can already sign in. Not a status, because nothing is wrong, but
+ * worth a line: the link is a way into the account until it expires.
+ */
+function LinkOut({ at }) {
+  return (
+    <span className="inline-flex items-center gap-1 text-[11px] text-[var(--info-fg)]">
+      <Mail size={10} />
+      link out {linkExpiry(at)}
     </span>
   );
 }
@@ -190,14 +208,18 @@ export default function UsersPage() {
   // down or the address wrong, and an admin who cannot see what was set has no
   // way to hand it over by another route.
   const [rescueResult, setRescueResult] = useState(null);
+  // The server's configured link lifetimes, so every sentence states the real
+  // number instead of "a couple of hours" beside a value somebody configured.
+  const [linkHours, setLinkHours] = useState({ invite: 8, reset: 2 });
   const [query, setQuery] = useState("");
   const [roleFilter, setRoleFilter] = useState("all");
   const { email: currentEmail } = useAuth();
 
   async function loadUsers() {
     try {
-      const { users } = await userApi.list();
+      const { users, linkHours: hours } = await userApi.list();
       setUsers(users);
+      if (hours) setLinkHours(hours);
     } catch (e) {
       toast.error(e.message);
     } finally {
@@ -240,11 +262,16 @@ export default function UsersPage() {
         });
       } else if (r.emailed) {
         const hours = r.expiresHours;
+        const valid = `valid ${hours} hour${hours === 1 ? "" : "s"}`;
         toast.success(
-          kind === "password"
-            ? `Reset link sent to ${user.email} — valid ${hours} hour${hours === 1 ? "" : "s"}. Their old password no longer works.`
-            : `Onboarding link sent to ${user.email} — valid ${hours} hour${hours === 1 ? "" : "s"}.`,
-          { duration: 7000 }
+          kind !== "password"
+            ? `Onboarding link sent to ${user.email} — ${valid}.`
+            : r.retired
+              ? `Reset link sent to ${user.email} — ${valid}. Their old password no longer works.`
+              // Said plainly, because the admin clicked "reset" expecting the
+              // old password to die. It did not, and they need to know that.
+              : `Reset link sent to ${user.email} — ${valid}. Their password was changed moments ago, so it was left as it is.`,
+          { duration: 8000 }
         );
       } else {
         setRescueResult({
@@ -429,23 +456,35 @@ export default function UsersPage() {
                           {/* The rescue actions. Each is confirmed first: all
                               invalidate something the account is using right
                               now, and a mis-click should not be the thing that
-                              locks someone out on a Friday. */}
-                          <IconButton
-                            onClick={() => setRescue({ user: u, kind: "password" })}
-                            size="sm"
-                            title="Reset password — emails a one-time link, and the old password stops working"
-                            aria-label={`Reset password for ${u.email}`}
-                          >
-                            <KeyRound size={14} />
-                          </IconButton>
-                          <IconButton
-                            onClick={() => setRescue({ user: u, kind: "twofactor" })}
-                            size="sm"
-                            title="Reset two-factor — for a lost or replaced phone"
-                            aria-label={`Reset two-factor for ${u.email}`}
-                          >
-                            <ShieldOff size={14} />
-                          </IconButton>
+                              locks someone out on a Friday.
+
+                              Neither reset is offered on your own row. The
+                              server refuses both — a password reset retires
+                              your password before you know the email arrived,
+                              and a 2FA reset would go round the password check —
+                              and a button whose only outcome is an error is
+                              worse than no button. Profile → Security does both
+                              for your own account. */}
+                          {!isSelf && (
+                            <IconButton
+                              onClick={() => setRescue({ user: u, kind: "password" })}
+                              size="sm"
+                              title="Reset password — emails a one-time link, and the old password stops working"
+                              aria-label={`Reset password for ${u.email}`}
+                            >
+                              <KeyRound size={14} />
+                            </IconButton>
+                          )}
+                          {!isSelf && (
+                            <IconButton
+                              onClick={() => setRescue({ user: u, kind: "twofactor" })}
+                              size="sm"
+                              title="Reset two-factor — for a lost or replaced phone"
+                              aria-label={`Reset two-factor for ${u.email}`}
+                            >
+                              <ShieldOff size={14} />
+                            </IconButton>
+                          )}
                           <IconButton
                             onClick={() => setRescue({ user: u, kind: awaiting && u.status.startsWith("reset") ? "password" : "onboarding" })}
                             size="sm"
@@ -516,7 +555,10 @@ export default function UsersPage() {
       <ConfirmDialog
         open={!!rescue}
         title={RESCUE_COPY[rescue?.kind]?.title || ""}
-        message={(RESCUE_COPY[rescue?.kind]?.message || "").replace("{email}", rescue?.user?.email || "")}
+        message={(RESCUE_COPY[rescue?.kind]?.message || "")
+          .replace("{email}", rescue?.user?.email || "")
+          .replace("{resetHours}", `${linkHours.reset} hour${linkHours.reset === 1 ? "" : "s"}`)
+          .replace("{inviteHours}", `${linkHours.invite} hour${linkHours.invite === 1 ? "" : "s"}`)}
         confirmLabel={RESCUE_COPY[rescue?.kind]?.verb || "Confirm"}
         variant={rescue?.kind === "invite" ? "primary" : "danger"}
         loading={rescueBusy}
@@ -556,7 +598,7 @@ const RESCUE_COPY = {
     title: "Reset password",
     verb: "Send reset link",
     message:
-      "A one-time link to choose a new password will be emailed to {email}. It works once and expires in a couple of hours. " +
+      "A one-time link to choose a new password will be emailed to {email}. It works once and expires in {resetHours}. " +
       "Their current password stops working as soon as the email is sent — if the email cannot be sent, nothing changes.",
   },
   twofactor: {
@@ -569,7 +611,7 @@ const RESCUE_COPY = {
     title: "Send onboarding link",
     verb: "Send link",
     message:
-      "A one-time link to set their password will be emailed to {email}. It works once and expires within hours, and any earlier link stops working. " +
+      "A one-time link to set their password will be emailed to {email}. It works once and expires in {inviteHours}, and any earlier link stops working. " +
       "A password they already have is left alone.",
   },
 };
@@ -680,8 +722,13 @@ function UserFormModal({ mode, user, onClose, onSaved }) {
           setLoading(false);
           return;
         }
-        await userApi.update(user.id, body);
-        toast.success("Account updated");
+        const upd = await userApi.update(user.id, body);
+        toast.success(
+          upd?.linkCancelled
+            ? "Account updated. The password link that was out has been cancelled — send a new one if they still need it."
+            : "Account updated",
+          { duration: upd?.linkCancelled ? 8000 : 4000 }
+        );
         onSaved();
         return;
       }
