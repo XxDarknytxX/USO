@@ -446,7 +446,7 @@ function ProjectFormModal({ project = null, onClose, onSaved }) {
         icon={Network}
         onClose={onClose}
       />
-      <form onSubmit={submit}>
+      <form onSubmit={submit} className="flex min-h-0 flex-1 flex-col">
         <Modal.Body>
           <div className="flex flex-col gap-5">
             <Field

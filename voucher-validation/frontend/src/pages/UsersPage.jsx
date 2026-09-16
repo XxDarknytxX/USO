@@ -1094,7 +1094,7 @@ function UserFormModal({ mode, user, onClose, onSaved }) {
           icon={Edit3}
           onClose={onClose}
         />
-        <form onSubmit={handleSubmit}>
+        <form onSubmit={handleSubmit} className="flex min-h-0 flex-1 flex-col">
           <Modal.Body>
             <div className="flex flex-col gap-6">
               {identityBlock}
@@ -1143,7 +1143,10 @@ function UserFormModal({ mode, user, onClose, onSaved }) {
         ))}
       </div>
 
-      <form onSubmit={(e) => { e.preventDefault(); if (step === 1) setStep(2); else handleSubmit(e); }}>
+      <form
+        onSubmit={(e) => { e.preventDefault(); if (step === 1) setStep(2); else handleSubmit(e); }}
+        className="flex min-h-0 flex-1 flex-col"
+      >
         <Modal.Body className="!pt-5">
           {step === 1 ? (
             <div className="flex flex-col gap-6">

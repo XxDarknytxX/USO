@@ -149,13 +149,24 @@ function Header({
 }
 
 /* ------------ Body (scrollable) ------------------------------------------ */
+/**
+ * The only part of the dialog that scrolls. It earns that by being `flex-1`
+ * inside the panel's flex column and capping its own overflow.
+ *
+ * `min-h-0` is load-bearing, not tidiness: a flex item defaults to
+ * `min-height: auto`, which refuses to shrink below its content, so without it
+ * the body grows past the panel and pushes the footer off the bottom instead
+ * of scrolling.
+ *
+ * The same trap catches anything placed BETWEEN the panel and this — most
+ * often a <form> wrapping Body and Footer so one submit covers both. A plain
+ * <form> is neither a flex container nor a flex child that fills, so `flex-1`
+ * here lands on nothing and the footer gets clipped. Any such wrapper needs
+ * `className="flex min-h-0 flex-1 flex-col"`.
+ */
 function Body({ children, className = "" }) {
   return (
-    <div
-      className={`flex-1 overflow-y-auto px-7 py-6 ${className}`}
-      // Subtle inner shadow at the top/bottom edges when content is scrollable
-      // — uses radial mask to fade the edges
-    >
+    <div className={`min-h-0 flex-1 overflow-y-auto px-7 py-6 ${className}`}>
       {children}
     </div>
   );

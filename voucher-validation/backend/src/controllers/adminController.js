@@ -542,6 +542,23 @@ export function makeAdminController(pool) {
     // GET /api/me/preferences — per-user UI prefs (village display filter, active
     // scope). Stored server-side so a user's settings sync across their devices
     // instead of living in one browser's localStorage.
+    // GET /api/me/preferences
+    //
+    // Returns the caller's own preferences AND the estate default for the
+    // "All Villages" set. Two settings, deliberately:
+    //
+    //   globalVisibleSiteIds — set by an admin under Settings, applies to
+    //     everyone who has not chosen their own. This is where a test village
+    //     gets excluded once, for the whole console.
+    //
+    //   prefs.visibleSiteIds — this account's own choice, which overrides the
+    //     default for them alone. An admin can tick a test village back on to
+    //     look at it without putting it in front of anybody else.
+    //
+    // The default is served from HERE rather than from GET /api/settings
+    // because that route is admin-only and every role needs to know what the
+    // default is. It is a list of village ids, which tells the caller nothing
+    // they could not learn from the village list they already receive.
     getPreferences: async (req, res) => {
       try {
         const [rows] = await pool.query(
@@ -552,7 +569,27 @@ export function makeAdminController(pool) {
         if (rows.length && rows[0].prefs) {
           prefs = typeof rows[0].prefs === "string" ? JSON.parse(rows[0].prefs) : rows[0].prefs;
         }
-        return send.ok(res, { prefs });
+
+        // null (or an unreadable value) means "no default set" — every village.
+        // A stored default that will not parse is treated the same way rather
+        // than throwing: a corrupt setting should widen the view, not break the
+        // console for everyone at once.
+        let globalVisibleSiteIds = null;
+        try {
+          const [[row]] = await pool.query(
+            "SELECT setting_value FROM app_settings WHERE setting_key = 'global_visible_villages'"
+          );
+          if (row?.setting_value) {
+            const parsed = JSON.parse(row.setting_value);
+            if (Array.isArray(parsed)) {
+              globalVisibleSiteIds = parsed.map(Number).filter(Number.isFinite);
+            }
+          }
+        } catch (e) {
+          console.error("[prefs] global village default unreadable:", e.message);
+        }
+
+        return send.ok(res, { prefs, globalVisibleSiteIds });
       } catch (e) {
         console.error(e);
         return send.serverErr(res);

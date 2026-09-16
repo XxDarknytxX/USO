@@ -5,8 +5,23 @@
 //     an id → that village; everything rescopes to it.
 //   • visibleSiteIds — a DISPLAY FILTER for the Overview board + Network tab:
 //     which villages to show. null → all; an array → that subset.
-// Both are saved as a PER-USER server preference (synced across the user's
-// devices), with localStorage kept as an instant cache/fallback.
+//
+// The display filter comes in two layers:
+//   • globalVisibleSiteIds — the ESTATE DEFAULT, set once by an admin under
+//     Settings and applied to everyone who has not chosen otherwise. This is
+//     where a test village is taken out of the console for the whole team.
+//   • visibleSiteIds — the PERSONAL override, this account's own choice. An
+//     admin can tick a test village back on to look at it for an afternoon
+//     without putting it in front of anybody else.
+// Personal wins when it is set; otherwise the estate default applies; if
+// neither is set, every village shows. Neither layer grants ACCESS — that is
+// user_villages, enforced server-side. These only decide what is displayed of
+// what you are already allowed to see.
+//
+// activeSiteId and the personal filter are saved as PER-USER server
+// preferences (synced across the user's devices), with localStorage kept as an
+// instant cache/fallback. The estate default is an app setting, not a
+// preference, and is read-only here.
 
 import { createContext, useContext, useState, useEffect, useCallback, useRef } from "react";
 import { networkApi, userApi } from "../services/api";
@@ -35,7 +50,8 @@ function readVisible() {
 export function SiteProvider({ children }) {
   const [sites, setSites] = useState([]);
   const [activeSiteId, setActiveSiteIdState] = useState(readActive);
-  const [visibleSiteIds, setVisibleState] = useState(readVisible); // null = all
+  const [visibleSiteIds, setVisibleState] = useState(readVisible); // null = follow the estate default
+  const [globalVisibleSiteIds, setGlobalVisible] = useState(null);  // null = all
   const [loading, setLoading] = useState(true);
 
   // Debounced server sync — batches rapid village toggles into one PUT. The
@@ -63,7 +79,10 @@ export function SiteProvider({ children }) {
     // migrate this device's stale localStorage over real, synced server prefs.
     const [projRes, prefsRes] = await Promise.all([
       networkApi.projects().then((d) => ({ ok: true, d })).catch(() => ({ ok: false })),
-      userApi.preferences().then((p) => ({ ok: true, prefs: p?.prefs || {} })).catch(() => ({ ok: false })),
+      userApi
+        .preferences()
+        .then((p) => ({ ok: true, prefs: p?.prefs || {}, global: p?.globalVisibleSiteIds ?? null }))
+        .catch(() => ({ ok: false })),
     ]);
     if (seq !== loadSeq.current) return; // a newer load superseded this one
 
@@ -84,6 +103,15 @@ export function SiteProvider({ children }) {
     }
     const list = projRes.d.projects || [];
     setSites(list);
+
+    // Pruned to villages that still exist, so a default naming a deleted
+    // village does not quietly shrink what everyone sees.
+    const rawGlobal = prefsRes.ok ? prefsRes.global : null;
+    setGlobalVisible(
+      Array.isArray(rawGlobal)
+        ? rawGlobal.map(Number).filter((id) => list.some((x) => String(x.id) === String(id)))
+        : null
+    );
 
     const prefsOk = prefsRes.ok;
     const serverPrefs = prefsRes.prefs || {};
@@ -156,10 +184,19 @@ export function SiteProvider({ children }) {
     [sites, schedulePrefSave]
   );
 
+  // The set actually in force: the personal choice when there is one, the
+  // estate default otherwise, and everything if neither is set. Resolved in one
+  // place so no caller has to remember the precedence.
+  const effectiveVisibleSiteIds =
+    visibleSiteIds != null ? visibleSiteIds : globalVisibleSiteIds;
+
   const isSiteVisible = useCallback(
-    (id) => visibleSiteIds == null || visibleSiteIds.includes(id),
-    [visibleSiteIds]
+    (id) => effectiveVisibleSiteIds == null || effectiveVisibleSiteIds.includes(id),
+    [effectiveVisibleSiteIds]
   );
+
+  /** True when this account is showing the estate default rather than its own. */
+  const followingEstateDefault = visibleSiteIds == null;
 
   // Effective scope for the Overview board + Network tab: when a single village
   // is picked in the switcher, only that one; otherwise the configured
@@ -169,21 +206,29 @@ export function SiteProvider({ children }) {
     [activeSiteId, isSiteVisible]
   );
 
+  // Toggling starts from the set CURRENTLY IN FORCE, not from "all". Someone
+  // following an estate default of four villages who unticks one expects three
+  // — not every village bar one.
   const toggleVisibleSite = useCallback(
     (id) => {
-      const all = sites.map((s) => s.id);
-      const current = visibleSiteIds == null ? all : visibleSiteIds;
+      const current = effectiveVisibleSiteIds == null ? sites.map((s) => s.id) : effectiveVisibleSiteIds;
       const next = current.includes(id) ? current.filter((x) => x !== id) : [...current, id];
       setVisibleSiteIds(next);
     },
-    [sites, visibleSiteIds, setVisibleSiteIds]
+    [sites, effectiveVisibleSiteIds, setVisibleSiteIds]
   );
+
+  /** Drops this account's own choice and goes back to the estate default. */
+  const followEstateDefault = useCallback(() => setVisibleSiteIds(null), [setVisibleSiteIds]);
 
   const activeSite = sites.find((s) => s.id === activeSiteId) || null;
   const activeGroupId = activeSite?.ruijieGroupId || null;
   const isGlobal = activeSiteId == null;
-  const visibleSites = visibleSiteIds == null ? sites : sites.filter((s) => visibleSiteIds.includes(s.id));
-  const allVisible = visibleSiteIds == null;
+  // Derived from the EFFECTIVE set, not the personal one — an account following
+  // an estate default of four villages is not showing all of them.
+  const visibleSites =
+    effectiveVisibleSiteIds == null ? sites : sites.filter((s) => effectiveVisibleSiteIds.includes(s.id));
+  const allVisible = effectiveVisibleSiteIds == null;
 
   return (
     <SiteContext.Provider
@@ -194,8 +239,14 @@ export function SiteProvider({ children }) {
         activeGroupId,
         isGlobal,
         setActiveSiteId,
-        // display filter
+        // display filter — `visibleSiteIds` is this account's own choice (null =
+        // following the estate default); `effectiveVisibleSiteIds` is what is
+        // actually in force and is what callers almost always want.
         visibleSiteIds,
+        globalVisibleSiteIds,
+        effectiveVisibleSiteIds,
+        followingEstateDefault,
+        followEstateDefault,
         visibleSites,
         allVisible,
         isSiteVisible,

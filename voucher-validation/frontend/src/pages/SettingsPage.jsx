@@ -18,6 +18,7 @@ import toast from "react-hot-toast";
 
 import { settingsApi, networkApi, twoFactorApi } from "../services/api";
 import { useSite } from "../hooks/useSite";
+import { useAuth } from "../hooks/useAuth";
 import {
   PageShell, PageHeader, Panel, Badge, Toggle, Select, Field, Input, Button, Tabs, Section, SkeletonCard,
 } from "../components/ui";
@@ -123,6 +124,183 @@ function PanelFooter({ note, children }) {
 }
 
 /** A tickable village in one of the three scope pickers. */
+/* ============================================================================
+   Village display scope — the estate default and this account's own view.
+
+   NEITHER grants access. A viewer or engineer is limited to the villages
+   assigned to their account (user_villages, enforced server-side); these two
+   only decide which of the villages you may already see are DISPLAYED.
+   ========================================================================= */
+function VillageScopePanels() {
+  const {
+    sites, isSiteVisible, toggleVisibleSite, setVisibleSiteIds,
+    globalVisibleSiteIds, followingEstateDefault, followEstateDefault,
+    visibleSites, allVisible, reload,
+  } = useSite();
+  const { isAdmin } = useAuth();
+
+  // The estate default is edited here as a draft and saved explicitly. It
+  // changes what every other account sees, which is not something to commit on
+  // each click of a checkbox.
+  const [draft, setDraft] = useState(null);       // null until "Edit" is pressed
+  const [saving, setSaving] = useState(false);
+
+  const globalSet = globalVisibleSiteIds;         // null = every village
+  const editing = draft !== null;
+  const shown = editing ? draft : globalSet;
+  const globalCount = globalSet == null ? sites.length : globalSet.length;
+
+  function toggleDraft(id) {
+    setDraft((prev) => {
+      const base = prev ?? (globalSet == null ? sites.map((s) => s.id) : globalSet);
+      return base.includes(id) ? base.filter((x) => x !== id) : [...base, id];
+    });
+  }
+
+  async function saveGlobal() {
+    setSaving(true);
+    try {
+      // Every village selected is stored as "no restriction" rather than as a
+      // list of all of them, so a village added later is included by default
+      // instead of silently missing from a stale list.
+      const value = draft && draft.length < sites.length ? JSON.stringify(draft) : null;
+      await settingsApi.update("global_visible_villages", value, "json");
+      toast.success("Estate default saved — it applies to everyone following it");
+      setDraft(null);
+      await reload();
+    } catch (e) {
+      toast.error(e.message);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <>
+      {/* ── Estate default ─────────────────────────────────────────────── */}
+      <Panel
+        title="Estate default"
+        subtitle="Which villages count as “All Villages” for everyone who has not set their own view. Take a test village out here and it leaves the console for the whole team."
+        icon={<Globe2 size={15} />}
+        tone="navy"
+        padding={false}
+        actions={
+          !isAdmin ? null : editing ? (
+            <div className="flex items-center gap-1">
+              <Button variant="ghost" size="xs" onClick={() => setDraft(sites.map((s) => s.id))} disabled={saving}>
+                Select all
+              </Button>
+              <Button variant="ghost" size="xs" onClick={() => setDraft([])} disabled={saving}>
+                Clear
+              </Button>
+              <Button variant="ghost" size="xs" onClick={() => setDraft(null)} disabled={saving}>
+                Cancel
+              </Button>
+              <Button variant="primary" size="xs" onClick={saveGlobal} loading={saving}>
+                Save for everyone
+              </Button>
+            </div>
+          ) : (
+            <Button variant="secondary" size="xs" onClick={() => setDraft(globalSet == null ? sites.map((s) => s.id) : globalSet)}>
+              Edit
+            </Button>
+          )
+        }
+      >
+        <div className="flex flex-col divide-y divide-[var(--border-subtle)] max-h-[320px] overflow-y-auto scrollbar-none">
+          {sites.length === 0 ? (
+            <div className="px-5 sm:px-6 py-4 text-[12.5px] text-[var(--fg-muted)]">
+              No villages yet — add them under Network.
+            </div>
+          ) : (
+            sites.map((s) => (
+              <CheckRow
+                key={s.id}
+                checked={shown == null || shown.includes(s.id)}
+                disabled={!editing}
+                title={s.name}
+                subtitle={s.hostname}
+                onClick={() => toggleDraft(s.id)}
+              />
+            ))
+          )}
+        </div>
+        {sites.length > 0 && (
+          <PanelFooter
+            note={
+              <span>
+                {globalSet == null
+                  ? `Every village (${sites.length}) by default.`
+                  : `${globalCount} of ${sites.length} villages by default.`}
+                {!isAdmin && " Set by an administrator."}
+              </span>
+            }
+          />
+        )}
+      </Panel>
+
+      {/* ── This account's own view ────────────────────────────────────── */}
+      <Panel
+        title="Your view"
+        subtitle="Only affects you. Use it to look at a village the estate default leaves out — a test site, say — without putting it in front of anybody else."
+        icon={<Eye size={15} />}
+        tone="violet"
+        padding={false}
+        actions={
+          <div className="flex items-center gap-1">
+            <Button variant="ghost" size="xs" onClick={() => setVisibleSiteIds(sites.map((s) => s.id))}>
+              Select all
+            </Button>
+            <Button
+              variant="ghost"
+              size="xs"
+              onClick={followEstateDefault}
+              disabled={followingEstateDefault}
+              title="Go back to whatever the estate default says"
+            >
+              Follow default
+            </Button>
+          </div>
+        }
+      >
+        <div className="flex flex-col divide-y divide-[var(--border-subtle)] max-h-[320px] overflow-y-auto scrollbar-none">
+          {sites.length === 0 ? (
+            <div className="px-5 sm:px-6 py-4 text-[12.5px] text-[var(--fg-muted)]">
+              No villages yet — add them under Network.
+            </div>
+          ) : (
+            sites.map((s) => (
+              <CheckRow
+                key={s.id}
+                checked={isSiteVisible(s.id)}
+                title={s.name}
+                subtitle={s.hostname}
+                note={
+                  globalSet != null && !globalSet.includes(s.id)
+                    ? "not in the estate default"
+                    : undefined
+                }
+                onClick={() => toggleVisibleSite(s.id)}
+              />
+            ))
+          )}
+        </div>
+        {sites.length > 0 && (
+          <PanelFooter
+            note={
+              <span>
+                {followingEstateDefault
+                  ? `Following the estate default — ${allVisible ? `all ${sites.length}` : `${visibleSites.length} of ${sites.length}`} villages.`
+                  : `Your own selection — ${visibleSites.length} of ${sites.length} villages. Nobody else is affected.`}
+              </span>
+            }
+          />
+        )}
+      </Panel>
+    </>
+  );
+}
+
 function CheckRow({ checked, disabled, title, subtitle, note, mono = true, onClick }) {
   return (
     <button
@@ -161,7 +339,9 @@ export default function SettingsPage() {
   const [loading, setLoading] = useState(true); // eslint-disable-line no-unused-vars
   // Details are shown by default; the button masks them for screen-sharing.
   const [showSecrets, setShowSecrets] = useState(true);
-  const { sites, isSiteVisible, toggleVisibleSite, setVisibleSiteIds, allVisible, visibleSites } = useSite();
+  // The village pickers moved into VillageScopePanels, which reads useSite
+  // itself; the page only needs the list.
+  const { sites } = useSite();
 
   // Voucher-sync schedule
   const [syncEnabled, setSyncEnabled] = useState(true);
@@ -568,47 +748,14 @@ export default function SettingsPage() {
               </div>
             </Panel>
 
-            <Panel
-              title="All Villages scope"
-              subtitle="Which villages are included when the scope is set to “All Villages” — this drives the Dashboard, Overview and Network tab."
-              icon={<Globe2 size={15} />}
-              tone="navy"
-              padding={false}
-              actions={
-                <div className="flex items-center gap-1">
-                  <Button variant="ghost" size="xs" onClick={() => setVisibleSiteIds(null)}>Select all</Button>
-                  <Button variant="ghost" size="xs" onClick={() => setVisibleSiteIds([])}>Clear</Button>
-                </div>
-              }
-            >
-              <div className="flex flex-col divide-y divide-[var(--border-subtle)] max-h-[380px] overflow-y-auto scrollbar-none">
-                {sites.length === 0 ? (
-                  <div className="px-5 sm:px-6 py-4 text-[12.5px] text-[var(--fg-muted)]">
-                    No villages yet — add them under Network.
-                  </div>
-                ) : (
-                  sites.map((s) => (
-                    <CheckRow
-                      key={s.id}
-                      checked={isSiteVisible(s.id)}
-                      title={s.name}
-                      subtitle={s.hostname}
-                      onClick={() => toggleVisibleSite(s.id)}
-                    />
-                  ))
-                )}
-              </div>
-              {sites.length > 0 && (
-                <PanelFooter
-                  note={
-                    <span>
-                      {allVisible ? `All ${sites.length} villages` : `${visibleSites.length} of ${sites.length} villages`} in
-                      the All Villages scope.
-                    </span>
-                  }
-                />
-              )}
-            </Panel>
+            {/* Two layers, deliberately separate.
+
+                The estate default is the one that matters operationally: it is
+                where a test village is taken out of the console once, for
+                everybody. The personal view exists so that doing so does not
+                also stop the admin from looking at it — they can tick it back
+                on for themselves without putting it in front of the team. */}
+            <VillageScopePanels />
           </>
         )}
 
