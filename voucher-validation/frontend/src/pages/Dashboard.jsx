@@ -77,7 +77,11 @@ function usageColor(pct) {
 export default function Dashboard() {
   const navigate = useNavigate();
   const { sites, setActiveSiteId, isSiteVisible, allVisible } = useSite();
-  const { isViewer } = useAuth();
+  // Everything privileged on this page is gated on isAdmin, not on "not a
+  // viewer". The server's requireNotViewer is an admin check whatever its name
+  // suggests, so "not a viewer" let engineers press buttons that 403 and open
+  // routes that bounce them.
+  const { isAdmin } = useAuth();
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
   const [voucherStats, setVoucherStats] = useState(null);
@@ -147,19 +151,23 @@ export default function Dashboard() {
 
   async function loadDashboardData() {
     try {
-      // Viewers can't reach sync-logs or manual-assistance (403, server-blocked),
-      // so skip those fetches entirely — they only get stats + (scoped) revenue.
+      // Only admins can reach sync-logs or manual-assistance — the server's
+      // requireNotViewer is an admin check, whatever its name suggests. Gating
+      // these on "not a viewer" sent engineers straight into a 403 nothing
+      // caught, so ONE rejected promise took the whole dashboard down with it
+      // and every panel rendered empty. Both are now admin-gated and both
+      // catch, so a surprise from either degrades one panel, not the page.
       const [statsData, logsData, revenueData, maData, netData] = await Promise.all([
         api("/vouchers/stats", { auth: true }),
-        isViewer ? Promise.resolve({ logs: [] }) : api("/vouchers/sync-logs", { auth: true }),
+        isAdmin ? api("/vouchers/sync-logs", { auth: true }).catch(() => ({ logs: [] })) : Promise.resolve({ logs: [] }),
         api("/portal-config/revenue", { auth: true }).catch(() => null),
-        isViewer ? Promise.resolve(null) : api("/portal-config/manual-assistance?status=open", { auth: true }).catch(() => null),
+        isAdmin ? api("/portal-config/manual-assistance?status=open", { auth: true }).catch(() => null) : Promise.resolve(null),
         // 30 days so daily collection still yields enough samples to mean
         // something — at a 24h window one sample is only ever 0% or 100%.
         api("/network/overview?uptimeHours=720", { auth: true }).catch(() => null),
       ]);
       setVoucherStats(statsData);
-      setSyncLogs(logsData.logs || []);
+      setSyncLogs(logsData?.logs || []);
       setRevenue(revenueData);
       setManualAssist(maData);
       setNetOverview(netData);
@@ -446,7 +454,7 @@ export default function Dashboard() {
     <>
       <MonthPicker state={mb} compact />
       {/* Sync is an admin action (and hits Ruijie) — hidden for read-only viewers. */}
-      {!isViewer && (
+      {isAdmin && (
         <Button
           variant="secondary"
           size="sm"
@@ -492,7 +500,7 @@ export default function Dashboard() {
     { value: "plans", label: "Plans" },
     { value: "capacity", label: "Capacity" },
     // Sync history is admin-only — /vouchers/sync-logs 403s for viewers.
-    ...(!isViewer ? [{ value: "sync", label: "Sync" }] : []),
+    ...(isAdmin ? [{ value: "sync", label: "Sync" }] : []),
   ];
 
   return (
@@ -533,7 +541,7 @@ export default function Dashboard() {
               title="Last collector snapshot reported no internet at these sites."
               // /network is admin-only, so a viewer gets the count without a
               // click that would bounce them.
-              onClick={isViewer ? null : () => navigate("/network")}
+              onClick={isAdmin ? () => navigate("/network") : null}
             />
           )}
         </AttentionBar>
@@ -592,7 +600,7 @@ export default function Dashboard() {
               ? `villages online${netHealth.avgUptime != null ? ` · gateway uptime ${netHealth.avgUptime}% · 30d` : ""}`
               : "no collector data yet"
           }
-          onClick={isViewer ? undefined : () => navigate("/network")}
+          onClick={isAdmin ? () => navigate("/network") : undefined}
         />
         {/* Starlink consumption against the plan. Never renders a zero before
             the usage collector has run — that is the absence of a measurement,
@@ -617,7 +625,7 @@ export default function Dashboard() {
             color="violet"
             sub={`${fmtNum(netHealth.withTelemetry || 0)} linked ${netHealth.withTelemetry === 1 ? "kit" : "kits"}`}
             noTotalNote="no plan cap published"
-            onClick={isViewer ? undefined : () => navigate("/overview")}
+            onClick={() => navigate("/overview")}
           />
         )}
       </KpiGrid>
@@ -771,7 +779,7 @@ export default function Dashboard() {
           <div className="flex flex-col gap-5">
             <RiskTotals state={mb} />
             <OutcomesPanel state={mb} />
-            {!isViewer && (
+            {isAdmin && (
               <Panel title="Manual assistance" subtitle="Paid customers who still need a voucher assigned" icon={<LifeBuoy size={15} />} tone="orange">
                 <div className="flex items-center justify-between gap-4 flex-wrap">
                   <div className="min-w-0">
@@ -997,7 +1005,7 @@ export default function Dashboard() {
           </div>
         )}
 
-        {tab === "sync" && !isViewer && (
+        {tab === "sync" && isAdmin && (
           <Panel
             title="Sync activity"
             subtitle="Last 7 syncs from Ruijie Cloud"

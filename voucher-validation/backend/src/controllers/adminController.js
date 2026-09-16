@@ -6,8 +6,11 @@ import {
   verifyCode, clearTwoFactor, generateTempPassword,
 } from "../services/twoFactor.js";
 import {
-  loadSmtpTransport, buildOnboarding, buildPasswordReset, buildTwoFactorReset,
+  loadSmtpTransport, buildOnboarding, buildPasswordReset, buildTwoFactorReset, buildInvite,
 } from "../services/mailer.js";
+import {
+  issueInvite, consumeInvite, findInvitee, revokeInvite, unusablePasswordHash, INVITE_TTL_DAYS,
+} from "../services/invites.js";
 import { validationResult } from "express-validator";
 
 /** Local response helpers */
@@ -17,6 +20,9 @@ const send = {
   bad: (res, msg = "Bad request") => res.status(400).json({ error: msg }),
   unauthorized: (res, msg = "Unauthorized") => res.status(401).json({ error: msg }),
   forbidden: (res, msg = "Forbidden") => res.status(403).json({ error: msg }),
+  // Was missing while four handlers already called it — every one of them threw
+  // a TypeError into its own catch and answered 500 for a plain "no such user".
+  notFound: (res, msg = "Not found") => res.status(404).json({ error: msg }),
   serverErr: (res, msg = "Internal server error") => res.status(500).json({ error: msg }),
 };
 
@@ -35,6 +41,13 @@ const ROLES = new Set(["admin", "viewer", "engineer"]);
 export function safeRoleOf(role) {
   return ROLES.has(role) ? role : "viewer";
 }
+
+// Roles whose access is limited to the villages an admin assigned them.
+// Admins are unrestricted, so their user_villages rows are meaningless and are
+// cleared rather than kept — a stale set would come back to life the moment
+// someone was demoted. Must agree with SCOPED_ROLES in middleware/auth.js.
+const SCOPED_ROLES = new Set(["viewer", "engineer"]);
+const ROLE_LABELS = { admin: "administrator", viewer: "viewer", engineer: "field engineer" };
 
 async function insertUser(pool, { email, passwordHash, name, role }) {
   // Whitelist the role — never trust an arbitrary value into the privileged
@@ -71,7 +84,7 @@ async function insertUserVillages(conn, userId, projectIds) {
  * request because SMTP is down would leave the caller thinking nothing
  * happened when the password has in fact already changed.
  */
-async function sendAccountMail(pool, user, kind, { password } = {}) {
+async function sendAccountMail(pool, user, kind, { password, inviteToken } = {}) {
   try {
     const smtp = await loadSmtpTransport(pool);
     if (!smtp) return { sent: false, error: "SMTP is not configured in Settings" };
@@ -81,7 +94,13 @@ async function sendAccountMail(pool, user, kind, { password } = {}) {
     const url = process.env.CONSOLE_URL || process.env.APP_URL || "https://admin.vodafonefiji.cloud";
     const args = { name: user.name, email: user.email, password, url };
     const mail =
-      kind === "onboarding" ? buildOnboarding(args)
+      kind === "invite" ? buildInvite({
+        ...args,
+        link: `${url.replace(/\/+$/, "")}/set-password?token=${encodeURIComponent(inviteToken)}`,
+        roleLabel: ROLE_LABELS[user.role] || null,
+        expiresDays: INVITE_TTL_DAYS,
+      })
+      : kind === "onboarding" ? buildOnboarding(args)
       : kind === "password-reset" ? buildPasswordReset(args)
       : buildTwoFactorReset(args);
     await smtp.transport.sendMail({
@@ -210,6 +229,86 @@ export function makeAdminController(pool) {
         return send.ok(res, { success: true, wasEnabled: !!user.totp_enabled, emailed: mail.sent, emailError: mail.error });
       } catch (e) {
         console.error("[users] 2FA reset failed:", e.message);
+        return send.serverErr(res);
+      }
+    },
+
+    // POST /api/users/:id/invite  (admin)
+    // Mints a fresh invite and sends it. Used both to re-send one that was
+    // never opened and to replace one that expired — the old token dies either
+    // way, because issueInvite overwrites the stored hash.
+    resendInvite: async (req, res) => {
+      try {
+        const [rows] = await pool.query(
+          "SELECT id, email, name, role FROM users WHERE id = ?",
+          [req.params.id]
+        );
+        const user = rows[0];
+        if (!user) return send.notFound(res, "User not found");
+
+        const token = await issueInvite(pool, user.id);
+        const mail = await sendAccountMail(pool, user, "invite", { inviteToken: token });
+        return send.ok(res, {
+          success: true,
+          emailed: mail.sent,
+          emailError: mail.error,
+          expiresDays: INVITE_TTL_DAYS,
+        });
+      } catch (e) {
+        console.error("[users] invite resend failed:", e.message);
+        return send.serverErr(res);
+      }
+    },
+
+    // DELETE /api/users/:id/invite  (admin)
+    // Cancels a pending invite. The account stays, with a password nobody
+    // holds — which is the right state for "I invited the wrong person".
+    revokeInvite: async (req, res) => {
+      try {
+        await revokeInvite(pool, Number(req.params.id));
+        return send.ok(res, { success: true });
+      } catch (e) {
+        console.error("[users] invite revoke failed:", e.message);
+        return send.serverErr(res);
+      }
+    },
+
+    /* ── The invite link itself — UNAUTHENTICATED by design ────────────────
+       Whoever follows the link has no account yet, so there is nothing to
+       authenticate with. The token IS the credential and is verified inside
+       these two handlers.
+
+       Neither one says whether a token ever existed. "Expired", "already
+       used" and "never real" all come back the same, because distinguishing
+       them turns the endpoint into a way to ask questions about accounts. */
+
+    // POST /api/invite/check  — what the set-password page greets you with.
+    checkInvite: async (req, res) => {
+      try {
+        const user = await findInvitee(pool, req.body?.token);
+        if (!user) return send.bad(res, "This link is no longer valid. Ask your administrator to send a new one.");
+        return send.ok(res, { valid: true, email: user.email, name: user.name || null });
+      } catch (e) {
+        console.error("[invite] check failed:", e.message);
+        return send.serverErr(res);
+      }
+    },
+
+    // POST /api/invite/accept — set the password and burn the token.
+    acceptInvite: async (req, res) => {
+      const { token, password } = req.body || {};
+      if (!password || String(password).length < 8) {
+        return send.bad(res, "Choose a password of at least 8 characters");
+      }
+      try {
+        const ok = await consumeInvite(pool, token, password);
+        if (!ok) return send.bad(res, "This link is no longer valid. Ask your administrator to send a new one.");
+        // Deliberately does NOT return a session. Signing in straight after is
+        // one extra step and it is the step that proves the password works —
+        // and it routes through the 2FA policy instead of duplicating it here.
+        return send.ok(res, { success: true });
+      } catch (e) {
+        console.error("[invite] accept failed:", e.message);
         return send.serverErr(res);
       }
     },
@@ -508,15 +607,41 @@ export function makeAdminController(pool) {
 
     // GET /api/users — each user + the project ids assigned to them (for the
     // admin edit form to seed the village multi-select).
+    // GET /api/users  (admin)
+    // Returns the account's STATE as well as its identity. An admin looking at
+    // this list needs to know who has never accepted their invite and whose
+    // invite has quietly gone stale — an account that cannot be signed into
+    // looks exactly like a working one if all you list is name and role.
     listUsers: async (_req, res) => {
       try {
         const [rows] = await pool.query(
-          "SELECT id, email, name, role, created_at FROM users ORDER BY created_at DESC"
+          `SELECT id, email, name, role, created_at, last_login_at, invited_at,
+                  totp_enabled, must_change_password,
+                  password_set_token IS NOT NULL AS has_invite,
+                  password_set_expires,
+                  (password_set_token IS NOT NULL AND password_set_expires > NOW()) AS invite_live
+             FROM users
+            ORDER BY created_at DESC`
         );
         const [uv] = await pool.query("SELECT user_id, project_id FROM user_villages");
         const byUser = {};
         for (const r of uv) (byUser[r.user_id] ||= []).push(r.project_id);
-        const users = rows.map((u) => ({ ...u, villageIds: byUser[u.id] || [] }));
+        const users = rows.map((u) => ({
+          id: u.id,
+          email: u.email,
+          name: u.name,
+          role: u.role,
+          created_at: u.created_at,
+          lastLoginAt: u.last_login_at,
+          invitedAt: u.invited_at,
+          twoFactorEnabled: !!u.totp_enabled,
+          mustChangePassword: !!u.must_change_password,
+          inviteExpiresAt: u.has_invite ? u.password_set_expires : null,
+          // Three states an admin acts on differently: waiting on the person,
+          // waiting on a resend, or done.
+          status: u.has_invite ? (u.invite_live ? "invited" : "invite-expired") : "active",
+          villageIds: byUser[u.id] || [],
+        }));
         return send.ok(res, { users });
       } catch (e) {
         console.error(e);
@@ -525,35 +650,82 @@ export function makeAdminController(pool) {
     },
 
     // POST /api/users
+    // POST /api/users  (admin)
+    //
+    // Two ways to create an account, and the default is the one where nobody
+    // but the account holder ever knows the password: the account goes in with
+    // an unusable hash and an invite link goes out by mail.
+    //
+    // `password` is the other way — an admin sets one directly, for someone
+    // who has no mailbox yet or is standing next to them. It still forces a
+    // change at first sign-in, because a password someone else chose and typed
+    // is a password someone else knows.
+    //
+    // The account is created either way. If SMTP is down the invite is still
+    // minted and reported as unsent, so the admin can resend rather than
+    // discovering later that nothing was created.
     createUser: async (req, res) => {
       const errors = validationResult(req);
       if (!errors.isEmpty()) return send.bad(res, errors.array()[0].msg);
 
-      const { email, password, name, role, villageIds } = req.body;
-      const effRole = role || "viewer";
+      const { email, name, role, villageIds } = req.body;
+      const password = req.body.password || null;
+      const effRole = safeRoleOf(role);
+
+      if (password && String(password).length < 6) {
+        return send.bad(res, "A password you set must be at least 6 characters");
+      }
+      // A scoped role with no villages can sign in and see an empty console.
+      // Better to say so here than to have someone report the dashboard as
+      // broken a week later.
+      if (SCOPED_ROLES.has(effRole) && !(villageIds || []).length) {
+        return send.bad(res, "Choose at least one village for this account to see");
+      }
+
       const conn = await pool.getConnection();
+      let userId = null;
       try {
         const [dup] = await conn.query("SELECT id FROM users WHERE email = ?", [email]);
         if (dup[0]) { conn.release(); return send.bad(res, "Email already registered"); }
 
-        const passwordHash = await bcrypt.hash(password, 10);
+        const passwordHash = password
+          ? await bcrypt.hash(password, 10)
+          : await unusablePasswordHash();
+
         await conn.beginTransaction();
         const [ins] = await conn.query(
-          "INSERT INTO users (email, password_hash, name, role) VALUES (?, ?, ?, ?)",
-          [email, passwordHash, name || null, effRole]
+          `INSERT INTO users (email, password_hash, name, role, must_change_password)
+           VALUES (?, ?, ?, ?, ?)`,
+          [email, passwordHash, name || null, effRole, password ? 1 : 0]
         );
-        const userId = ins.insertId;
-        // Village scope is only meaningful for viewers (admins are unrestricted).
-        if (effRole === "viewer") await insertUserVillages(conn, userId, villageIds);
+        userId = ins.insertId;
+        // Admins are unrestricted, so a scope row for one is noise that would
+        // become policy if they were ever demoted.
+        if (SCOPED_ROLES.has(effRole)) await insertUserVillages(conn, userId, villageIds);
         await conn.commit();
         conn.release();
-        return send.created(res, { id: userId, email, name: name || null, role: effRole });
       } catch (e) {
         try { await conn.rollback(); } catch { /* ignore */ }
         conn.release();
-        console.error(e);
+        console.error("[users] create failed:", e.message);
         return send.serverErr(res);
       }
+
+      // Mail is sent AFTER the transaction commits, never inside it: a held
+      // transaction waiting on an SMTP handshake is a lock waiting on a network.
+      const created = { id: userId, email, name: name || null, role: effRole };
+      if (password) {
+        return send.created(res, { ...created, invited: false, emailed: false });
+      }
+      const token = await issueInvite(pool, userId);
+      const mail = await sendAccountMail(pool, created, "invite", { inviteToken: token });
+      return send.created(res, {
+        ...created,
+        invited: true,
+        emailed: mail.sent,
+        emailError: mail.error,
+        expiresDays: INVITE_TTL_DAYS,
+      });
     },
 
     // PUT /api/users/:id
@@ -586,8 +758,23 @@ export function makeAdminController(pool) {
           params.push(await bcrypt.hash(password, 10));
         }
 
-        // Effective role AFTER this update decides village handling.
-        const effRole = role !== undefined ? role : existing[0].role;
+        // Effective role AFTER this update decides village handling. Run
+        // through the same whitelist the SET clause uses, or an unrecognised
+        // value would be stored as "viewer" while this line still treated it
+        // as something else.
+        const effRole = role !== undefined ? safeRoleOf(role) : existing[0].role;
+
+        // Demoting the last admin leaves a console nobody can administer, and
+        // no amount of database access from the UI can undo it.
+        if (existing[0].role === "admin" && effRole !== "admin") {
+          const [[{ admins }]] = await conn.query(
+            "SELECT COUNT(*) AS admins FROM users WHERE role = 'admin'"
+          );
+          if (admins <= 1) {
+            conn.release();
+            return send.bad(res, "This is the only administrator — promote someone else first");
+          }
+        }
         // Admins are unrestricted -> always clear stale rows. Viewers -> replace the
         // set only when villageIds was actually sent.
         const touchesVillages = effRole === "admin" || villageIds !== undefined;
@@ -628,6 +815,16 @@ export function makeAdminController(pool) {
         return send.bad(res, "Cannot delete your own account");
       }
       try {
+        const [[target]] = await pool.query("SELECT role FROM users WHERE id = ?", [targetId]);
+        if (!target) return send.bad(res, "User not found");
+        if (target.role === "admin") {
+          const [[{ admins }]] = await pool.query(
+            "SELECT COUNT(*) AS admins FROM users WHERE role = 'admin'"
+          );
+          if (admins <= 1) {
+            return send.bad(res, "This is the only administrator — promote someone else first");
+          }
+        }
         const [result] = await pool.query("DELETE FROM users WHERE id = ?", [targetId]);
         if (result.affectedRows === 0) return send.bad(res, "User not found");
         return send.ok(res, { deleted: true });

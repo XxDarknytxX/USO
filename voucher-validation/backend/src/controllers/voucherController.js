@@ -722,7 +722,7 @@ export function makeVoucherController(pool) {
   return {
     getStats: async (req, res) => {
       try {
-        const scope = req.scope || { isViewer: false };
+        const scope = req.scope || { isViewer: true, projectIds: [], groupIds: [] };
         const singleGroup = req.query.groupId || null;
         // Effective group filter: admin -> requested (null = all); viewer -> their
         // assigned set, or the requested group intersected with it. A viewer who
@@ -748,7 +748,7 @@ export function makeVoucherController(pool) {
     getVouchers: async (req, res) => {
       try {
         const { page, limit, status, packageName, userGroupId, includeHistorical, groupId, groupIds, phone, soldFrom, soldTo } = req.query;
-        const scope = req.scope || { isViewer: false };
+        const scope = req.scope || { isViewer: true, projectIds: [], groupIds: [] };
         const pg = parseInt(page) || 1;
         const lim = parseInt(limit) || 10;
 
@@ -806,7 +806,7 @@ export function makeVoucherController(pool) {
 
         // Scope: single village (groupId) or the visible subset (groupIds), clamped
         // to the viewer's villages. null = all (admin); [] = none → empty result.
-        const scope = req.scope || { isViewer: false };
+        const scope = req.scope || { isViewer: true, projectIds: [], groupIds: [] };
         const gids = effectiveGroupIds(scope, req.query.groupIds || req.query.groupId || null);
         if (Array.isArray(gids) && gids.length === 0) {
           return send.ok(res, { vouchers: [], total: 0, page: pg, limit: lim, totalPages: 0 });

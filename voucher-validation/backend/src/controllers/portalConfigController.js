@@ -534,7 +534,7 @@ export function makePortalConfigController(pool) {
         const groupId = req.query.groupId ? String(req.query.groupId) : null;
         // Viewer scope: only count revenue for the viewer's assigned villages.
         // Empty set -> nothing matches -> zeroed totals (never all villages).
-        const scope = req.scope || { isViewer: false };
+        const scope = req.scope || { isViewer: true, projectIds: [], groupIds: [] };
         const allowedGroups = scope.isViewer ? new Set((scope.groupIds || []).map(String)) : null;
 
         // One row per PAID transaction: amount, when, which plan. Revenue is
@@ -636,7 +636,7 @@ export function makePortalConfigController(pool) {
         //              village is in scope, which must read as zeroes, not as
         //              "no filter" - hence the `!== undefined` test.
         //   req.scope- a viewer's permitted villages
-        const scope = req.scope || { isViewer: false };
+        const scope = req.scope || { isViewer: true, projectIds: [], groupIds: [] };
         const narrow = (set, list) => {
           const next = new Set(list.map(String).filter(Boolean));
           return set ? new Set([...next].filter((g) => set.has(g))) : next;

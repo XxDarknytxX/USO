@@ -33,9 +33,13 @@ const navSections = [
   {
     title: "Monitoring",
     items: [
-      // viewerOk: the read-only viewer role sees ONLY the Dashboard tab.
-      { to: "/dashboard", label: "Dashboard", Icon: LayoutDashboard, end: true, viewerOk: true },
-      { to: "/overview", label: "Overview", Icon: Gauge },
+      // Two flags, read as "this role may see this item". Dashboard and
+      // Overview are open to every role — the SERVER narrows both to the
+      // villages that account was assigned, so the page is the same and the
+      // answer is not. Network stays admin-only: it is where villages are
+      // added and edited, not where they are read.
+      { to: "/dashboard", label: "Dashboard", Icon: LayoutDashboard, end: true, viewerOk: true, engineerOk: true },
+      { to: "/overview", label: "Overview", Icon: Gauge, viewerOk: true, engineerOk: true },
       { to: "/network", label: "Network", Icon: Network },
       { to: "/maintenance", label: "Maintenance", Icon: Wrench, engineerOk: true },
     ],
@@ -100,17 +104,21 @@ function Shell() {
   const initial = displayName[0].toUpperCase();
   const roleLabel = role ? role.charAt(0).toUpperCase() + role.slice(1) : "User";
 
-  // Section-level admin gate, then a per-item viewer gate: a viewer keeps only
-  // items marked viewerOk (just Dashboard), and empty sections are dropped.
+  // Section-level admin gate, then a per-item role gate, then drop any section
+  // left empty.
+  //
+  // Written as an ALLOW-list keyed on the role rather than as a chain of "not a
+  // viewer" tests: the old form passed every non-adminOnly item for any role it
+  // did not recognise, so a fourth role added later would have arrived with a
+  // full sidebar of links that all bounce.
   const sections = navSections
     .filter((s) => !s.adminOnly || isAdmin)
     .map((s) => ({
       ...s,
-      items: s.items.filter(
-        (it) => (!isViewer || it.viewerOk) && (!isEngineer || it.engineerOk)
+      items: s.items.filter((it) =>
+        isAdmin ? true : isEngineer ? it.engineerOk : isViewer ? it.viewerOk : false
       ),
     }))
-    .filter((s) => s.items.length > 0)
     .filter((s) => s.items.length > 0);
 
   function toggleCollapsed() {
@@ -272,7 +280,7 @@ function Shell() {
                 <div className="min-w-0 flex-1 ml-3">
                   <p className="text-sm font-semibold text-[var(--fg-primary)] truncate leading-snug">{displayName}</p>
                   <p className="flex items-center gap-1 text-[11px] text-[var(--fg-muted)] truncate mt-0.5">
-                    {isAdmin ? <Shield size={10} /> : <Eye size={10} />} {roleLabel}
+                    {isAdmin ? <Shield size={10} /> : isEngineer ? <Wrench size={10} /> : <Eye size={10} />} {roleLabel}
                   </p>
                 </div>
                 <span className="shrink-0 pr-1 text-[var(--fg-muted)]">
@@ -336,7 +344,7 @@ function Shell() {
                       <p className="text-sm font-semibold text-[var(--fg-primary)] truncate">{displayName}</p>
                       {email && <p className="text-xs text-[var(--fg-muted)] truncate mt-0.5">{email}</p>}
                       <span className="inline-flex items-center gap-1 mt-2 px-2 py-0.5 rounded-full text-[10px] font-medium bg-[var(--accent)]/10 text-[var(--accent)]">
-                        {isAdmin ? <Shield size={10} /> : <Eye size={10} />} {roleLabel}
+                        {isAdmin ? <Shield size={10} /> : isEngineer ? <Wrench size={10} /> : <Eye size={10} />} {roleLabel}
                       </span>
                     </div>
                     <div className="py-1">

@@ -139,7 +139,7 @@ export function makeNetworkController(pool) {
     // GET /api/network/projects
     listProjects: async (req, res) => {
       try {
-        const scope = req.scope || { isViewer: false };
+        const scope = req.scope || { isViewer: true, projectIds: [], groupIds: [] };
         let sql = "SELECT * FROM network_projects ORDER BY sort_order, name";
         let params = [];
         if (scope.isViewer) {
@@ -185,6 +185,17 @@ export function makeNetworkController(pool) {
           [req.params.id]
         );
         if (!project) return send.notFound(res, "Village not found");
+
+        // The scope check every sibling per-project endpoint performs, and the
+        // one place it was missing: without it any authenticated account could
+        // read the full telemetry series — and the resolved Starlink device id —
+        // for a village it was never given, by incrementing the id.
+        // "Not found" rather than "forbidden" on purpose: a 403 confirms the
+        // village exists, which is itself an answer nobody out of scope is owed.
+        const scope = req.scope || { isViewer: true, projectIds: [] };
+        if (scope.isViewer && !(scope.projectIds || []).includes(Number(project.id))) {
+          return send.notFound(res, "Village not found");
+        }
 
         const devId =
           normalizeDeviceId(project.starlink_device_id) ||
@@ -547,7 +558,7 @@ export function makeNetworkController(pool) {
         const project = rows[0];
         if (!project) return send.notFound(res, "Project not found");
 
-        const scope = req.scope || { isViewer: false };
+        const scope = req.scope || { isViewer: true, projectIds: [], groupIds: [] };
         if (scope.isViewer && !(scope.projectIds || []).includes(Number(project.id))) {
           return send.notFound(res, "Project not found");
         }
@@ -637,7 +648,7 @@ export function makeNetworkController(pool) {
 
         // Viewer scope: a viewer may only see health for their assigned villages.
         // Return 404 (not 403) so we don't reveal that other projects exist.
-        const scope = req.scope || { isViewer: false };
+        const scope = req.scope || { isViewer: true, projectIds: [], groupIds: [] };
         if (scope.isViewer && !(scope.projectIds || []).includes(Number(project.id))) {
           return send.notFound(res, "Project not found");
         }
@@ -706,7 +717,7 @@ export function makeNetworkController(pool) {
     getOverview: async (req, res) => {
       try {
         const uptimeHours = Math.min(720, Math.max(1, Number(req.query.uptimeHours) || 24));
-        const scope = req.scope || { isViewer: false };
+        const scope = req.scope || { isViewer: true, projectIds: [], groupIds: [] };
         // Scope to the viewer's villages. Empty set -> projects stays [] and the
         // normal path below yields an empty sites/summary of the correct shape
         // (never fall through to all villages).
@@ -914,7 +925,7 @@ export function makeNetworkController(pool) {
       try {
         const hours = Math.min(720, Math.max(1, Number(req.query.hours) || 24));
         const groupId = req.query.groupId ? String(req.query.groupId) : null;
-        const scope = req.scope || { isViewer: false };
+        const scope = req.scope || { isViewer: true, projectIds: [], groupIds: [] };
         const bucketFmt = hours <= 168 ? "%Y-%m-%d %H:00:00" : "%Y-%m-%d 00:00:00";
         const params = [hours];
         let projFilter = "";

@@ -53,6 +53,18 @@ export async function getPool() {
     `ALTER TABLE users ADD COLUMN must_change_password BOOLEAN NOT NULL DEFAULT 0`,
     `ALTER TABLE users ADD COLUMN password_changed_at TIMESTAMP NULL`,
     `ALTER TABLE users ADD COLUMN last_login_at TIMESTAMP NULL`,
+
+    // INVITES. An account can be created without anyone choosing a password
+    // for it: the invite mail carries a one-time link and the person sets their
+    // own. That is strictly better than mailing a temporary password, which
+    // sits in an inbox in clear for as long as the mailbox exists.
+    //
+    // Only the SHA-256 of the token is stored. The token itself exists in the
+    // mail and nowhere else, so a database read does not hand over a way in.
+    // Consuming an invite nulls the hash, which is what makes it single-use.
+    `ALTER TABLE users ADD COLUMN password_set_token CHAR(64) NULL`,
+    `ALTER TABLE users ADD COLUMN password_set_expires TIMESTAMP NULL`,
+    `ALTER TABLE users ADD COLUMN invited_at TIMESTAMP NULL`,
   ];
   for (const sql of migrations) {
     try { await pool.query(sql); console.log(`Migration OK: ${sql.slice(0, 60)}...`); }
@@ -619,6 +631,40 @@ export async function getPool() {
     }
   } catch (e) {
     console.log('Network project seed note:', e.message);
+  }
+
+  // ── One-time: give existing engineers the scope they used to have ─────────
+  // Engineers were previously unscoped because attachScope handed every
+  // non-viewer an empty set and nothing engineers could reach was scoped. Now
+  // that they see the dashboard and overview, an empty set means an empty
+  // console — so every engineer that predates this change inherits every
+  // active village, and an admin narrows it from there.
+  //
+  // Guarded by a marker row, not by "has no rows yet": an admin who
+  // deliberately clears an engineer's villages must not have them handed back
+  // on the next restart.
+  try {
+    const [[marker]] = await pool.query(
+      "SELECT setting_value FROM app_settings WHERE setting_key = 'engineer_scope_backfilled'"
+    );
+    if (!marker) {
+      const [r] = await pool.query(
+        `INSERT IGNORE INTO user_villages (user_id, project_id)
+         SELECT u.id, p.id
+           FROM users u
+           JOIN network_projects p ON p.is_active = 1
+          WHERE u.role = 'engineer'`
+      );
+      await pool.query(
+        `INSERT INTO app_settings (setting_key, setting_value, setting_type, description)
+         VALUES ('engineer_scope_backfilled', '1', 'boolean',
+                 'Existing engineers were granted every active village when scope began applying to them.')
+         ON DUPLICATE KEY UPDATE setting_value = '1'`
+      );
+      if (r.affectedRows) console.log(`Engineer scope backfill: ${r.affectedRows} village grants`);
+    }
+  } catch (e) {
+    console.log('Engineer scope backfill note:', e.message);
   }
 
   return pool;

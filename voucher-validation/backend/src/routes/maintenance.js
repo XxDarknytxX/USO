@@ -5,9 +5,19 @@ import { requireAuth, requireAdmin, requireMaintainer } from "../middleware/auth
 export function makeMaintenanceRouter(controller) {
   const router = Router();
 
-  // Admins and engineers. Engineers reach nothing else in the app — every other
-  // router is guarded by requireAdmin or requireNotViewer, both of which now
-  // deny them.
+  // Admins and engineers.
+  //
+  // Engineers are no longer maintenance-only: they also read the dashboard and
+  // the all-villages overview, limited to the villages an admin assigned them
+  // (see SCOPED_ROLES in middleware/auth.js). What they still cannot reach is
+  // anything behind requireAdmin or requireNotViewer — vouchers, settings,
+  // audit logs, transaction flows, user management.
+  //
+  // These maintenance routes are deliberately NOT village-scoped. An engineer
+  // can file a report for any village, because being sent to a site at short
+  // notice is normal fieldwork and a scope list that lagged the dispatch board
+  // would block the job. Scope governs what they can SEE of the estate's
+  // numbers, not where they are allowed to do the work.
   router.use(requireAuth, requireMaintainer);
 
   // The checklist itself, so the UI never drifts from server validation.

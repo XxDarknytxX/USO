@@ -212,6 +212,20 @@ export const userApi = {
   resetPassword: (id) => api(`/users/${id}/reset-password`, { method: "POST", body: {} }),
   resetTwoFactor: (id) => api(`/users/${id}/reset-2fa`, { method: "POST", body: {} }),
   resendOnboarding: (id) => api(`/users/${id}/resend-onboarding`, { method: "POST", body: {} }),
+
+  // Invitations. resendInvite replaces any outstanding one, so it covers both
+  // "they never opened it" and "it went stale".
+  resendInvite: (id) => api(`/users/${id}/invite`, { method: "POST", body: {} }),
+  revokeInvite: (id) => api(`/users/${id}/invite`, { method: "DELETE" }),
+};
+
+// The invite link's own endpoints. Unauthenticated — whoever follows the link
+// has no account to sign in with yet, so `auth: false` is the point, not an
+// oversight.
+export const inviteApi = {
+  check: (token) => api("/invite/check", { method: "POST", body: { token }, auth: false }),
+  accept: (token, password) =>
+    api("/invite/accept", { method: "POST", body: { token, password }, auth: false }),
 };
 
 // Two-factor, for the current account and (policy) for the estate.

@@ -79,11 +79,23 @@ export function requireMaintainer(req, res, next) {
   next();
 }
 
+// Which roles read their villages from user_villages. Admins are unrestricted
+// and are handled before this is consulted; anything NOT listed here is
+// restricted to nothing, so a role added later cannot default to seeing
+// everything by omission.
+const SCOPED_ROLES = new Set(["viewer", "engineer"]);
+
 // Attaches req.scope describing which villages the caller may see:
-//   admin  -> { isViewer:false, projectIds:null, groupIds:null }  (null = unrestricted)
-//   viewer -> { isViewer:true, projectIds:[int], groupIds:[str] }  (their assigned
-//             ACTIVE villages, resolved to network_projects.id + ruijie_group_id)
-// Fails CLOSED for viewers: any DB error yields an EMPTY set, never unrestricted.
+//   admin             -> { isViewer:false, projectIds:null, groupIds:null }  (null = unrestricted)
+//   viewer | engineer -> { isViewer:true, projectIds:[int], groupIds:[str] }  (their assigned
+//                        ACTIVE villages, resolved to network_projects.id + ruijie_group_id)
+// Fails CLOSED: any DB error, or an unrecognised role, yields an EMPTY set,
+// never unrestricted.
+//
+// `isViewer` is a misnomer kept deliberately — it is read at dozens of call
+// sites and means "restricted", not "has the viewer role". Renaming it is a
+// separate change; quietly giving it a second meaning here would be worse.
+//
 // A factory because it needs the pool. Mount AFTER requireAuth on scoped routers.
 export function makeAttachScope(pool) {
   return async function attachScope(req, res, next) {
@@ -91,11 +103,7 @@ export function makeAttachScope(pool) {
       req.scope = { isViewer: false, projectIds: null, groupIds: null };
       return next();
     }
-    // Anyone who is not an admin is RESTRICTED. Written as "not admin" rather
-    // than "is viewer" so a new role can never default to unrestricted: an
-    // engineer reaching a scoped dashboard endpoint gets an empty set (they
-    // have no user_villages rows), not every village's revenue.
-    if (req.user?.role !== "viewer") {
+    if (!SCOPED_ROLES.has(req.user?.role)) {
       req.scope = { isViewer: true, projectIds: [], groupIds: [] };
       return next();
     }

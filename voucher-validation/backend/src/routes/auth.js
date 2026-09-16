@@ -30,6 +30,20 @@ export function makeAuthRouter(controller) {
     controller.login
   );
 
+  /* ── Invitations ──────────────────────────────────────────────────────
+     UNAUTHENTICATED by design: whoever follows an invite link has no account
+     to authenticate with yet. The token in the body IS the credential and is
+     verified inside the handler, the same arrangement as login-verify below.
+
+     Neither route reveals whether a token ever existed — expired, spent and
+     never-real all answer identically. */
+  router.post("/invite/check", controller.checkInvite);
+  router.post(
+    "/invite/accept",
+    [body("password").isLength({ min: 8 }).withMessage("Choose a password of at least 8 characters")],
+    controller.acceptInvite
+  );
+
   /* ── Two-factor ───────────────────────────────────────────────────────
      login-verify is UNAUTHENTICATED by design: the caller holds only a
      pending2FA token, which requireAuth rejects on purpose. The token itself

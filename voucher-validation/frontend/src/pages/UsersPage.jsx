@@ -1,60 +1,37 @@
 // src/pages/UsersPage.jsx
-// Console accounts: who can sign in, what they are allowed to see, and the
-// create/edit modal.
+// Console accounts: who can sign in, what they are allowed to see, and how
+// they get their first password.
 //
 // The list is one table rather than a card per person, and the role counts live
 // in the filter itself instead of a row of KPI tiles — on a page with a handful
 // of accounts, a tile that says "3 admins" is a tile that only tells you
 // something the filter already had to know.
+//
+// What the table DOES spend a column on is state. An account waiting on an
+// invite, an account whose invite went stale, and an account somebody is using
+// every day look identical if all you list is a name and a role — and only one
+// of the three is finished.
 
 import { useState, useEffect, useMemo } from "react";
 import toast from "react-hot-toast";
 import {
-  Users,
-  UserPlus,
-  Trash2,
-  Shield,
-  Eye,
-  EyeOff,
-  Edit3,
-  RefreshCw,
-  KeyRound,
-  ShieldOff,
-  Send,
-  Check,
-  MapPin,
-  Wrench,
-  Globe2,
+  Users, UserPlus, Trash2, Shield, Eye, EyeOff, Edit3, RefreshCw, KeyRound,
+  ShieldOff, Send, Check, MapPin, Wrench, Globe2, Mail, User as UserIcon,
+  ArrowRight, ArrowLeft, MailCheck, AlertTriangle, Copy, Clock, Search,
+  LayoutDashboard, Gauge, Dices,
 } from "lucide-react";
 
 import { userApi, networkApi } from "../services/api";
 import { useAuth } from "../hooks/useAuth";
 import ConfirmDialog from "../components/shared/ConfirmDialog";
 import {
-  Modal,
-  Field,
-  Input,
-  Button,
-  IconButton,
-  EmptyState,
-  PageShell,
-  PageHeader,
-  Panel,
-  Toolbar,
-  SearchInput,
-  Segmented,
-  DataTable,
-  Th,
-  Td,
-  TableMessage,
-  RecordCell,
-  StatusPill,
-  SkeletonTable,
+  Modal, Field, Input, Button, IconButton, EmptyState, PageShell, PageHeader,
+  Panel, Toolbar, SearchInput, Segmented, DataTable, Th, Td, TableMessage,
+  RecordCell, StatusPill, SkeletonTable,
 } from "../components/ui";
 
 function generatePassword(len = 14) {
-  const chars =
-    "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789!@#$%";
+  const chars = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789!@#$%";
   let pw = "";
   const arr = new Uint32Array(len);
   crypto.getRandomValues(arr);
@@ -62,37 +39,67 @@ function generatePassword(len = 14) {
   return pw;
 }
 
-/* The three roles, described once. The list, the filter and the modal all read
-   from here so a role never picks up a different colour or wording per screen. */
+/* ============================================================================
+   The roles, described once.
+   The list, the filter and the modal all read from here, so a role can never
+   pick up a different colour or a different promise on a different screen.
+
+   `opens` is the load-bearing field. "Read-only access" tells an admin the
+   shape of the permission; it does not tell them which tabs the person will
+   actually find when they sign in, which is the thing being decided.
+   ========================================================================= */
 const ROLES = {
-  admin: {
-    label: "Admin",
-    icon: Shield,
-    tone: "brand",
-    tile: "violet",
-    desc: "Full administrative access",
-    access: "Every village · full control",
-  },
   viewer: {
     label: "Viewer",
     icon: Eye,
     tone: "info",
     tile: "blue",
-    desc: "Read-only access",
-    access: null, // villages are listed per user
+    blurb: "Reads the numbers for the villages you choose. Changes nothing, anywhere.",
+    opens: [
+      { label: "Dashboard", Icon: LayoutDashboard },
+      { label: "Overview", Icon: Gauge },
+    ],
+    scoped: true,
   },
   engineer: {
-    label: "Engineer",
+    label: "Field engineer",
     icon: Wrench,
     tone: "warning",
     tile: "orange",
-    desc: "Field contractor. Files maintenance reports for any village and sees nothing else.",
-    access: "Maintenance only",
+    blurb: "Everything a viewer sees, and files maintenance reports with photos from site.",
+    opens: [
+      { label: "Dashboard", Icon: LayoutDashboard },
+      { label: "Overview", Icon: Gauge },
+      { label: "Maintenance", Icon: Wrench },
+    ],
+    scoped: true,
+  },
+  admin: {
+    label: "Administrator",
+    icon: Shield,
+    tone: "brand",
+    tile: "violet",
+    blurb: "Every village, every setting, every voucher — and these accounts.",
+    opens: [{ label: "Everything", Icon: Globe2 }],
+    scoped: false,
   },
 };
 
+// Least privilege first, so the picker reads as a ladder rather than a menu.
+const ROLE_ORDER = ["viewer", "engineer", "admin"];
+
 function roleOf(role) {
-  return ROLES[role] || { label: role || "—", icon: Users, tone: "neutral", tile: "slate", desc: "", access: "—" };
+  return (
+    ROLES[role] || {
+      label: role || "—",
+      icon: Users,
+      tone: "neutral",
+      tile: "slate",
+      blurb: "",
+      opens: [],
+      scoped: true,
+    }
+  );
 }
 
 function RolePill({ role }) {
@@ -106,13 +113,62 @@ function RolePill({ role }) {
   );
 }
 
+/** What the server says about an account's state, turned into a badge. */
+function StatusCell({ user }) {
+  if (user.status === "invited") {
+    return (
+      <span className="inline-flex flex-col gap-1">
+        <StatusPill tone="info" dot={false}>
+          <Mail size={11} />
+          Invited
+        </StatusPill>
+        <span className="text-[11px] text-[var(--fg-subtle)]">
+          {user.inviteExpiresAt
+            ? `Expires ${new Date(user.inviteExpiresAt).toLocaleDateString("en-AU", { day: "numeric", month: "short" })}`
+            : "Waiting"}
+        </span>
+      </span>
+    );
+  }
+  if (user.status === "invite-expired") {
+    return (
+      <StatusPill tone="warning" dot={false}>
+        <AlertTriangle size={11} />
+        Invite expired
+      </StatusPill>
+    );
+  }
+  if (!user.lastLoginAt) {
+    return (
+      <StatusPill tone="neutral" dot={false}>
+        <Clock size={11} />
+        Never signed in
+      </StatusPill>
+    );
+  }
+  return (
+    <span className="inline-flex flex-col gap-1">
+      <StatusPill tone="success" dot={false}>
+        <Check size={11} />
+        Active
+      </StatusPill>
+      <span className="text-[11px] text-[var(--fg-subtle)]">
+        {new Date(user.lastLoginAt).toLocaleDateString("en-AU", { day: "numeric", month: "short", year: "numeric" })}
+      </span>
+    </span>
+  );
+}
+
+/* ============================================================================
+   Page
+   ========================================================================= */
 export default function UsersPage() {
   const [users, setUsers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showCreate, setShowCreate] = useState(false);
   const [editTarget, setEditTarget] = useState(null);
   const [deleteTarget, setDeleteTarget] = useState(null);
-  // { user, kind: "password" | "twofactor" | "onboarding" }
+  // { user, kind: "password" | "twofactor" | "onboarding" | "invite" }
   const [rescue, setRescue] = useState(null);
   const [rescueBusy, setRescueBusy] = useState(false);
   // Held after a reset so the temporary password stays on screen: SMTP can be
@@ -151,6 +207,7 @@ export default function UsersPage() {
       const r =
         kind === "password" ? await userApi.resetPassword(user.id)
         : kind === "twofactor" ? await userApi.resetTwoFactor(user.id)
+        : kind === "invite" ? await userApi.resendInvite(user.id)
         : await userApi.resendOnboarding(user.id);
 
       setRescue(null);
@@ -163,6 +220,21 @@ export default function UsersPage() {
           title: "Two-factor reset",
           message: `${user.email} will be asked to set up two-factor again at their next sign-in. ${mailLine}`,
         });
+      } else if (kind === "invite") {
+        // Nothing to show and nothing to copy: the link is in the mail and
+        // nowhere else, which is the entire point of sending one.
+        if (r.emailed) {
+          toast.success(`Invite sent to ${user.email} — good for ${r.expiresDays || 7} days`);
+        } else {
+          setRescueResult({
+            title: "Invite not sent",
+            message:
+              `A new link was created for ${user.email} but the email did not go out` +
+              `${r.emailError ? ` (${r.emailError})` : ""}.\n\n` +
+              `The link exists only inside that email, so there is nothing to pass on by hand — ` +
+              `fix SMTP under Settings and send it again, or set a password for them directly by editing the account.`,
+          });
+        }
       } else {
         setRescueResult({
           title: kind === "password" ? "Password reset" : "Welcome email sent",
@@ -208,33 +280,26 @@ export default function UsersPage() {
   }, [users, query, roleFilter]);
 
   const filtered = query.trim() !== "" || roleFilter !== "all";
+  const pending = users.filter((u) => u.status === "invited" || u.status === "invite-expired").length;
 
   return (
     <PageShell>
       <PageHeader
         eyebrow="Access"
         title="User Management"
-        subtitle={`${users.length.toLocaleString()} account${
-          users.length !== 1 ? "s" : ""
-        } with console access.`}
+        subtitle={
+          pending
+            ? `${users.length.toLocaleString()} account${users.length !== 1 ? "s" : ""} · ${pending} waiting on an invite`
+            : `${users.length.toLocaleString()} account${users.length !== 1 ? "s" : ""} with console access.`
+        }
         icon={<Users size={22} />}
         tone="pink"
         actions={
           <>
-            <Button
-              variant="secondary"
-              size="sm"
-              onClick={loadUsers}
-              iconLeft={<RefreshCw size={14} />}
-            >
+            <Button variant="secondary" size="sm" onClick={loadUsers} iconLeft={<RefreshCw size={14} />}>
               Refresh
             </Button>
-            <Button
-              variant="primary"
-              size="sm"
-              onClick={() => setShowCreate(true)}
-              iconLeft={<UserPlus size={14} />}
-            >
+            <Button variant="primary" size="sm" onClick={() => setShowCreate(true)} iconLeft={<UserPlus size={14} />}>
               Add user
             </Button>
           </>
@@ -267,7 +332,7 @@ export default function UsersPage() {
 
       {loading ? (
         <Panel padding>
-          <SkeletonTable rows={5} cols={4} />
+          <SkeletonTable rows={5} cols={5} />
         </Panel>
       ) : users.length === 0 ? (
         <Panel padding={false}>
@@ -286,7 +351,7 @@ export default function UsersPage() {
         <Panel
           padding={false}
           title="Accounts"
-          subtitle="Role decides what each person can reach; viewers are additionally limited to named villages."
+          subtitle="Role decides which tabs a person finds; viewers and engineers are additionally limited to named villages."
           icon={<Users size={15} />}
           tone="pink"
         >
@@ -295,8 +360,8 @@ export default function UsersPage() {
               <tr>
                 <Th>User</Th>
                 <Th>Role</Th>
-                <Th>Access</Th>
-                <Th>Joined</Th>
+                <Th>Villages</Th>
+                <Th>Status</Th>
                 <Th align="right">Actions</Th>
               </tr>
             </thead>
@@ -308,16 +373,13 @@ export default function UsersPage() {
                   const r = roleOf(u.role);
                   const villages = Array.isArray(u.villageIds) ? u.villageIds.length : 0;
                   const isSelf = u.email === currentEmail;
+                  const awaiting = u.status === "invited" || u.status === "invite-expired";
                   return (
                     <tr key={u.id}>
                       <Td>
                         <RecordCell
                           tone={r.tile}
-                          icon={
-                            <span className="text-[12px] font-bold uppercase">
-                              {(u.email || "?").charAt(0)}
-                            </span>
-                          }
+                          icon={<span className="text-[12px] font-bold uppercase">{(u.name || u.email || "?").charAt(0)}</span>}
                           title={u.name || u.email}
                           subtitle={u.name ? u.email : undefined}
                         />
@@ -325,42 +387,51 @@ export default function UsersPage() {
                       <Td><RolePill role={u.role} /></Td>
                       <Td muted nowrap>
                         <span className="inline-flex items-center gap-1.5">
-                          {u.role === "viewer" ? (
+                          {r.scoped ? (
                             <>
                               <MapPin size={12} className="shrink-0" />
-                              {villages === 0
-                                ? "No villages"
-                                : `${villages} village${villages === 1 ? "" : "s"}`}
+                              {villages === 0 ? (
+                                <span className="text-[var(--warning-fg)] font-medium">No villages</span>
+                              ) : (
+                                `${villages} village${villages === 1 ? "" : "s"}`
+                              )}
                             </>
                           ) : (
                             <>
-                              {u.role === "admin" ? <Globe2 size={12} className="shrink-0" /> : <Wrench size={12} className="shrink-0" />}
-                              {r.access}
+                              <Globe2 size={12} className="shrink-0" />
+                              Every village
                             </>
                           )}
                         </span>
                       </Td>
-                      <Td muted nowrap>
-                        {new Date(u.created_at).toLocaleDateString("en-AU", {
-                          day: "numeric",
-                          month: "short",
-                          year: "numeric",
-                        })}
-                      </Td>
+                      <Td><StatusCell user={u} /></Td>
                       <Td align="right">
                         <div className="flex items-center justify-end gap-1">
-                          <IconButton
-                            onClick={() => setEditTarget(u)}
-                            size="sm"
-                            title="Edit user"
-                            aria-label={`Edit ${u.email}`}
-                          >
+                          <IconButton onClick={() => setEditTarget(u)} size="sm" title="Edit user" aria-label={`Edit ${u.email}`}>
                             <Edit3 size={14} />
                           </IconButton>
+
+                          {/* An account still waiting on its invite gets ONE
+                              obvious action — send it again. The password and
+                              onboarding resets below would work, but both mail
+                              a temporary password, which is the thing the
+                              invite flow exists to avoid. */}
+                          {awaiting && (
+                            <IconButton
+                              onClick={() => setRescue({ user: u, kind: "invite" })}
+                              size="sm"
+                              title="Send the invite link again"
+                              aria-label={`Resend invite to ${u.email}`}
+                              className="text-[var(--info-fg)] hover:bg-[var(--info-soft)]"
+                            >
+                              <MailCheck size={14} />
+                            </IconButton>
+                          )}
+
                           {/* The rescue actions. Each is confirmed first: all
-                              three invalidate something the account is using
-                              right now, and a mis-click should not be the thing
-                              that locks someone out on a Friday. */}
+                              invalidate something the account is using right
+                              now, and a mis-click should not be the thing that
+                              locks someone out on a Friday. */}
                           <IconButton
                             onClick={() => setRescue({ user: u, kind: "password" })}
                             size="sm"
@@ -385,12 +456,11 @@ export default function UsersPage() {
                           >
                             <Send size={14} />
                           </IconButton>
+
                           {/* You cannot delete yourself — the API refuses it, so
                               the row says why rather than offering the button. */}
                           {isSelf ? (
-                            <span className="text-[11.5px] text-[var(--fg-subtle)] italic px-2">
-                              you
-                            </span>
+                            <span className="px-2 text-[11.5px] italic text-[var(--fg-subtle)]">you</span>
                           ) : (
                             <IconButton
                               onClick={() => setDeleteTarget(u)}
@@ -418,8 +488,9 @@ export default function UsersPage() {
         <UserFormModal
           mode="create"
           onClose={() => setShowCreate(false)}
-          onSaved={() => {
+          onSaved={(result) => {
             setShowCreate(false);
+            if (result?.warn) setRescueResult(result.warn);
             loadUsers();
           }}
         />
@@ -437,22 +508,22 @@ export default function UsersPage() {
         />
       )}
 
-      {/* One dialog for all three: they differ in wording and endpoint, not in
-          shape, and three near-identical dialogs drift apart. */}
+      {/* One dialog for all of them: they differ in wording and endpoint, not in
+          shape, and four near-identical dialogs drift apart. */}
       <ConfirmDialog
         open={!!rescue}
         title={RESCUE_COPY[rescue?.kind]?.title || ""}
         message={(RESCUE_COPY[rescue?.kind]?.message || "").replace("{email}", rescue?.user?.email || "")}
         confirmLabel={RESCUE_COPY[rescue?.kind]?.verb || "Confirm"}
-        variant="danger"
+        variant={rescue?.kind === "invite" ? "primary" : "danger"}
         loading={rescueBusy}
         onConfirm={runRescue}
         onCancel={() => setRescue(null)}
       />
 
-      {/* The temporary password, kept on screen until dismissed. Shown even when
-          the email went, because "it was emailed" is not the same as "it
-          arrived" and this is the only other copy that exists. */}
+      {/* Kept on screen until dismissed. Shown even when the email went,
+          because "it was emailed" is not the same as "it arrived" and this is
+          the only other copy that exists. */}
       {rescueResult && (
         <ConfirmDialog
           open
@@ -478,41 +549,106 @@ export default function UsersPage() {
 }
 
 const RESCUE_COPY = {
-  "password": {
-    "title": "Reset password",
-    "verb": "Reset password",
-    "message": "A new temporary password will be set and emailed to {email}. Their current password stops working immediately, and they will be asked to choose a new one when they sign in."
+  password: {
+    title: "Reset password",
+    verb: "Reset password",
+    message:
+      "A new temporary password will be set and emailed to {email}. Their current password stops working immediately, and they will be asked to choose a new one when they sign in.",
   },
-  "twofactor": {
-    "title": "Reset two-factor",
-    "verb": "Reset two-factor",
-    "message": "This clears the authenticator and every backup code for {email} \u2014 for a lost or replaced phone. They will set two-factor up again at their next sign-in, and will be emailed to say it happened."
+  twofactor: {
+    title: "Reset two-factor",
+    verb: "Reset two-factor",
+    message:
+      "This clears the authenticator and every backup code for {email} — for a lost or replaced phone. They will set two-factor up again at their next sign-in, and will be emailed to say it happened.",
   },
-  "onboarding": {
-    "title": "Resend welcome email",
-    "verb": "Send welcome email",
-    "message": "A new temporary password will be set and the welcome email sent again to {email}. Any password they already have stops working."
-  }
+  onboarding: {
+    title: "Resend welcome email",
+    verb: "Send welcome email",
+    message:
+      "A new temporary password will be set and the welcome email sent again to {email}. Any password they already have stops working.",
+  },
+  invite: {
+    title: "Send the invite again",
+    verb: "Send invite",
+    message:
+      "A fresh link will be emailed to {email} so they can choose their own password. Any earlier link stops working straight away.",
+  },
 };
 
 /* ============================================================================
-   User form modal — create OR edit
-   ============================================================================ */
+   One row of a joined field block.
+   The label sits inside the row, above the value, so the row is a single
+   target and a focused field has a whole surface to tint rather than a 1px
+   border to thicken. Same treatment as the sign-in screen, deliberately — this
+   and that are the two places the console asks for credentials.
+   ========================================================================= */
+function FormRow({ icon: Icon, label, hint, trailing, focused, children }) {
+  return (
+    <div className={"relative flex items-stretch transition-colors duration-150 " + (focused ? "bg-[var(--brand-soft)]" : "")}>
+      <span
+        aria-hidden
+        className="absolute bottom-0 left-0 top-0 w-[2.5px] origin-center bg-[var(--brand)] transition-transform duration-150"
+        style={{ transform: focused ? "scaleY(1)" : "scaleY(0)" }}
+      />
+      <span
+        className={
+          "flex w-[52px] shrink-0 items-center justify-center border-r transition-colors duration-150 " +
+          (focused
+            ? "border-[var(--brand-soft-hover)] text-[var(--brand)]"
+            : "border-[var(--border-default)] text-[var(--fg-subtle)]")
+        }
+      >
+        <Icon size={16} strokeWidth={1.9} />
+      </span>
+      <span className="flex min-w-0 flex-1 flex-col justify-center px-4 py-2.5">
+        <span className="mb-1.5 flex items-baseline gap-2 text-[9.5px] font-bold uppercase leading-none tracking-[0.14em] text-[var(--fg-muted)]">
+          {label}
+          {hint && <span className="font-medium normal-case tracking-normal text-[10.5px] text-[var(--fg-subtle)]">{hint}</span>}
+        </span>
+        {children}
+      </span>
+      {trailing && <span className="flex items-center gap-0.5 pr-2.5">{trailing}</span>}
+    </div>
+  );
+}
+
+const rowInput =
+  "w-full border-0 bg-transparent p-0 text-[14px] leading-[1.35] " +
+  "text-[var(--fg-primary)] outline-none placeholder:text-[var(--fg-subtle)]";
+
+/* ============================================================================
+   User form modal — create (two steps) OR edit (one form)
+   ------------------------------------------------------------------------
+   Create is two steps because the second one depends on the first: which
+   villages to offer, and whether to offer them at all, is not knowable until
+   the role is chosen. Putting both on one screen means a village picker that
+   appears and disappears under the cursor, and a password field that is asked
+   for before anyone has said who this person is.
+
+   Edit is one screen. The role is already chosen, nothing is revealed by
+   anything else, and an admin fixing a typo in a name should not be walked
+   through a wizard to do it.
+   ========================================================================= */
 function UserFormModal({ mode, user, onClose, onSaved }) {
   const isEdit = mode === "edit";
+  const [step, setStep] = useState(1);
   const [form, setForm] = useState({
     email: user?.email || "",
-    password: "",
     name: user?.name || "",
     role: user?.role || "viewer",
     villageIds: Array.isArray(user?.villageIds) ? user.villageIds : [],
+    // The default is the one where nobody but the account holder ever knows
+    // the password. Ticking the box is the deliberate exception.
+    setPasswordDirectly: false,
+    password: "",
   });
   const [villages, setVillages] = useState([]);
+  const [villageQuery, setVillageQuery] = useState("");
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState("");
   const [showPassword, setShowPassword] = useState(false);
+  const [focusField, setFocusField] = useState(null);
 
-  // Village list for the viewer scope picker.
   useEffect(() => {
     networkApi.projects().then((d) => setVillages(d.projects || [])).catch(() => {});
   }, []);
@@ -521,27 +657,56 @@ function UserFormModal({ mode, user, onClose, onSaved }) {
     setForm((prev) => ({ ...prev, [key]: value }));
   }
 
+  const role = roleOf(form.role);
+  const scoped = role.scoped;
+
+  const shownVillages = useMemo(() => {
+    const needle = villageQuery.trim().toLowerCase();
+    if (!needle) return villages;
+    return villages.filter(
+      (v) =>
+        String(v.name || "").toLowerCase().includes(needle) ||
+        String(v.hostname || "").toLowerCase().includes(needle)
+    );
+  }, [villages, villageQuery]);
+
   function toggleVillage(id) {
-    setForm((prev) => {
-      const has = prev.villageIds.includes(id);
-      return {
-        ...prev,
-        villageIds: has ? prev.villageIds.filter((x) => x !== id) : [...prev.villageIds, id],
-      };
-    });
+    setForm((prev) => ({
+      ...prev,
+      villageIds: prev.villageIds.includes(id)
+        ? prev.villageIds.filter((x) => x !== id)
+        : [...prev.villageIds, id],
+    }));
   }
 
-  function handleGenPassword() {
-    setField("password", generatePassword());
-    setShowPassword(true);
+  // Select-all acts on what is VISIBLE, which is the only reading that makes
+  // sense next to a search box — "all" while filtered to three villages
+  // meaning all twenty-nine would be a trap.
+  function selectAllShown() {
+    setForm((prev) => ({
+      ...prev,
+      villageIds: [...new Set([...prev.villageIds, ...shownVillages.map((v) => v.id)])],
+    }));
   }
+  function clearShown() {
+    const ids = new Set(shownVillages.map((v) => v.id));
+    setForm((prev) => ({ ...prev, villageIds: prev.villageIds.filter((x) => !ids.has(x)) }));
+  }
+
+  const emailOk = /\S+@\S+\.\S+/.test(form.email);
+  const step1Ok = emailOk;
+  const scopeOk = !scoped || form.villageIds.length > 0;
+  const passwordOk = !form.setPasswordDirectly || form.password.length >= 6;
 
   async function handleSubmit(e) {
-    e.preventDefault();
+    e?.preventDefault();
     setErr("");
-    // A viewer with no villages would see nothing — require at least one.
-    if (form.role === "viewer" && form.villageIds.length === 0) {
-      setErr("Select at least one village for this viewer.");
+    if (!scopeOk) {
+      setErr(`Choose at least one village — a ${role.label.toLowerCase()} with none signs in to an empty console.`);
+      return;
+    }
+    if (!passwordOk) {
+      setErr("A password you set must be at least 6 characters.");
       return;
     }
     setLoading(true);
@@ -551,257 +716,476 @@ function UserFormModal({ mode, user, onClose, onSaved }) {
         if (form.name !== (user.name || "")) body.name = form.name;
         if (form.email !== user.email) body.email = form.email;
         if (form.role !== user.role) body.role = form.role;
-        if (form.password) body.password = form.password;
-        // Send the village set whenever this is (or becomes) a viewer so the
-        // backend replaces it; for admins the backend clears it automatically.
-        if (form.role === "viewer") body.villageIds = form.villageIds;
+        if (form.setPasswordDirectly && form.password) body.password = form.password;
+        // Send the village set whenever this is (or becomes) a scoped role so
+        // the backend replaces it; for admins the backend clears it itself.
+        if (scoped) body.villageIds = form.villageIds;
+        if (Object.keys(body).length === 0) {
+          setErr("Nothing has changed.");
+          setLoading(false);
+          return;
+        }
         await userApi.update(user.id, body);
-        toast.success("User updated");
-      } else {
-        await userApi.create({
-          email: form.email,
-          password: form.password,
-          name: form.name,
-          role: form.role,
-          villageIds: form.role === "viewer" ? form.villageIds : [],
-        });
-        toast.success("User created");
+        toast.success("Account updated");
+        onSaved();
+        return;
       }
-      onSaved();
+
+      const r = await userApi.create({
+        email: form.email,
+        name: form.name,
+        role: form.role,
+        villageIds: scoped ? form.villageIds : [],
+        // Omitted entirely on the invite path — the server reads its absence
+        // as "mint an invite", not as an empty password.
+        ...(form.setPasswordDirectly ? { password: form.password } : {}),
+      });
+
+      if (!r.invited) {
+        toast.success(`${form.email} can sign in now`);
+        onSaved();
+        return;
+      }
+      if (r.emailed) {
+        toast.success(`Invite sent to ${form.email} — good for ${r.expiresDays || 7} days`);
+        onSaved();
+        return;
+      }
+      // The account exists but the link went nowhere. Said loudly, because the
+      // list will show a perfectly normal-looking "Invited" row either way.
+      onSaved({
+        warn: {
+          title: "Account created — invite not sent",
+          message:
+            `${form.email} was created, but the invite email did not go out` +
+            `${r.emailError ? ` (${r.emailError})` : ""}.\n\n` +
+            `The link exists only inside that email, so there is nothing to pass on by hand. ` +
+            `Fix SMTP under Settings and use the resend button on their row, or edit the account and set a password directly.`,
+        },
+      });
     } catch (e) {
       setErr(e.message);
-    } finally {
       setLoading(false);
     }
   }
 
+  /* ---------------------------------------------------------------- pieces */
+
+  const identityBlock = (
+    <div
+      className={
+        "overflow-hidden rounded-2xl border bg-[var(--surface)] transition-shadow duration-150 " +
+        (focusField
+          ? "border-[var(--brand)] shadow-[0_0_0_4px_var(--brand-soft)]"
+          : "border-[var(--input-border)] shadow-[var(--shadow-xs)]")
+      }
+    >
+      <FormRow icon={UserIcon} label="Name" hint="optional" focused={focusField === "name"}>
+        <input
+          value={form.name}
+          onChange={(e) => setField("name", e.target.value)}
+          onFocus={() => setFocusField("name")}
+          onBlur={() => setFocusField(null)}
+          placeholder="Full name"
+          autoComplete="off"
+          className={rowInput}
+        />
+      </FormRow>
+      <div className="h-px bg-[var(--border-default)]" />
+      <FormRow icon={Mail} label="Email" focused={focusField === "email"}>
+        <input
+          type="email"
+          value={form.email}
+          onChange={(e) => setField("email", e.target.value)}
+          onFocus={() => setFocusField("email")}
+          onBlur={() => setFocusField(null)}
+          placeholder="name@vodafone.com.fj"
+          required
+          autoComplete="off"
+          autoFocus={!isEdit}
+          className={rowInput}
+        />
+      </FormRow>
+    </div>
+  );
+
+  const rolePicker = (
+    <div className="flex flex-col gap-2.5">
+      {ROLE_ORDER.map((value) => {
+        const opt = ROLES[value];
+        const selected = form.role === value;
+        const Icon = opt.icon;
+        return (
+          <button
+            key={value}
+            type="button"
+            onClick={() => setField("role", value)}
+            aria-pressed={selected}
+            className={
+              "flex items-start gap-3.5 rounded-2xl border p-4 text-left transition-all duration-150 " +
+              (selected
+                ? "border-[var(--brand)] bg-[var(--brand-soft)] shadow-[0_0_0_3px_var(--brand-soft)]"
+                : "border-[var(--border-default)] bg-[var(--surface-raised)] hover:border-[var(--border-hover)] hover:bg-[var(--surface-hover)]")
+            }
+          >
+            <span
+              className={
+                "mt-0.5 grid h-9 w-9 shrink-0 place-items-center rounded-[11px] " +
+                (selected
+                  ? "bg-[var(--brand)] text-[var(--text-on-brand)]"
+                  : "border border-[var(--border-subtle)] bg-[var(--surface-sunken)] text-[var(--fg-muted)]")
+              }
+            >
+              <Icon size={15} />
+            </span>
+            <span className="flex min-w-0 flex-col gap-2">
+              <span className="flex flex-col gap-0.5">
+                <span
+                  className={
+                    "font-display text-[13.5px] font-bold " +
+                    (selected ? "text-[var(--brand-fg-on-soft)]" : "text-[var(--fg-primary)]")
+                  }
+                >
+                  {opt.label}
+                </span>
+                <span className="text-[12px] leading-snug text-[var(--fg-muted)]">{opt.blurb}</span>
+              </span>
+              {/* The tabs they will actually find. This is the part an admin is
+                  really choosing between. */}
+              <span className="flex flex-wrap items-center gap-1.5">
+                {opt.opens.map(({ label, Icon: TabIcon }) => (
+                  <span
+                    key={label}
+                    className={
+                      "inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[10.5px] font-medium " +
+                      (selected
+                        ? "bg-[var(--surface)] text-[var(--fg-secondary)]"
+                        : "bg-[var(--bg-surface)] text-[var(--fg-muted)]")
+                    }
+                  >
+                    <TabIcon size={10} />
+                    {label}
+                  </span>
+                ))}
+                {opt.scoped && (
+                  <span className="text-[10.5px] text-[var(--fg-subtle)]">· for chosen villages only</span>
+                )}
+              </span>
+            </span>
+          </button>
+        );
+      })}
+    </div>
+  );
+
+  const villagePicker = scoped && (
+    <Field
+      label="Villages this account may see"
+      required
+      hint="Enforced on the server — the dashboard and overview answer with these villages and no others."
+    >
+      {villages.length === 0 ? (
+        <p className="text-[12.5px] text-[var(--fg-muted)]">No villages yet — add them under Network first.</p>
+      ) : (
+        <div className="overflow-hidden rounded-xl border border-[var(--border-default)]">
+          <div className="flex items-center gap-2 border-b border-[var(--border-subtle)] bg-[var(--bg-surface)] px-2.5 py-2">
+            <Search size={13} className="shrink-0 text-[var(--fg-subtle)]" />
+            <input
+              value={villageQuery}
+              onChange={(e) => setVillageQuery(e.target.value)}
+              placeholder="Filter villages…"
+              className="min-w-0 flex-1 border-0 bg-transparent p-0 text-[12.5px] text-[var(--fg-primary)] outline-none placeholder:text-[var(--fg-subtle)]"
+            />
+            <button
+              type="button"
+              onClick={selectAllShown}
+              className="rounded px-1.5 py-0.5 text-[11.5px] font-medium text-[var(--brand-fg-on-soft)] hover:bg-[var(--brand-soft)]"
+            >
+              Select all
+            </button>
+            <button
+              type="button"
+              onClick={clearShown}
+              className="rounded px-1.5 py-0.5 text-[11.5px] font-medium text-[var(--fg-muted)] hover:bg-[var(--surface-hover)]"
+            >
+              Clear
+            </button>
+          </div>
+
+          <div className="max-h-56 divide-y divide-[var(--border-subtle)] overflow-y-auto">
+            {shownVillages.length === 0 ? (
+              <p className="px-3.5 py-4 text-[12.5px] text-[var(--fg-muted)]">Nothing matches “{villageQuery}”.</p>
+            ) : (
+              shownVillages.map((v) => {
+                const checked = form.villageIds.includes(v.id);
+                return (
+                  <button
+                    key={v.id}
+                    type="button"
+                    onClick={() => toggleVillage(v.id)}
+                    className="flex w-full items-center gap-3 px-3.5 py-2.5 text-left transition-colors hover:bg-[var(--surface-hover)]"
+                  >
+                    <span
+                      className={
+                        "grid h-[18px] w-[18px] shrink-0 place-items-center rounded-[5px] border transition-colors " +
+                        (checked
+                          ? "border-[var(--brand)] bg-[var(--brand)] text-[var(--text-on-brand)]"
+                          : "border-[var(--border-strong)] text-transparent")
+                      }
+                    >
+                      <Check size={12} strokeWidth={3} />
+                    </span>
+                    <MapPin size={14} className="shrink-0 text-[var(--fg-subtle)]" />
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate text-[12.5px] font-medium text-[var(--fg-primary)]">{v.name}</span>
+                      {v.hostname && (
+                        <span className="block truncate font-mono text-[11px] text-[var(--fg-muted)]">{v.hostname}</span>
+                      )}
+                    </span>
+                  </button>
+                );
+              })
+            )}
+          </div>
+
+          <div className="flex items-center justify-between border-t border-[var(--border-subtle)] bg-[var(--bg-surface)] px-3.5 py-2">
+            <span className="text-[11.5px] tabular-nums text-[var(--fg-muted)]">
+              {form.villageIds.length} of {villages.length} selected
+            </span>
+            {form.villageIds.length === 0 && (
+              <span className="inline-flex items-center gap-1.5 text-[11.5px] font-medium text-[var(--warning-fg)]">
+                <AlertTriangle size={12} />
+                Pick at least one
+              </span>
+            )}
+          </div>
+        </div>
+      )}
+    </Field>
+  );
+
+  const signInSection = (
+    <Field label={isEdit ? "Password" : "How they get in"}>
+      <div className="flex flex-col gap-3">
+        {!isEdit && !form.setPasswordDirectly && (
+          <div className="flex items-start gap-3 rounded-xl border border-[var(--info-border)] bg-[var(--info-soft)] px-4 py-3">
+            <MailCheck size={16} className="mt-0.5 shrink-0 text-[var(--info-fg)]" />
+            <p className="text-[12.5px] leading-relaxed text-[var(--info-fg)]">
+              We’ll email{" "}
+              <span className="font-semibold">{form.email || "them"}</span> a link to choose their own
+              password. It works once, expires in seven days, and nobody here — including you — ever
+              sees what they pick.
+            </p>
+          </div>
+        )}
+
+        <label className="flex cursor-pointer items-start gap-2.5 text-[13px] text-[var(--fg-secondary)]">
+          <input
+            type="checkbox"
+            checked={form.setPasswordDirectly}
+            onChange={(e) => {
+              setField("setPasswordDirectly", e.target.checked);
+              if (e.target.checked && !form.password) setField("password", generatePassword());
+              setShowPassword(e.target.checked);
+            }}
+            className="mt-0.5 cursor-pointer accent-[var(--brand)]"
+          />
+          <span>
+            <span className="font-medium text-[var(--fg-primary)]">
+              {isEdit ? "Set a new password for them" : "Set the password myself instead"}
+            </span>
+            <span className="mt-0.5 block text-[11.5px] leading-relaxed text-[var(--fg-muted)]">
+              {isEdit
+                ? "Replaces whatever they have now. They will be asked to change it at their next sign-in."
+                : "For someone with no mailbox yet, or standing next to you. They will be asked to change it at first sign-in."}
+            </span>
+          </span>
+        </label>
+
+        {form.setPasswordDirectly && (
+          <div className="overflow-hidden rounded-2xl border border-[var(--input-border)] bg-[var(--surface)] shadow-[var(--shadow-xs)]">
+            <FormRow
+              icon={KeyRound}
+              label="Password"
+              hint="min 6 characters"
+              focused={focusField === "password"}
+              trailing={
+                <>
+                  <button
+                    type="button"
+                    onClick={() => setShowPassword((v) => !v)}
+                    tabIndex={-1}
+                    aria-label={showPassword ? "Hide password" : "Show password"}
+                    className="rounded-lg p-1.5 text-[var(--fg-muted)] transition-colors hover:bg-[var(--surface-hover)] hover:text-[var(--fg-primary)]"
+                  >
+                    {showPassword ? <EyeOff size={15} /> : <Eye size={15} />}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      navigator.clipboard?.writeText(form.password).then(
+                        () => toast.success("Password copied"),
+                        () => toast.error("Could not copy — select it by hand")
+                      );
+                    }}
+                    tabIndex={-1}
+                    aria-label="Copy password"
+                    title="Copy"
+                    className="rounded-lg p-1.5 text-[var(--fg-muted)] transition-colors hover:bg-[var(--surface-hover)] hover:text-[var(--fg-primary)]"
+                  >
+                    <Copy size={15} />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => { setField("password", generatePassword()); setShowPassword(true); }}
+                    tabIndex={-1}
+                    aria-label="Generate a password"
+                    title="Generate"
+                    className="rounded-lg p-1.5 text-[var(--fg-muted)] transition-colors hover:bg-[var(--brand-soft)] hover:text-[var(--brand)]"
+                  >
+                    <Dices size={15} />
+                  </button>
+                </>
+              }
+            >
+              <input
+                type={showPassword ? "text" : "password"}
+                value={form.password}
+                onChange={(e) => setField("password", e.target.value)}
+                onFocus={() => setFocusField("password")}
+                onBlur={() => setFocusField(null)}
+                placeholder="At least 6 characters"
+                autoComplete="new-password"
+                className={`${rowInput} ${showPassword ? "font-mono tracking-[0.04em]" : ""}`}
+              />
+            </FormRow>
+          </div>
+        )}
+
+        {form.setPasswordDirectly && (
+          <p className="text-[11.5px] leading-relaxed text-[var(--fg-muted)]">
+            You will need to pass this on yourself — it is not emailed. Anything you send it over is
+            somewhere it will still be readable next year.
+          </p>
+        )}
+      </div>
+    </Field>
+  );
+
+  const errorBox = err && (
+    <div
+      role="alert"
+      className="flex items-start gap-2.5 rounded-xl border border-[var(--danger-border)] bg-[var(--danger-soft)] px-3.5 py-3"
+    >
+      <span className="mt-[7px] h-1.5 w-1.5 shrink-0 rounded-full bg-[var(--danger-fg)]" />
+      <p className="text-[12.5px] font-medium leading-relaxed text-[var(--danger-fg)]">{err}</p>
+    </div>
+  );
+
+  /* ------------------------------------------------------------------ edit */
+
+  if (isEdit) {
+    return (
+      <Modal open onClose={onClose} width="lg">
+        <Modal.Header
+          eyebrow={user?.email}
+          title="Edit account"
+          subtitle="Role decides which tabs they find; villages decide what the numbers on them add up to."
+          icon={Edit3}
+          onClose={onClose}
+        />
+        <form onSubmit={handleSubmit}>
+          <Modal.Body>
+            <div className="flex flex-col gap-6">
+              {identityBlock}
+              <Field label="Role" required>{rolePicker}</Field>
+              {villagePicker}
+              {signInSection}
+              {errorBox}
+            </div>
+          </Modal.Body>
+          <Modal.Footer>
+            <Button type="button" variant="ghost" onClick={onClose} disabled={loading}>Cancel</Button>
+            <Button type="submit" variant="primary" loading={loading}>Save changes</Button>
+          </Modal.Footer>
+        </form>
+      </Modal>
+    );
+  }
+
+  /* ---------------------------------------------------------------- create */
+
   return (
-    <Modal open onClose={onClose} width="md">
+    <Modal open onClose={onClose} width="lg">
       <Modal.Header
-        eyebrow={isEdit ? "Edit user" : "New user"}
-        title={isEdit ? "Edit user details" : "Add a teammate"}
+        eyebrow={`Step ${step} of 2`}
+        title={step === 1 ? "Who is this for?" : "What they can see, and how they get in"}
         subtitle={
-          isEdit
-            ? "Update name, email, role or set a new password."
-            : "Send the credentials privately — passwords aren't recoverable."
+          step === 1
+            ? "The role decides which tabs they find when they sign in."
+            : `Setting up ${form.name || form.email}.`
         }
-        icon={isEdit ? Edit3 : UserPlus}
+        icon={step === 1 ? UserPlus : Check}
         onClose={onClose}
       />
 
-      <form onSubmit={handleSubmit}>
-        <Modal.Body>
-          <div className="flex flex-col gap-6">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <Field label="Name" htmlFor="u-name">
-                <Input
-                  id="u-name"
-                  type="text"
-                  value={form.name}
-                  onChange={(e) => setField("name", e.target.value)}
-                  placeholder="Full name"
-                  autoComplete="name"
-                />
-              </Field>
+      {/* Two segments rather than numbered circles: the point is how much is
+          left, and a bar answers that without being read. */}
+      <div className="flex gap-1.5 px-7 pt-5">
+        {[1, 2].map((n) => (
+          <span
+            key={n}
+            className={
+              "h-[3px] flex-1 rounded-full transition-colors duration-200 " +
+              (n <= step ? "bg-[var(--brand)]" : "bg-[var(--surface-pressed)]")
+            }
+          />
+        ))}
+      </div>
 
-              <Field label="Email" required htmlFor="u-email">
-                <Input
-                  id="u-email"
-                  type="email"
-                  value={form.email}
-                  onChange={(e) => setField("email", e.target.value)}
-                  placeholder="user@example.com"
-                  required
-                  autoComplete="off"
-                />
-              </Field>
+      <form onSubmit={(e) => { e.preventDefault(); if (step === 1) setStep(2); else handleSubmit(e); }}>
+        <Modal.Body className="!pt-5">
+          {step === 1 ? (
+            <div className="flex flex-col gap-6">
+              {identityBlock}
+              <Field label="Role" required>{rolePicker}</Field>
             </div>
-
-            <Field
-              label="Password"
-              required={!isEdit}
-              hint={
-                isEdit
-                  ? "Leave blank to keep the current password."
-                  : "At least 6 characters. Use the dice to generate one."
-              }
-              htmlFor="u-password"
-            >
-              <div className="relative">
-                <Input
-                  id="u-password"
-                  type={showPassword ? "text" : "password"}
-                  value={form.password}
-                  onChange={(e) => setField("password", e.target.value)}
-                  placeholder={isEdit ? "New password" : "Min 6 characters"}
-                  required={!isEdit}
-                  minLength={form.password ? 6 : undefined}
-                  autoComplete="new-password"
-                  mono={!!form.password && showPassword}
-                  className="pr-20"
-                />
-                <div className="absolute right-1 top-1/2 -translate-y-1/2 flex items-center">
-                  <button
-                    type="button"
-                    onClick={() => setShowPassword(!showPassword)}
-                    tabIndex={-1}
-                    aria-label={showPassword ? "Hide" : "Show"}
-                    className="h-7 w-7 inline-flex items-center justify-center rounded-full text-[var(--text-quaternary)] hover:text-[var(--text-secondary)] hover:bg-[var(--surface-hover)] focus-ring"
-                  >
-                    {showPassword ? <EyeOff size={13} /> : <Eye size={13} />}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={handleGenPassword}
-                    tabIndex={-1}
-                    title="Generate random password"
-                    aria-label="Generate password"
-                    className="h-7 w-7 inline-flex items-center justify-center rounded-full text-[var(--text-quaternary)] hover:text-[var(--brand)] hover:bg-[var(--brand-soft)] focus-ring"
-                  >
-                    <RefreshCw size={13} />
-                  </button>
-                </div>
-              </div>
-            </Field>
-
-            {/* Role cards rather than a dropdown: the difference between these
-                three is what they are allowed to see, which needs a sentence. */}
-            <Field label="Role" required>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-                {["viewer", "admin", "engineer"].map((value) => {
-                  const opt = ROLES[value];
-                  const selected = form.role === value;
-                  const Icon = opt.icon;
-                  return (
-                    <button
-                      key={value}
-                      type="button"
-                      onClick={() => setField("role", value)}
-                      aria-pressed={selected}
-                      className={
-                        "flex items-start gap-3 text-left p-3.5 rounded-xl border transition-all duration-150 " +
-                        (selected
-                          ? "border-[var(--brand)] bg-[var(--brand-soft)] shadow-[0_0_0_3px_var(--brand-soft)]"
-                          : "border-[var(--border-default)] bg-[var(--surface-raised)] hover:border-[var(--border-hover)] hover:bg-[var(--surface-hover)]")
-                      }
-                    >
-                      <span
-                        className={
-                          "shrink-0 h-8 w-8 rounded-[10px] flex items-center justify-center mt-0.5 " +
-                          (selected
-                            ? "bg-[var(--brand)] text-[var(--text-on-brand)]"
-                            : "bg-[var(--surface-sunken)] text-[var(--text-tertiary)] border border-[var(--border-subtle)]")
-                        }
-                      >
-                        <Icon size={14} />
-                      </span>
-                      <span className="flex flex-col min-w-0">
-                        <span
-                          className={
-                            "text-[13px] font-semibold font-display " +
-                            (selected
-                              ? "text-[var(--brand-fg-on-soft)]"
-                              : "text-[var(--text-primary)]")
-                          }
-                        >
-                          {opt.label}
-                        </span>
-                        <span className="text-[11.5px] text-[var(--text-tertiary)] leading-snug">
-                          {opt.desc}
-                        </span>
-                      </span>
-                    </button>
-                  );
-                })}
-              </div>
-            </Field>
-
-            {/* Village scope — only for viewers. Server-enforced: a viewer can
-                only ever see dashboard data for the villages selected here. */}
-            {form.role === "viewer" && (
-              <Field
-                label="Villages"
-                required
-                hint="This viewer's dashboard is limited to the villages you select — enforced server-side."
-              >
-                {villages.length === 0 ? (
-                  <p className="text-[12.5px] text-[var(--text-tertiary)]">
-                    No villages yet — add them under Network first.
+          ) : (
+            <div className="flex flex-col gap-6">
+              {villagePicker}
+              {!scoped && (
+                <div className="flex items-start gap-3 rounded-xl border border-[var(--border-default)] bg-[var(--bg-surface)] px-4 py-3">
+                  <Globe2 size={16} className="mt-0.5 shrink-0 text-[var(--fg-muted)]" />
+                  <p className="text-[12.5px] leading-relaxed text-[var(--fg-secondary)]">
+                    Administrators are not limited to villages — this account will see the whole
+                    estate, and will be able to change these accounts too.
                   </p>
-                ) : (
-                  <>
-                    <div className="max-h-52 overflow-y-auto rounded-xl border border-[var(--border-default)] divide-y divide-[var(--border-subtle)]">
-                      {villages.map((v) => {
-                        const checked = form.villageIds.includes(v.id);
-                        return (
-                          <button
-                            key={v.id}
-                            type="button"
-                            onClick={() => toggleVillage(v.id)}
-                            className="w-full flex items-center gap-3 px-3.5 py-2.5 text-left hover:bg-[var(--surface-hover)] transition-colors"
-                          >
-                            <span
-                              className={
-                                "shrink-0 h-[18px] w-[18px] rounded-[5px] flex items-center justify-center border transition-colors " +
-                                (checked
-                                  ? "bg-[var(--brand)] border-[var(--brand)] text-[var(--text-on-brand)]"
-                                  : "border-[var(--border-strong)] text-transparent")
-                              }
-                            >
-                              <Check size={12} strokeWidth={3} />
-                            </span>
-                            <MapPin size={14} className="shrink-0 text-[var(--text-quaternary)]" />
-                            <span className="min-w-0 flex-1">
-                              <span className="block text-[12.5px] font-medium text-[var(--text-primary)] truncate">
-                                {v.name}
-                              </span>
-                              {v.hostname && (
-                                <span className="block text-[11px] font-mono text-[var(--text-tertiary)] truncate">
-                                  {v.hostname}
-                                </span>
-                              )}
-                            </span>
-                          </button>
-                        );
-                      })}
-                    </div>
-                    <p className="mt-1.5 text-[11.5px] text-[var(--text-tertiary)] tabular-nums">
-                      {form.villageIds.length} of {villages.length} selected
-                    </p>
-                  </>
-                )}
-              </Field>
-            )}
-
-            {err && (
-              <div
-                role="alert"
-                className={
-                  "flex items-start gap-2.5 px-3.5 py-3 rounded-xl " +
-                  "bg-[var(--danger-soft)] border border-[var(--danger-border)]"
-                }
-              >
-                <span className="w-1.5 h-1.5 rounded-full bg-[var(--danger-fg)] mt-[7px] shrink-0" />
-                <p className="text-[12.5px] text-[var(--danger-fg)] font-medium leading-relaxed">
-                  {err}
-                </p>
-              </div>
-            )}
-          </div>
+                </div>
+              )}
+              {signInSection}
+              {errorBox}
+            </div>
+          )}
         </Modal.Body>
 
         <Modal.Footer>
-          <Button
-            type="button"
-            variant="ghost"
-            onClick={onClose}
-            disabled={loading}
-          >
-            Cancel
-          </Button>
-          <Button type="submit" variant="primary" loading={loading}>
-            {isEdit ? "Save changes" : "Create user"}
-          </Button>
+          {step === 1 ? (
+            <>
+              <Button type="button" variant="ghost" onClick={onClose}>Cancel</Button>
+              <Button type="submit" variant="primary" disabled={!step1Ok} iconRight={<ArrowRight size={15} />}>
+                Continue
+              </Button>
+            </>
+          ) : (
+            <>
+              <Button type="button" variant="ghost" onClick={() => { setStep(1); setErr(""); }} iconLeft={<ArrowLeft size={15} />}>
+                Back
+              </Button>
+              <Button type="submit" variant="primary" loading={loading}>
+                {form.setPasswordDirectly ? "Create account" : "Create and send invite"}
+              </Button>
+            </>
+          )}
         </Modal.Footer>
       </form>
     </Modal>

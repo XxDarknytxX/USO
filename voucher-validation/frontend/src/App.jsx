@@ -5,6 +5,7 @@ import AppLayout from "./components/layout/AppLayout";
 import { getAuthRole } from "./hooks/useAuth";
 
 const Login = lazy(() => import("./pages/Login"));
+const SetPassword = lazy(() => import("./pages/SetPassword"));
 const DashboardRouter = lazy(() => import("./pages/DashboardRouter"));
 const OverviewPage = lazy(() => import("./pages/OverviewPage"));
 const VouchersPage = lazy(() => import("./pages/VouchersPage"));
@@ -29,16 +30,24 @@ function ProtectedRoute({ children }) {
 }
 
 function AdminRoute({ children }) {
-  const role = getAuthRole();
-  // An engineer bounced off an admin page must not land on the dashboard —
-  // that is not their app. Send them where they belong.
-  if (role === "engineer") return <Navigate to="/maintenance" replace />;
-  return role === "admin" ? children : <Navigate to="/dashboard" replace />;
+  return getAuthRole() === "admin" ? children : <Navigate to="/dashboard" replace />;
 }
 
 function MaintenanceRoute({ children }) {
   const role = getAuthRole();
   return role === "admin" || role === "engineer" ? children : <Navigate to="/dashboard" replace />;
+}
+
+// The monitoring pages: every signed-in role reaches them, and the SERVER
+// decides which villages are in the answer. That is the whole point of the
+// scope model — the client does not need a role check here, because a viewer
+// and an admin opening the same page get different data from the same call.
+//
+// This exists as a named component rather than a bare route so the intent is
+// stated once: "open to all roles, scoped server-side" is a deliberate
+// position, not a route somebody forgot to guard.
+function ScopedRoute({ children }) {
+  return children;
 }
 
 function PageLoader() {
@@ -55,6 +64,9 @@ export default function App() {
       <Suspense fallback={<PageLoader />}>
         <Routes>
           <Route path="/login" element={<Login />} />
+          {/* Public: whoever follows an invite link has no account to sign in
+              with yet. The token in the URL is the credential. */}
+          <Route path="/set-password" element={<SetPassword />} />
           <Route
             element={
               <ProtectedRoute>
@@ -72,7 +84,9 @@ export default function App() {
             {/* Admins and engineers. The server enforces the same pair. */}
             <Route path="/maintenance" element={<MaintenanceRoute><MaintenancePage /></MaintenanceRoute>} />
             <Route path="/maintenance/village/:projectId" element={<MaintenanceRoute><VillageProfilePage /></MaintenanceRoute>} />
-            <Route path="/overview" element={<AdminRoute><OverviewPage /></AdminRoute>} />
+            {/* Viewers and engineers see the same page as an admin, narrowed
+                to their villages by attachScope on the server. */}
+            <Route path="/overview" element={<ScopedRoute><OverviewPage /></ScopedRoute>} />
             <Route path="/vouchers" element={<AdminRoute><VouchersPage /></AdminRoute>} />
             <Route path="/vouchers/:uuid" element={<AdminRoute><VouchersPage /></AdminRoute>} />
             <Route path="/activity" element={<AdminRoute><ActivityLogPage /></AdminRoute>} />
@@ -142,8 +156,14 @@ export default function App() {
               }
             />
           </Route>
-          <Route path="/" element={<Navigate to={getAuthRole() === "engineer" ? "/maintenance" : "/dashboard"} replace />} />
-          <Route path="*" element={<Navigate to="/login" replace />} />
+          {/* Every role has a dashboard now, so every role starts on it. */}
+          <Route path="/" element={<Navigate to="/dashboard" replace />} />
+          {/* A signed-in user who mistypes a URL gets their console back, not
+              a sign-in form they do not need. */}
+          <Route
+            path="*"
+            element={<Navigate to={localStorage.getItem("token") ? "/dashboard" : "/login"} replace />}
+          />
         </Routes>
       </Suspense>
     </BrowserRouter>

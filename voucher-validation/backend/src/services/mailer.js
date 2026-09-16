@@ -769,6 +769,44 @@ function accountShell(title, lead, blocks, footer) {
   </td></tr></table></body></html>`;
 }
 
+/**
+ * The invite. Carries a link, never a password — so there is nothing in this
+ * mail that is still worth stealing a week after it was sent, and nothing that
+ * works twice.
+ *
+ * The role is stated because it is the one thing the recipient cannot find out
+ * any other way before signing in, and "you have been given an account" without
+ * "to do what" is a mail people ignore.
+ */
+export function buildInvite({ name, email, url, link, roleLabel, expiresDays = 7 }) {
+  const what = roleLabel ? ` as ${/^[aeiou]/i.test(roleLabel) ? "an" : "a"} ${roleLabel}` : "";
+  const footer =
+    `This link works once and stops working after ${expiresDays} days. ` +
+    "If it has expired by the time you open it, ask your administrator to send another. " +
+    "If two-factor authentication is switched on, you will be walked through setting it up when you first sign in.";
+  return {
+    subject: "Set up your Vodafone Fiji USO console account",
+    text:
+      `An account has been created for you${what} on the Vodafone Fiji USO operations console.\n\n` +
+      `Choose your password here:\n${link}\n\n` +
+      `Email: ${email}\n` +
+      `Console: ${url}\n\n` +
+      `This link works once and expires in ${expiresDays} days. If you were not expecting this, tell your administrator.`,
+    html: accountShell(
+      `Welcome${name ? `, ${name}` : ""}`,
+      `An account has been created for you${what} on the USO operations console. Choose your own password to finish setting it up — nobody else has seen it, and nobody can.`,
+      [
+        { label: "Email", value: email },
+        { label: "Console", value: url },
+      ],
+      `<a href="${link}" style="display:inline-block;background:#e60000;color:#ffffff;text-decoration:none;font-size:14px;font-weight:600;padding:11px 22px;border-radius:8px;">Choose your password</a>
+       <br><br><span style="font-size:12px;color:#6b7580;">Or paste this into your browser:</span>
+       <br><span style="font-size:12px;color:#4a5560;word-break:break-all;">${link}</span>
+       <br><br>${footer}`
+    ),
+  };
+}
+
 export function buildOnboarding({ name, email, password, url }) {
   const subject = "Your Vodafone Fiji USO console account";
   const footer =
