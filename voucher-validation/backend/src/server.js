@@ -15,6 +15,7 @@ import { makePortalConfigRouter } from "./routes/portalConfig.js";
 import { makePortalRouter } from "./routes/portal.js";
 import { makeNetworkController } from "./controllers/networkController.js";
 import { makeNetworkRouter } from "./routes/network.js";
+import { makeSystemRouter } from "./routes/system.js";
 import { makeMpaisaController } from "./controllers/mpaisaController.js";
 import { makeMaintenanceController } from "./controllers/maintenanceController.js";
 import { makeMpaisaRouter } from "./routes/mpaisa.js";
@@ -119,6 +120,8 @@ app.use("/api/users", makeUserRouter(admin));
 app.use("/api/portal-config", makePortalConfigRouter(portalConfig, attachScope));
 app.use("/api/portal", makePortalRouter(portalApi));
 app.use("/api/network", makeNetworkRouter(network, attachScope));
+// Host health (CPU, memory, disk, database size, pm2). Admin only.
+app.use("/api/system", makeSystemRouter(pool));
 app.use("/api/mpaisa", makeMpaisaRouter(mpaisa));
 app.use("/api/maintenance", makeMaintenanceRouter(maintenance));
 

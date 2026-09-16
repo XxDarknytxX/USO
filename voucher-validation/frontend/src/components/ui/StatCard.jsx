@@ -167,6 +167,10 @@ export function MeterCard({
   color = "accent",
   sub,               // shown when there IS a total; the no-total note replaces it
   noTotalNote = "no limit published",
+  // For ratios whose denominator is a constant everyone already knows — a
+  // percentage against 100, say. The meter still needs the total to size
+  // itself; printing it just reads as noise ("25 / 100 %").
+  showTotal = true,
   onClick,
   className,
 }) {
@@ -191,7 +195,7 @@ export function MeterCard({
           <p className="text-label truncate">{label}</p>
           <p className="mt-2 text-[28px] leading-none font-semibold tracking-tight tabular-nums text-[var(--fg-primary)]">
             {format(used)}
-            {hasTotal && (
+            {hasTotal && showTotal && (
               <span className="text-[15px] font-medium text-[var(--fg-muted)]">
                 {" / "}
                 {format(total)}

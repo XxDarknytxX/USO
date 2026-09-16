@@ -12,6 +12,7 @@ const SyncPage = lazy(() => import("./pages/SyncPage"));
 const ActivityLogPage = lazy(() => import("./pages/ActivityLogPage"));
 const NetworkPage = lazy(() => import("./pages/NetworkPage"));
 const SettingsPage = lazy(() => import("./pages/SettingsPage"));
+const SystemHealthPage = lazy(() => import("./pages/SystemHealthPage"));
 const UsersPage = lazy(() => import("./pages/UsersPage"));
 const PortalConfigPage = lazy(() => import("./pages/PortalConfigPage"));
 const PortalAuditLogPage = lazy(() => import("./pages/PortalAuditLogPage"));
@@ -89,6 +90,14 @@ export default function App() {
               element={
                 <AdminRoute>
                   <SettingsPage />
+                </AdminRoute>
+              }
+            />
+            <Route
+              path="/system"
+              element={
+                <AdminRoute>
+                  <SystemHealthPage />
                 </AdminRoute>
               }
             />

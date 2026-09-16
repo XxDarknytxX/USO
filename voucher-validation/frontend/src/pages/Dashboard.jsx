@@ -365,9 +365,14 @@ export default function Dashboard() {
     setSort((s) => (s.key === key ? { key, dir: s.dir === "asc" ? "desc" : "asc" } : { key, dir: key === "name" ? "asc" : "desc" }));
   }
 
+  // Opens the village's own DASHBOARD, not its vouchers. /dashboard is one
+  // route in two modes (DashboardRouter): with a village in scope it renders
+  // that village's SiteDashboard, so setting the scope is the navigation.
+  // Clicking a village row asks "how is this village doing", and the answer to
+  // that is its dashboard — the voucher list is one tab of it, not the whole.
   function openVillage(siteId) {
     setActiveSiteId(siteId);
-    navigate("/vouchers");
+    navigate("/dashboard");
   }
 
   /* ---- Charts fed by the voucher mirror (not the window) ---- */
@@ -712,7 +717,7 @@ export default function Dashboard() {
                           size="xs"
                           onClick={() => openVillage(r.siteId)}
                           iconRight={<ChevronRight size={14} />}
-                          title={`Open ${r.name} vouchers`}
+                          title={`Open ${r.name}`}
                         >
                           Open
                         </Button>

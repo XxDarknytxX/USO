@@ -12,7 +12,7 @@ import {
   LayoutDashboard, Gauge, Network, Ticket, History, RefreshCw, Globe,
   FileText, GitBranch, Users, Settings, Menu, X, ChevronLeft, ChevronRight,
   ChevronDown, LogOut, Shield, Eye, LifeBuoy, UserCircle, Wallet,
-  Wrench, Sun, Moon,
+  Wrench, Sun, Moon, Server,
 } from "lucide-react";
 
 import { useAuth } from "../../hooks/useAuth";
@@ -64,6 +64,7 @@ const navSections = [
     adminOnly: true,
     items: [
       { to: "/users", label: "Users", Icon: Users },
+      { to: "/system", label: "Server Health", Icon: Server },
       { to: "/settings", label: "Settings", Icon: Settings },
     ],
   },
