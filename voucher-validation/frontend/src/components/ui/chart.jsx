@@ -227,11 +227,36 @@ export function LegendRows({ children }) {
  * DonutCenter — absolutely-positioned label for the hole of a donut chart.
  * Salesforce always states the total in the middle; a ring with no total is a
  * shape, not a measurement.
+ *
+ * The size is derived from the string, because the hole is small and the value
+ * is not. Recharts resolves BOTH radii in DONUT against min(w,h)/2 of the plot
+ * rect — the inner one is not a fraction of the outer — so at the 196px box the
+ * call sites use, the hole measures 115px across. "$6,322.00" at the 26px this
+ * used to be fixed at renders 126px, which is why the total was being painted
+ * onto the ring. Text also crosses the hole as a chord rather than a diameter,
+ * so the usable width is a little under the full 115px.
+ *
+ * Deliberately pure arithmetic: no ref, no measure pass, no second paint that
+ * could disagree with the first before the webfont settles.
  */
-export function DonutCenter({ value, label }) {
+export function DonutCenter({ value, label, size = 196 }) {
+  const text = String(value ?? "");
+  const len = Math.max(text.length, 1);
+  // 0.62 = DONUT.innerRadius, less the 5px chart margin on each side; 0.94
+  // takes the chord rather than the diameter.
+  const budget = 0.62 * (size - 10) * 0.94;
+  // ~0.58em per tabular digit less 0.025em of tracking-tight. Separators are
+  // about half that, so charging every character the full digit width is a
+  // safe over-estimate.
+  const fontSize = Math.max(14, Math.min(26, Math.round(budget / (0.555 * len))));
   return (
     <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center">
-      <span className="text-[26px] font-semibold leading-none tracking-tight text-[var(--fg-primary)] tabular-nums">
+      <span
+        className="font-semibold leading-none tracking-tight text-[var(--fg-primary)] tabular-nums whitespace-nowrap"
+        // Inline, not a Tailwind arbitrary value: the JIT cannot see a value
+        // computed at runtime, so text-[${n}px] would emit no CSS at all.
+        style={{ fontSize: `${fontSize}px` }}
+      >
         {value}
       </span>
       {label && <span className="mt-1 text-[11px] font-medium text-[var(--fg-muted)]">{label}</span>}

@@ -179,10 +179,29 @@ export function StatusPill({ tone = "neutral", children, dot = true, className }
  * header styling, row hover and dividers come from .sf-table so no page has to
  * restate them.
  */
-export function DataTable({ children, className }) {
+/**
+ * DataTable — the console's one table shell.
+ *
+ * `maxHeight` turns on contained scrolling: the list scrolls inside its own box
+ * with the header pinned, instead of making the whole page long. Pass a number
+ * of px or any CSS length. It is a MAX height on purpose — a search that
+ * narrows thirty rows to three must shrink the box, not leave three rows
+ * stranded in an empty well.
+ *
+ * Setting overflow-y also makes this div the nearest scrollport, which is what
+ * the sticky header in `.sf-table--sticky` resolves against.
+ */
+export function DataTable({ children, className, maxHeight }) {
   return (
-    <div className={cn("overflow-x-auto", className)}>
-      <table className="sf-table">{children}</table>
+    <div
+      className={cn("overflow-x-auto", maxHeight && "overflow-y-auto", className)}
+      style={
+        maxHeight
+          ? { maxHeight: typeof maxHeight === "number" ? `${maxHeight}px` : maxHeight }
+          : undefined
+      }
+    >
+      <table className={cn("sf-table", maxHeight && "sf-table--sticky")}>{children}</table>
     </div>
   );
 }

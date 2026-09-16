@@ -22,7 +22,7 @@ import {
 import {
   Users, DollarSign, LifeBuoy, Activity, TrendingUp, Database, BarChart3,
   Clock, CheckCircle, Wifi, WifiOff, RefreshCw, Zap, HardDrive, ArrowUpRight,
-  Ticket, MapPin, ChevronUp, ChevronDown, PackageOpen, ChevronRight,
+  Ticket, MapPin, ChevronUp, ChevronDown, PackageOpen, ChevronRight, AlertTriangle,
 } from "lucide-react";
 
 import { useNavigate } from "react-router-dom";
@@ -446,29 +446,37 @@ export default function Dashboard() {
         actions={headerActions}
       />
 
-      {/* ----- Alerts. Rendered only when something needs a person; a row of
-              reassuring green strips would just be more to scroll past. ----- */}
+      {/* ----- Attention. One ~44px row of queue pills rather than a stack of
+              full-width banners. An operator's three questions are "is anything
+              wrong / how much / where do I go"; the pill answers all three and
+              IS the link, so every queue stays exactly one click away. Nothing
+              wrong renders nothing at all — a row of reassuring green strips
+              would just be more to scroll past. ----- */}
       {(manualAssist?.unresolvedCount > 0 || netHealth.down > 0) && (
-        <div className="flex flex-col gap-2.5">
+        <AttentionBar>
           {manualAssist?.unresolvedCount > 0 && (
-            <AlertStrip
+            <AttentionPill
               tone="warning"
-              icon={<LifeBuoy size={17} />}
-              title={`${manualAssist.unresolvedCount} manual assistance case${manualAssist.unresolvedCount === 1 ? " needs" : "s need"} attention`}
-              detail="Customers who paid but weren't auto-connected — assign their reserved voucher."
+              icon={<LifeBuoy size={14} />}
+              count={manualAssist.unresolvedCount}
+              label={`manual assistance case${manualAssist.unresolvedCount === 1 ? "" : "s"}`}
+              title="Customers who paid but weren't auto-connected — assign their reserved voucher."
               onClick={() => navigate("/manual-assistance")}
             />
           )}
           {netHealth.down > 0 && (
-            <AlertStrip
+            <AttentionPill
               tone="danger"
-              icon={<WifiOff size={17} />}
-              title={`${netHealth.down} village${netHealth.down === 1 ? " is" : "s are"} offline`}
-              detail="Last collector snapshot reported no internet at these sites."
+              icon={<WifiOff size={14} />}
+              count={netHealth.down}
+              label={`village${netHealth.down === 1 ? "" : "s"} offline`}
+              title="Last collector snapshot reported no internet at these sites."
+              // /network is admin-only, so a viewer gets the count without a
+              // click that would bounce them.
               onClick={isViewer ? null : () => navigate("/network")}
             />
           )}
-        </div>
+        </AttentionBar>
       )}
 
       {/* ----- Four headline KPIs: is the estate healthy, and is it earning?
@@ -555,7 +563,14 @@ export default function Dashboard() {
           tone="navy"
           padding={false}
         >
-          <DataTable>
+          {/* Scrolls in its own box rather than stretching the page: thirty-one
+              rows at 57px plus a 35px header is ~1800px of Dashboard, which is
+              the single biggest reason this page felt endless. 404px shows six
+              full rows and clips the seventh — the half-row is the affordance
+              that says "keep going", the same trick the tab strip uses. It is a
+              MAX height, so filtering down to three villages shrinks the box
+              instead of stranding them in an empty well. */}
+          <DataTable maxHeight={404}>
             <thead>
               <tr>
                 <SortTh label="Village" sortKey="name" sort={sort} onSort={toggleSort} />
@@ -1055,30 +1070,54 @@ export default function Dashboard() {
 /* ------------ Sub-components --------------------------------------------- */
 
 /**
- * A full-width call to action above the KPIs. Only ever rendered when there is
- * something to act on, so its presence alone means "read me".
+ * The attention row. Its surface stays neutral so that two different severities
+ * can sit side by side without the page turning into a wall of red — the tone
+ * lives on each pill, not on the bar.
+ *
+ * Only ever rendered when there is something to act on, so its presence alone
+ * means "read me". One row scales: a third queue is one more pill, not a third
+ * full-width banner.
  */
-function AlertStrip({ tone, icon, title, detail, onClick }) {
+function AttentionBar({ children }) {
+  return (
+    <div className="flex flex-wrap items-center gap-2 rounded-xl border border-[var(--border-default)] bg-[var(--bg-elevated)] px-4 py-2.5">
+      <span className="flex items-center gap-2 pr-1 text-[13px] font-semibold font-display text-[var(--fg-primary)]">
+        <AlertTriangle size={15} className="text-[var(--warning-fg)]" />
+        Needs attention
+      </span>
+      {children}
+    </div>
+  );
+}
+
+/**
+ * One queue. The count is the point, so it leads; the explanation that used to
+ * occupy a second line now lives in the tooltip, because an operator needs it
+ * once rather than on every page load.
+ *
+ * Renders as a plain span when there is nowhere to send this viewer, so the
+ * figure still informs without offering a click that would bounce.
+ */
+function AttentionPill({ tone, icon, count, label, title, onClick }) {
   const tones = {
     warning: "bg-[var(--warning-soft)] border-[var(--warning-border)] text-[var(--warning-fg)]",
     danger: "bg-[var(--danger-soft)] border-[var(--danger-border)] text-[var(--danger-fg)]",
   };
-  const Tag = onClick ? "button" : "div";
+  const Tag = onClick ? "button" : "span";
   return (
     <Tag
       onClick={onClick || undefined}
+      title={title}
       className={
-        "w-full flex items-center gap-3.5 px-4 py-3 rounded-xl border text-left transition-colors " +
+        "inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-[12.5px] transition-colors " +
         tones[tone] +
-        (onClick ? " hover:brightness-[0.98]" : "")
+        (onClick ? " hover:brightness-[0.97] cursor-pointer" : "")
       }
     >
       <span className="shrink-0">{icon}</span>
-      <span className="flex-1 min-w-0">
-        <span className="block text-[13px] font-semibold font-display">{title}</span>
-        <span className="block text-[12px] opacity-80">{detail}</span>
-      </span>
-      {onClick && <ArrowUpRight size={15} className="shrink-0" />}
+      <span className="font-semibold tabular-nums">{fmtNum(count)}</span>
+      <span className="opacity-90">{label}</span>
+      {onClick && <ArrowUpRight size={13} className="shrink-0 opacity-70" />}
     </Tag>
   );
 }
