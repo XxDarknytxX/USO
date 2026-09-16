@@ -14,9 +14,12 @@
 //     admin can tick a test village back on to look at it for an afternoon
 //     without putting it in front of anybody else.
 // Personal wins when it is set; otherwise the estate default applies; if
-// neither is set, every village shows. Neither layer grants ACCESS — that is
-// user_villages, enforced server-side. These only decide what is displayed of
-// what you are already allowed to see.
+// neither is set, every village shows.
+//
+// For a viewer or engineer the estate default is also what the SERVER answers
+// with, so their personal layer can only ever narrow what they already get —
+// ticking a village the default leaves out shows them an empty row, not
+// somebody else's data.
 //
 // activeSiteId and the personal filter are saved as PER-USER server
 // preferences (synced across the user's devices), with localStorage kept as an

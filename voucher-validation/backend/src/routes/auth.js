@@ -3,7 +3,7 @@ import { Router } from "express";
 import { body } from "express-validator";
 import { requireAuth, requireAdmin, requireAuthAllowing2FASetup } from "../middleware/auth.js";
 
-export function makeAuthRouter(controller) {
+export function makeAuthRouter(controller, attachScope) {
   const router = Router();
 
   // Admin-only. This was previously an UNAUTHENTICATED public endpoint that also
@@ -67,7 +67,11 @@ export function makeAuthRouter(controller) {
   // to change it before enrolling.
   router.post("/me/password", requireAuthAllowing2FASetup, controller.changeOwnPassword  );
 
-  router.get("/me", requireAuth, controller.me);
+  // attachScope on this one route: /me reports which villages the account may
+  // see, and that answer has to be the SAME one every other endpoint gives.
+  // Resolving it a second way here is how the sidebar ends up disagreeing
+  // with the dashboard.
+  router.get("/me", requireAuth, ...(attachScope ? [attachScope] : []), controller.me);
   // Per-user UI preferences — synced across the user's devices.
   router.get("/me/preferences", requireAuth, controller.getPreferences);
   router.put("/me/preferences", requireAuth, controller.savePreferences);

@@ -127,9 +127,11 @@ function PanelFooter({ note, children }) {
 /* ============================================================================
    Village display scope — the estate default and this account's own view.
 
-   NEITHER grants access. A viewer or engineer is limited to the villages
-   assigned to their account (user_villages, enforced server-side); these two
-   only decide which of the villages you may already see are DISPLAYED.
+   The estate default is the real boundary for a viewer or engineer: the server
+   answers their dashboard, overview and maintenance with exactly these
+   villages. "Your view" is a display filter on top and can only ever narrow
+   what you already get — for an admin, who is unrestricted, that is how a test
+   village gets looked at without being put in front of the team.
    ========================================================================= */
 function VillageScopePanels() {
   const {

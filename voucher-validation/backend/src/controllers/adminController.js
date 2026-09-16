@@ -42,12 +42,12 @@ export function safeRoleOf(role) {
   return ROLES.has(role) ? role : "viewer";
 }
 
-// Roles whose access is limited to the villages an admin assigned them.
-// Admins are unrestricted, so their user_villages rows are meaningless and are
-// cleared rather than kept — a stale set would come back to life the moment
-// someone was demoted. Must agree with SCOPED_ROLES in middleware/auth.js.
+// Roles limited to a subset of the estate. WHICH villages is not a per-account
+// question: it is the estate default under Settings, read by attachScope. Must
+// agree with SCOPED_ROLES in middleware/auth.js.
 const SCOPED_ROLES = new Set(["viewer", "engineer"]);
 const ROLE_LABELS = { admin: "administrator", viewer: "viewer", engineer: "field engineer" };
+
 
 async function insertUser(pool, { email, passwordHash, name, role }) {
   // Whitelist the role — never trust an arbitrary value into the privileged
@@ -58,23 +58,6 @@ async function insertUser(pool, { email, passwordHash, name, role }) {
     [email, passwordHash, name || null, safeRole]
   );
   return { id: res.insertId, email, name, role: safeRole };
-}
-
-// Replace a user's assigned villages. Bulk INSERT IGNORE downgrades a bad/duplicate
-// project_id (FK miss) to a skipped row instead of erroring. Runs on a transaction
-// connection. De-dupes + coerces to positive ints.
-async function insertUserVillages(conn, userId, projectIds) {
-  const ids = [
-    ...new Set((projectIds || []).map(Number).filter((n) => Number.isInteger(n) && n > 0)),
-  ];
-  if (!ids.length) return;
-  const placeholders = ids.map(() => "(?, ?)").join(", ");
-  const params = [];
-  for (const pid of ids) params.push(userId, pid);
-  await conn.query(
-    `INSERT IGNORE INTO user_villages (user_id, project_id) VALUES ${placeholders}`,
-    params
-  );
 }
 
 /** Factory */
@@ -515,22 +498,23 @@ export function makeAdminController(pool) {
         );
         const user = rows[0];
         if (!user) return send.unauthorized(res, "User not found");
+        // What a scoped account may see is the estate default — the same
+        // single setting attachScope reads — not a per-account list. Resolved
+        // through the same middleware so the two can never disagree.
         let villages = [];
-        // Every scoped role, not just "viewer" — an engineer is scoped too, and
-        // naming one role here while SCOPED_ROLES names two is how the two
-        // drift apart. This one failed safe (too few villages, never too many),
-        // but it was the same deny-list shape that hid the engineer bug.
-        if (SCOPED_ROLES.has(user.role)) {
-          const [vrows] = await pool.query(
-            `SELECT p.id, p.name, p.hostname, p.ruijie_group_id
-               FROM user_villages uv JOIN network_projects p ON p.id = uv.project_id
-              WHERE uv.user_id = ? AND p.is_active = 1
-              ORDER BY p.sort_order, p.name`,
-            [user.id]
-          );
-          villages = vrows.map((r) => ({
-            id: r.id, name: r.name, hostname: r.hostname, ruijieGroupId: r.ruijie_group_id,
-          }));
+        if (SCOPED_ROLES.has(user.role) && Array.isArray(req.scope?.projectIds)) {
+          const ids = req.scope.projectIds;
+          if (ids.length) {
+            const [vrows] = await pool.query(
+              `SELECT id, name, hostname, ruijie_group_id FROM network_projects
+                WHERE id IN (${ids.map(() => "?").join(",")})
+                ORDER BY sort_order, name`,
+              ids
+            );
+            villages = vrows.map((r) => ({
+              id: r.id, name: r.name, hostname: r.hostname, ruijieGroupId: r.ruijie_group_id,
+            }));
+          }
         }
         return send.ok(res, { user: { ...user, villages } });
       } catch (e) {
@@ -664,9 +648,6 @@ export function makeAdminController(pool) {
              FROM users
             ORDER BY created_at DESC`
         );
-        const [uv] = await pool.query("SELECT user_id, project_id FROM user_villages");
-        const byUser = {};
-        for (const r of uv) (byUser[r.user_id] ||= []).push(r.project_id);
         const users = rows.map((u) => ({
           id: u.id,
           email: u.email,
@@ -681,7 +662,6 @@ export function makeAdminController(pool) {
           // Three states an admin acts on differently: waiting on the person,
           // waiting on a resend, or done.
           status: u.has_invite ? (u.invite_live ? "invited" : "invite-expired") : "active",
-          villageIds: byUser[u.id] || [],
         }));
         return send.ok(res, { users });
       } catch (e) {
@@ -709,20 +689,13 @@ export function makeAdminController(pool) {
       const errors = validationResult(req);
       if (!errors.isEmpty()) return send.bad(res, errors.array()[0].msg);
 
-      const { email, name, role, villageIds } = req.body;
+      const { email, name, role } = req.body;
       const password = req.body.password || null;
       const effRole = safeRoleOf(role);
 
       if (password && String(password).length < 6) {
         return send.bad(res, "A password you set must be at least 6 characters");
       }
-      // A scoped role with no villages can sign in and see an empty console.
-      // Better to say so here than to have someone report the dashboard as
-      // broken a week later.
-      if (SCOPED_ROLES.has(effRole) && !(villageIds || []).length) {
-        return send.bad(res, "Choose at least one village for this account to see");
-      }
-
       const conn = await pool.getConnection();
       let userId = null;
       try {
@@ -740,9 +713,6 @@ export function makeAdminController(pool) {
           [email, passwordHash, name || null, effRole, password ? 1 : 0]
         );
         userId = ins.insertId;
-        // Admins are unrestricted, so a scope row for one is noise that would
-        // become policy if they were ever demoted.
-        if (SCOPED_ROLES.has(effRole)) await insertUserVillages(conn, userId, villageIds);
         await conn.commit();
         conn.release();
       } catch (e) {
@@ -775,7 +745,7 @@ export function makeAdminController(pool) {
       if (!errors.isEmpty()) return send.bad(res, errors.array()[0].msg);
 
       const targetId = Number(req.params.id);
-      const { email, password, name, role, villageIds } = req.body;
+      const { email, password, name, role } = req.body;
       const conn = await pool.getConnection();
       try {
         const [existing] = await conn.query("SELECT id, email, role FROM users WHERE id = ?", [targetId]);
@@ -816,10 +786,7 @@ export function makeAdminController(pool) {
             return send.bad(res, "This is the only administrator — promote someone else first");
           }
         }
-        // Admins are unrestricted -> always clear stale rows. Viewers -> replace the
-        // set only when villageIds was actually sent.
-        const touchesVillages = effRole === "admin" || villageIds !== undefined;
-        if (sets.length === 0 && !touchesVillages) {
+        if (sets.length === 0) {
           conn.release();
           return send.bad(res, "Nothing to update");
         }
@@ -829,18 +796,14 @@ export function makeAdminController(pool) {
           params.push(targetId);
           await conn.query(`UPDATE users SET ${sets.join(", ")} WHERE id = ?`, params);
         }
-        if (effRole === "admin") {
-          await conn.query("DELETE FROM user_villages WHERE user_id = ?", [targetId]);
-        } else if (villageIds !== undefined) {
-          await conn.query("DELETE FROM user_villages WHERE user_id = ?", [targetId]);
-          await insertUserVillages(conn, targetId, villageIds);
-        }
         await conn.commit();
 
-        const [rows] = await conn.query("SELECT id, email, name, role, created_at FROM users WHERE id = ?", [targetId]);
-        const [uv] = await conn.query("SELECT project_id FROM user_villages WHERE user_id = ?", [targetId]);
+        const [rows] = await conn.query(
+          "SELECT id, email, name, role, created_at FROM users WHERE id = ?",
+          [targetId]
+        );
         conn.release();
-        return send.ok(res, { user: { ...rows[0], villageIds: uv.map((r) => r.project_id) } });
+        return send.ok(res, { user: rows[0] });
       } catch (e) {
         try { await conn.rollback(); } catch { /* ignore */ }
         conn.release();

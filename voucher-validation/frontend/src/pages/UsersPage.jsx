@@ -16,13 +16,15 @@ import { useState, useEffect, useMemo } from "react";
 import toast from "react-hot-toast";
 import {
   Users, UserPlus, Trash2, Shield, Eye, EyeOff, Edit3, RefreshCw, KeyRound,
-  ShieldOff, Send, Check, MapPin, Wrench, Globe2, Mail, User as UserIcon,
-  ArrowRight, ArrowLeft, MailCheck, AlertTriangle, Copy, Clock, Search,
+  ShieldOff, Send, Check, Wrench, Globe2, Mail, User as UserIcon,
+  MailCheck, AlertTriangle, Copy, Clock,
   LayoutDashboard, Gauge, Dices,
 } from "lucide-react";
 
-import { userApi, networkApi } from "../services/api";
+import { userApi } from "../services/api";
+import { useNavigate } from "react-router-dom";
 import { useAuth } from "../hooks/useAuth";
+import { useSite } from "../hooks/useSite";
 import ConfirmDialog from "../components/shared/ConfirmDialog";
 import {
   Modal, Field, Input, Button, IconButton, EmptyState, PageShell, PageHeader,
@@ -54,7 +56,7 @@ const ROLES = {
     icon: Eye,
     tone: "info",
     tile: "blue",
-    blurb: "Reads the numbers for the villages you choose. Changes nothing, anywhere.",
+    blurb: "Reads the numbers. Changes nothing, anywhere.",
     opens: [
       { label: "Dashboard", Icon: LayoutDashboard },
       { label: "Overview", Icon: Gauge },
@@ -351,7 +353,7 @@ export default function UsersPage() {
         <Panel
           padding={false}
           title="Accounts"
-          subtitle="Role decides which tabs a person finds; viewers and engineers are additionally limited to named villages."
+          subtitle="Role decides which tabs a person finds. Which villages they see is the estate default, set once under Settings."
           icon={<Users size={15} />}
           tone="pink"
         >
@@ -371,7 +373,6 @@ export default function UsersPage() {
               ) : (
                 shown.map((u) => {
                   const r = roleOf(u.role);
-                  const villages = Array.isArray(u.villageIds) ? u.villageIds.length : 0;
                   const isSelf = u.email === currentEmail;
                   const awaiting = u.status === "invited" || u.status === "invite-expired";
                   return (
@@ -387,19 +388,18 @@ export default function UsersPage() {
                       <Td><RolePill role={u.role} /></Td>
                       <Td muted nowrap>
                         <span className="inline-flex items-center gap-1.5">
-                          {r.scoped ? (
-                            <>
-                              <MapPin size={12} className="shrink-0" />
-                              {villages === 0 ? (
-                                <span className="text-[var(--warning-fg)] font-medium">No villages</span>
-                              ) : (
-                                `${villages} village${villages === 1 ? "" : "s"}`
-                              )}
-                            </>
-                          ) : (
+                          {!r.scoped ? (
                             <>
                               <Globe2 size={12} className="shrink-0" />
                               Every village
+                            </>
+                          ) : (
+                            // Every scoped account sees the same thing: the
+                            // estate default. There is nothing per-account to
+                            // report here, and a number would imply otherwise.
+                            <>
+                              <Globe2 size={12} className="shrink-0" />
+                              Estate default
                             </>
                           )}
                         </span>
@@ -631,27 +631,24 @@ const rowInput =
    ========================================================================= */
 function UserFormModal({ mode, user, onClose, onSaved }) {
   const isEdit = mode === "edit";
-  const [step, setStep] = useState(1);
   const [form, setForm] = useState({
     email: user?.email || "",
     name: user?.name || "",
     role: user?.role || "viewer",
-    villageIds: Array.isArray(user?.villageIds) ? user.villageIds : [],
     // The default is the one where nobody but the account holder ever knows
     // the password. Ticking the box is the deliberate exception.
     setPasswordDirectly: false,
     password: "",
   });
-  const [villages, setVillages] = useState([]);
-  const [villageQuery, setVillageQuery] = useState("");
+  // How many villages the estate default currently covers, so the choice can
+  // say what "follow the default" actually means rather than making the admin
+  // go and look. null there means no restriction — i.e. all of them.
+  const { globalVisibleSiteIds } = useSite();
+  const navigate = useNavigate();
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [focusField, setFocusField] = useState(null);
-
-  useEffect(() => {
-    networkApi.projects().then((d) => setVillages(d.projects || [])).catch(() => {});
-  }, []);
 
   function setField(key, value) {
     setForm((prev) => ({ ...prev, [key]: value }));
@@ -659,52 +656,14 @@ function UserFormModal({ mode, user, onClose, onSaved }) {
 
   const role = roleOf(form.role);
   const scoped = role.scoped;
-
-  const shownVillages = useMemo(() => {
-    const needle = villageQuery.trim().toLowerCase();
-    if (!needle) return villages;
-    return villages.filter(
-      (v) =>
-        String(v.name || "").toLowerCase().includes(needle) ||
-        String(v.hostname || "").toLowerCase().includes(needle)
-    );
-  }, [villages, villageQuery]);
-
-  function toggleVillage(id) {
-    setForm((prev) => ({
-      ...prev,
-      villageIds: prev.villageIds.includes(id)
-        ? prev.villageIds.filter((x) => x !== id)
-        : [...prev.villageIds, id],
-    }));
-  }
-
-  // Select-all acts on what is VISIBLE, which is the only reading that makes
-  // sense next to a search box — "all" while filtered to three villages
-  // meaning all twenty-nine would be a trap.
-  function selectAllShown() {
-    setForm((prev) => ({
-      ...prev,
-      villageIds: [...new Set([...prev.villageIds, ...shownVillages.map((v) => v.id)])],
-    }));
-  }
-  function clearShown() {
-    const ids = new Set(shownVillages.map((v) => v.id));
-    setForm((prev) => ({ ...prev, villageIds: prev.villageIds.filter((x) => !ids.has(x)) }));
-  }
+  const estateCount = globalVisibleSiteIds == null ? null : globalVisibleSiteIds.length;
 
   const emailOk = /\S+@\S+\.\S+/.test(form.email);
-  const step1Ok = emailOk;
-  const scopeOk = !scoped || form.villageIds.length > 0;
   const passwordOk = !form.setPasswordDirectly || form.password.length >= 6;
 
   async function handleSubmit(e) {
     e?.preventDefault();
     setErr("");
-    if (!scopeOk) {
-      setErr(`Choose at least one village — a ${role.label.toLowerCase()} with none signs in to an empty console.`);
-      return;
-    }
     if (!passwordOk) {
       setErr("A password you set must be at least 6 characters.");
       return;
@@ -717,9 +676,6 @@ function UserFormModal({ mode, user, onClose, onSaved }) {
         if (form.email !== user.email) body.email = form.email;
         if (form.role !== user.role) body.role = form.role;
         if (form.setPasswordDirectly && form.password) body.password = form.password;
-        // Send the village set whenever this is (or becomes) a scoped role so
-        // the backend replaces it; for admins the backend clears it itself.
-        if (scoped) body.villageIds = form.villageIds;
         if (Object.keys(body).length === 0) {
           setErr("Nothing has changed.");
           setLoading(false);
@@ -735,7 +691,6 @@ function UserFormModal({ mode, user, onClose, onSaved }) {
         email: form.email,
         name: form.name,
         role: form.role,
-        villageIds: scoped ? form.villageIds : [],
         // Omitted entirely on the invite path — the server reads its absence
         // as "mint an invite", not as an empty password.
         ...(form.setPasswordDirectly ? { password: form.password } : {}),
@@ -868,7 +823,7 @@ function UserFormModal({ mode, user, onClose, onSaved }) {
                   </span>
                 ))}
                 {opt.scoped && (
-                  <span className="text-[10.5px] text-[var(--fg-subtle)]">· for chosen villages only</span>
+                  <span className="text-[10.5px] text-[var(--fg-subtle)]">· villages in the estate default</span>
                 )}
               </span>
             </span>
@@ -878,89 +833,34 @@ function UserFormModal({ mode, user, onClose, onSaved }) {
     </div>
   );
 
-  const villagePicker = scoped && (
-    <Field
-      label="Villages this account may see"
-      required
-      hint="Enforced on the server — the dashboard and overview answer with these villages and no others."
-    >
-      {villages.length === 0 ? (
-        <p className="text-[12.5px] text-[var(--fg-muted)]">No villages yet — add them under Network first.</p>
-      ) : (
-        <div className="overflow-hidden rounded-xl border border-[var(--border-default)]">
-          <div className="flex items-center gap-2 border-b border-[var(--border-subtle)] bg-[var(--bg-surface)] px-2.5 py-2">
-            <Search size={13} className="shrink-0 text-[var(--fg-subtle)]" />
-            <input
-              value={villageQuery}
-              onChange={(e) => setVillageQuery(e.target.value)}
-              placeholder="Filter villages…"
-              className="min-w-0 flex-1 border-0 bg-transparent p-0 text-[12.5px] text-[var(--fg-primary)] outline-none placeholder:text-[var(--fg-subtle)]"
-            />
-            <button
-              type="button"
-              onClick={selectAllShown}
-              className="rounded px-1.5 py-0.5 text-[11.5px] font-medium text-[var(--brand-fg-on-soft)] hover:bg-[var(--brand-soft)]"
-            >
-              Select all
-            </button>
-            <button
-              type="button"
-              onClick={clearShown}
-              className="rounded px-1.5 py-0.5 text-[11.5px] font-medium text-[var(--fg-muted)] hover:bg-[var(--surface-hover)]"
-            >
-              Clear
-            </button>
-          </div>
-
-          <div className="max-h-56 divide-y divide-[var(--border-subtle)] overflow-y-auto">
-            {shownVillages.length === 0 ? (
-              <p className="px-3.5 py-4 text-[12.5px] text-[var(--fg-muted)]">Nothing matches “{villageQuery}”.</p>
-            ) : (
-              shownVillages.map((v) => {
-                const checked = form.villageIds.includes(v.id);
-                return (
-                  <button
-                    key={v.id}
-                    type="button"
-                    onClick={() => toggleVillage(v.id)}
-                    className="flex w-full items-center gap-3 px-3.5 py-2.5 text-left transition-colors hover:bg-[var(--surface-hover)]"
-                  >
-                    <span
-                      className={
-                        "grid h-[18px] w-[18px] shrink-0 place-items-center rounded-[5px] border transition-colors " +
-                        (checked
-                          ? "border-[var(--brand)] bg-[var(--brand)] text-[var(--text-on-brand)]"
-                          : "border-[var(--border-strong)] text-transparent")
-                      }
-                    >
-                      <Check size={12} strokeWidth={3} />
-                    </span>
-                    <MapPin size={14} className="shrink-0 text-[var(--fg-subtle)]" />
-                    <span className="min-w-0 flex-1">
-                      <span className="block truncate text-[12.5px] font-medium text-[var(--fg-primary)]">{v.name}</span>
-                      {v.hostname && (
-                        <span className="block truncate font-mono text-[11px] text-[var(--fg-muted)]">{v.hostname}</span>
-                      )}
-                    </span>
-                  </button>
-                );
-              })
-            )}
-          </div>
-
-          <div className="flex items-center justify-between border-t border-[var(--border-subtle)] bg-[var(--bg-surface)] px-3.5 py-2">
-            <span className="text-[11.5px] tabular-nums text-[var(--fg-muted)]">
-              {form.villageIds.length} of {villages.length} selected
-            </span>
-            {form.villageIds.length === 0 && (
-              <span className="inline-flex items-center gap-1.5 text-[11.5px] font-medium text-[var(--warning-fg)]">
-                <AlertTriangle size={12} />
-                Pick at least one
-              </span>
-            )}
-          </div>
-        </div>
-      )}
+  // What a scoped account sees is decided in ONE place: the estate default
+  // under Settings. Not here, per account.
+  //
+  // There was a per-account picker. It was thirty-one checkboxes answering a
+  // question the estate default had already answered, and the two copies would
+  // have diverged the day a village was added — with nobody remembering which
+  // accounts needed updating. Excluding a test village should be one decision
+  // that takes effect everywhere, and now it is.
+  const scopeNote = scoped && (
+    <Field label="Villages this account may see">
+      <div className="flex items-start gap-3 rounded-xl border border-[var(--border-default)] bg-[var(--bg-surface)] px-4 py-3">
+        <Globe2 size={16} className="mt-0.5 shrink-0 text-[var(--fg-muted)]" />
+        <p className="text-[12.5px] leading-relaxed text-[var(--fg-secondary)]">
+          {estateCount == null
+            ? "Every village in the estate."
+            : `The ${estateCount} village${estateCount === 1 ? "" : "s"} in the estate default.`}{" "}
+          Set once under{" "}
+          <button
+            type="button"
+            onClick={() => navigate("/settings")}
+            className="font-medium text-[var(--brand-fg-on-soft)] underline underline-offset-2 hover:no-underline"
+          >
+            Settings → Estate default
+          </button>
+          , and every viewer and engineer follows it — so taking a test village out is one change, not
+          one per account. Enforced on the server.
+        </p>
+      </div>
     </Field>
   );
 
@@ -1090,7 +990,7 @@ function UserFormModal({ mode, user, onClose, onSaved }) {
         <Modal.Header
           eyebrow={user?.email}
           title="Edit account"
-          subtitle="Role decides which tabs they find; villages decide what the numbers on them add up to."
+          subtitle="Role decides which tabs they find. Which villages they see is the estate default."
           icon={Edit3}
           onClose={onClose}
         />
@@ -1099,7 +999,7 @@ function UserFormModal({ mode, user, onClose, onSaved }) {
             <div className="flex flex-col gap-6">
               {identityBlock}
               <Field label="Role" required>{rolePicker}</Field>
-              {villagePicker}
+              {scopeNote}
               {signInSection}
               {errorBox}
             </div>
@@ -1114,81 +1014,48 @@ function UserFormModal({ mode, user, onClose, onSaved }) {
   }
 
   /* ---------------------------------------------------------------- create */
+  //
+  // One screen. It was two while there was a village picker whose contents
+  // depended on the role chosen above it — nothing is conditional on anything
+  // now, and a wizard for four fields is ceremony.
 
   return (
     <Modal open onClose={onClose} width="lg">
       <Modal.Header
-        eyebrow={`Step ${step} of 2`}
-        title={step === 1 ? "Who is this for?" : "What they can see, and how they get in"}
-        subtitle={
-          step === 1
-            ? "The role decides which tabs they find when they sign in."
-            : `Setting up ${form.name || form.email}.`
-        }
-        icon={step === 1 ? UserPlus : Check}
+        eyebrow="New account"
+        title="Add a teammate"
+        subtitle="The role decides which tabs they find when they sign in."
+        icon={UserPlus}
         onClose={onClose}
       />
 
-      {/* Two segments rather than numbered circles: the point is how much is
-          left, and a bar answers that without being read. */}
-      <div className="flex gap-1.5 px-7 pt-5">
-        {[1, 2].map((n) => (
-          <span
-            key={n}
-            className={
-              "h-[3px] flex-1 rounded-full transition-colors duration-200 " +
-              (n <= step ? "bg-[var(--brand)]" : "bg-[var(--surface-pressed)]")
-            }
-          />
-        ))}
-      </div>
-
-      <form
-        onSubmit={(e) => { e.preventDefault(); if (step === 1) setStep(2); else handleSubmit(e); }}
-        className="flex min-h-0 flex-1 flex-col"
-      >
-        <Modal.Body className="!pt-5">
-          {step === 1 ? (
-            <div className="flex flex-col gap-6">
-              {identityBlock}
-              <Field label="Role" required>{rolePicker}</Field>
-            </div>
-          ) : (
-            <div className="flex flex-col gap-6">
-              {villagePicker}
-              {!scoped && (
-                <div className="flex items-start gap-3 rounded-xl border border-[var(--border-default)] bg-[var(--bg-surface)] px-4 py-3">
-                  <Globe2 size={16} className="mt-0.5 shrink-0 text-[var(--fg-muted)]" />
-                  <p className="text-[12.5px] leading-relaxed text-[var(--fg-secondary)]">
-                    Administrators are not limited to villages — this account will see the whole
-                    estate, and will be able to change these accounts too.
-                  </p>
-                </div>
-              )}
-              {signInSection}
-              {errorBox}
-            </div>
-          )}
+      <form onSubmit={handleSubmit} className="flex min-h-0 flex-1 flex-col">
+        <Modal.Body>
+          <div className="flex flex-col gap-6">
+            {identityBlock}
+            <Field label="Role" required>{rolePicker}</Field>
+            {scopeNote}
+            {!scoped && (
+              <div className="flex items-start gap-3 rounded-xl border border-[var(--border-default)] bg-[var(--bg-surface)] px-4 py-3">
+                <Globe2 size={16} className="mt-0.5 shrink-0 text-[var(--fg-muted)]" />
+                <p className="text-[12.5px] leading-relaxed text-[var(--fg-secondary)]">
+                  Administrators are not limited to villages — this account will see the whole estate,
+                  and will be able to change these accounts too.
+                </p>
+              </div>
+            )}
+            {signInSection}
+            {errorBox}
+          </div>
         </Modal.Body>
 
         <Modal.Footer>
-          {step === 1 ? (
-            <>
-              <Button type="button" variant="ghost" onClick={onClose}>Cancel</Button>
-              <Button type="submit" variant="primary" disabled={!step1Ok} iconRight={<ArrowRight size={15} />}>
-                Continue
-              </Button>
-            </>
-          ) : (
-            <>
-              <Button type="button" variant="ghost" onClick={() => { setStep(1); setErr(""); }} iconLeft={<ArrowLeft size={15} />}>
-                Back
-              </Button>
-              <Button type="submit" variant="primary" loading={loading}>
-                {form.setPasswordDirectly ? "Create account" : "Create and send invite"}
-              </Button>
-            </>
-          )}
+          <Button type="button" variant="ghost" onClick={onClose} disabled={loading}>
+            Cancel
+          </Button>
+          <Button type="submit" variant="primary" loading={loading} disabled={!emailOk}>
+            {form.setPasswordDirectly ? "Create account" : "Create and send invite"}
+          </Button>
         </Modal.Footer>
       </form>
     </Modal>

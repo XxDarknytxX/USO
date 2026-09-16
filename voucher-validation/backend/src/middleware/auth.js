@@ -79,24 +79,37 @@ export function requireMaintainer(req, res, next) {
   next();
 }
 
-// Which roles read their villages from user_villages. Admins are unrestricted
+// Which roles are LIMITED to a subset of the estate. Admins are unrestricted
 // and are handled before this is consulted; anything NOT listed here is
 // restricted to nothing, so a role added later cannot default to seeing
 // everything by omission.
 const SCOPED_ROLES = new Set(["viewer", "engineer"]);
 
-// Attaches req.scope describing which villages the caller may see:
-//   admin             -> { isViewer:false, projectIds:null, groupIds:null }  (null = unrestricted)
-//   viewer | engineer -> { isViewer:true, projectIds:[int], groupIds:[str] }  (their assigned
-//                        ACTIVE villages, resolved to network_projects.id + ruijie_group_id)
-// Fails CLOSED: any DB error, or an unrecognised role, yields an EMPTY set,
-// never unrestricted.
-//
-// `isViewer` is a misnomer kept deliberately — it is read at dozens of call
-// sites and means "restricted", not "has the viewer role". Renaming it is a
-// separate change; quietly giving it a second meaning here would be worse.
-//
-// A factory because it needs the pool. Mount AFTER requireAuth on scoped routers.
+/**
+ * Attaches req.scope describing which villages the caller may see:
+ *   admin             -> { isViewer:false, projectIds:null, groupIds:null }  (null = unrestricted)
+ *   viewer | engineer -> the ESTATE DEFAULT, resolved to network_projects.id
+ *                        + ruijie_group_id
+ *   anything else     -> nothing
+ *
+ * ONE setting decides this for the whole console: app_settings
+ * global_visible_villages, edited by an admin under Settings. There is no
+ * per-account village list. The estate carries test villages that get added
+ * and removed, and excluding one should be a single decision that takes effect
+ * everywhere — not the same list maintained once per account, which goes stale
+ * the day a village is added and nobody remembers who to update.
+ *
+ * An unset or unreadable default means "no restriction", which is what an
+ * administrator who has never set one has asked for. A default that has been
+ * explicitly CLEARED means nothing, and is honoured as such.
+ *
+ * `isViewer` is a misnomer kept deliberately — it is read at dozens of call
+ * sites and means "restricted", not "has the viewer role".
+ *
+ * Fails CLOSED: any DB error yields an EMPTY set, never unrestricted.
+ *
+ * A factory because it needs the pool. Mount AFTER requireAuth on scoped routers.
+ */
 export function makeAttachScope(pool) {
   return async function attachScope(req, res, next) {
     if (req.user?.role === "admin") {
@@ -108,13 +121,37 @@ export function makeAttachScope(pool) {
       return next();
     }
     try {
-      const [rows] = await pool.query(
-        `SELECT p.id, p.ruijie_group_id
-           FROM user_villages uv
-           JOIN network_projects p ON p.id = uv.project_id
-          WHERE uv.user_id = ? AND p.is_active = 1`,
-        [req.user.id]
+      const [[setting]] = await pool.query(
+        "SELECT setting_value FROM app_settings WHERE setting_key = 'global_visible_villages'"
       );
+      let ids = null; // null = no restriction
+      if (setting?.setting_value) {
+        try {
+          const parsed = JSON.parse(setting.setting_value);
+          if (Array.isArray(parsed)) ids = parsed.map(Number).filter(Number.isFinite);
+        } catch {
+          /* unreadable default = no restriction; a corrupt setting should widen
+             the view, not take the console away from everyone at once */
+        }
+      }
+
+      let rows;
+      if (ids && ids.length === 0) {
+        // Cleared on purpose means nothing — and `IN ()` is a syntax error, so
+        // this cannot be left to the query to express.
+        rows = [];
+      } else if (ids) {
+        [rows] = await pool.query(
+          `SELECT id, ruijie_group_id FROM network_projects
+            WHERE is_active = 1 AND id IN (${ids.map(() => "?").join(",")})`,
+          ids
+        );
+      } else {
+        [rows] = await pool.query(
+          "SELECT id, ruijie_group_id FROM network_projects WHERE is_active = 1"
+        );
+      }
+
       req.scope = {
         isViewer: true,
         projectIds: rows.map((r) => Number(r.id)),

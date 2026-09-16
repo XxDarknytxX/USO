@@ -113,7 +113,7 @@ voucher.setSyncScheduler(syncScheduler);
 const attachScope = makeAttachScope(pool);
 
 // Routes
-app.use("/api", makeAuthRouter(admin));
+app.use("/api", makeAuthRouter(admin, attachScope));
 app.use("/api/vouchers", makeVoucherRouter(voucher, attachScope));
 app.use("/api/settings", makeSettingsRouter(voucher));
 app.use("/api/users", makeUserRouter(admin));
