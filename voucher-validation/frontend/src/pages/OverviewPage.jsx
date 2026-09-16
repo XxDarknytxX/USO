@@ -50,7 +50,18 @@ export default function OverviewPage() {
   const [q, setQ] = useState("");
   const [status, setStatus] = useState("all");
   const navigate = useNavigate();
-  const { isInScope } = useSite();
+  const { isInScope, setActiveSiteId } = useSite();
+
+  // Selecting the scope and routing to /dashboard are one action from the
+  // user's point of view, so they are one function here. The scope has to be
+  // set first: DashboardRouter reads it to decide which dashboard to render.
+  const openVillage = useCallback(
+    (v) => {
+      setActiveSiteId(v.id);
+      navigate("/dashboard");
+    },
+    [setActiveSiteId, navigate]
+  );
   const timer = useRef(null);
 
   const load = useCallback(async (isRefresh = false) => {
@@ -289,9 +300,9 @@ export default function OverviewPage() {
           </thead>
           <tbody>
             {loading ? (
-              <TableMessage colSpan={8}>Loading…</TableMessage>
+              <TableMessage colSpan={9}>Loading…</TableMessage>
             ) : rows.length === 0 ? (
-              <TableMessage colSpan={8}>
+              <TableMessage colSpan={9}>
                 <span className="block font-semibold text-[var(--fg-primary)] text-[13.5px]">
                   {filtered
                     ? "No village matches these filters"
@@ -311,7 +322,14 @@ export default function OverviewPage() {
               rows.map((v) => (
                 <tr
                   key={v.id}
-                  onClick={() => navigate("/network")}
+                  // Opens THIS village's dashboard. /dashboard is one route in
+                  // two modes (DashboardRouter): with a village in scope it
+                  // renders that village's SiteDashboard, so selecting the
+                  // scope IS the navigation. It used to drop you on /network,
+                  // which answered a different question from the one a row
+                  // click asks.
+                  onClick={() => openVillage(v)}
+                  title={`Open ${v.name}`}
                   className="cursor-pointer"
                 >
                   <Td>

@@ -40,7 +40,7 @@ import {
   VillageRevenuePanel,
 } from "../components/MonthlyBreakdown";
 import {
-  PageShell, PageHeader, KpiGrid, StatCard, Panel, Toolbar, SearchInput, Tabs,
+  PageShell, PageHeader, KpiGrid, StatCard, MeterCard, Panel, Toolbar, SearchInput, Tabs,
   DataTable, Th, Td, TableMessage, RecordCell, StatusPill, EmptyState,
   Button, Modal,
   SkeletonKpis, SkeletonCard, SkeletonTable,
@@ -274,6 +274,21 @@ export default function Dashboard() {
       up: scoped.filter((v) => v.online === true).length,
       down: scoped.filter((v) => v.online === false).length,
       avgUptime: uptimes.length ? Math.round((uptimes.reduce((a, u) => a + u, 0) / uptimes.length) * 10) / 10 : null,
+      // Starlink consumption for the estate, from the SCOPED villages so it
+      // moves with the scope switcher like every other figure on this page.
+      starlinkUsedGb: scoped.reduce((a, v) => a + (v.starlink?.usedGb || 0), 0),
+      // Villages Starlink publishes no cap for are SKIPPED, not counted as
+      // zero — a zero in the denominator makes the estate look further from its
+      // limit than it is. Null when nothing in scope has a cap at all, so the
+      // card can say so rather than meter against nothing.
+      starlinkAllowanceGb: scoped.some((v) => v.starlink?.allowanceGb != null)
+        ? scoped.reduce((a, v) => a + (v.starlink?.allowanceGb || 0), 0)
+        : null,
+      withTelemetry: scoped.filter((v) => v.starlink?.configured).length,
+      // Distinguishes "no data used" from "the collector has never run".
+      usageCollected:
+        netOverview?.summary?.usageCollected ??
+        scoped.some((v) => v.starlink?.usedGb != null),
     };
   }, [netOverview, allVisible, isSiteVisible]);
 
@@ -507,13 +522,19 @@ export default function Dashboard() {
       {/* ----- Four headline KPIs: is the estate healthy, and is it earning?
               Everything demoted from the old eight-tile rail now lives in the
               tab it belongs to (inventory → Capacity, avg sale → Sales). ----- */}
-      <KpiGrid cols={4}>
+      <KpiGrid cols={5}>
+        {/* Just "Revenue": at five across, "Revenue · September 2026" truncates
+            to "REVENUE · SEPTEM…", and the window is already stated twice
+            within a few hundred pixels — in the period picker directly above
+            and on the revenue chart below. The sub carries it for the moving
+            ranges ("all time", "this week"), where the label alone would be
+            genuinely ambiguous. */}
         <StatCard
-          label={`Revenue · ${mb.label || "month"}`}
+          label="Revenue"
           value={fmtMoney(mb.totals.revenue)}
           icon={<DollarSign size={18} />}
           color="accent"
-          sub={`${fmtNum(mb.totals.transactions)} sale${mb.totals.transactions === 1 ? "" : "s"} · ${fmtMoney(mb.totals.avgSale)} avg`}
+          sub={`${fmtNum(mb.totals.transactions)} sale${mb.totals.transactions === 1 ? "" : "s"} · ${mb.label || "this month"}`}
           onClick={() => navigate("/portal-flows")}
         />
         <StatCard
@@ -553,6 +574,32 @@ export default function Dashboard() {
           }
           onClick={isViewer ? undefined : () => navigate("/network")}
         />
+        {/* Starlink consumption against the plan. Never renders a zero before
+            the usage collector has run — that is the absence of a measurement,
+            not a measurement, and showing it as a figure sends someone looking
+            for traffic that was never missing. */}
+        {netHealth.total && !netHealth.usageCollected ? (
+          <StatCard
+            label="Starlink data"
+            value="—"
+            icon={<HardDrive size={18} />}
+            color="slate"
+            sub="usage collection is off"
+          />
+        ) : (
+          <MeterCard
+            label="Starlink data"
+            used={netHealth.starlinkUsedGb ?? 0}
+            total={netHealth.starlinkAllowanceGb ?? null}
+            unit="GB"
+            format={(n) => Math.round(Number(n || 0)).toLocaleString()}
+            icon={<HardDrive size={18} />}
+            color="violet"
+            sub={`${fmtNum(netHealth.withTelemetry || 0)} linked ${netHealth.withTelemetry === 1 ? "kit" : "kits"}`}
+            noTotalNote="no plan cap published"
+            onClick={isViewer ? undefined : () => navigate("/overview")}
+          />
+        )}
       </KpiGrid>
 
       {/* ----- The one chart pair worth the space above the fold: what we earned

@@ -277,7 +277,13 @@ export default function SiteDashboard({ groupId, site }) {
           value={internetUp == null ? "Unknown" : internetUp ? "Online" : "Offline"}
           icon={internetUp ? <Wifi size={18} /> : <WifiOff size={18} />}
           color={internetUp == null ? "slate" : internetUp ? "emerald" : "rose"}
-          sub={uptimePct == null ? publicIp || "no uptime data" : `${uptimePct}% uptime · 24h`}
+          // "gateway uptime", not "uptime": this tile's VALUE is the Starlink
+          // verdict and this figure is the Ruijie gateway's WAN history. Two
+          // layers, two questions, and running them together unlabelled is how
+          // "Unknown · 99.3% uptime" reads as a contradiction rather than as
+          // the genuinely useful fact that the dish is quiet while the local
+          // link has been solid.
+          sub={uptimePct == null ? publicIp || "no uptime data" : `gateway uptime ${uptimePct}% · 24h`}
         />
       </KpiGrid>
 
