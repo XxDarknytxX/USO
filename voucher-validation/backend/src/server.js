@@ -22,6 +22,7 @@ import { makeMaintenanceRouter } from "./routes/maintenance.js";
 import { collectOnceGuarded } from "./services/networkCollector.js";
 import { makeNetworkCollectScheduler } from "./services/networkCollectScheduler.js";
 import { makeTelemetryPoller } from "./services/starlinkTelemetry.js";
+import { makeStarlinkUsageScheduler } from "./services/starlinkUsageCollector.js";
 import RuijieService from "./services/ruijieService.js";
 import { makeSyncScheduler } from "./services/syncScheduler.js";
 import { makeAttachScope } from "./middleware/auth.js";
@@ -189,4 +190,18 @@ if (_isSchedulerPrimary) {
     .catch((e) => console.error("Starlink telemetry poller failed to start:", e.message));
 } else {
   console.log(`[Telemetry] instance ${_instanceId} is not primary — poller not started`);
+}
+
+// Per-village Starlink data usage. Separate from telemetry above because the
+// cost shape is different: telemetry is ONE account-wide stream, usage is one
+// live request PER SERVICE LINE with no cache. Hence its own cadence (twice a
+// day by default — a billing total moves slowly) and its own on/off.
+const starlinkUsageScheduler = makeStarlinkUsageScheduler({ pool });
+network.setUsageScheduler(starlinkUsageScheduler);
+if (_isSchedulerPrimary) {
+  starlinkUsageScheduler
+    .start()
+    .catch((e) => console.error("Starlink usage scheduler failed to start:", e.message));
+} else {
+  console.log(`[StarlinkUsage] instance ${_instanceId} is not primary — scheduler not started`);
 }

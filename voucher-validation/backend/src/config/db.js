@@ -316,6 +316,31 @@ export async function getPool() {
     // single row like smtp_settings. Deliberately NOT in app_settings: that
     // table is returned wholesale by GET /api/settings, which would ship the
     // client secret to the browser.
+    // Current-cycle Starlink data usage, one row per village, refreshed by the
+    // usage collector. Kept apart from the telemetry tables because it answers
+    // a different question on a different cadence: telemetry is a continuous
+    // account-wide stream, this is one request per service line.
+    //
+    // fetch_ok is load-bearing. Without it "the dish carried no data" and "we
+    // could not reach Starlink" collapse into one state, and an API outage
+    // would read as thirty villages using nothing.
+    `CREATE TABLE IF NOT EXISTS starlink_status (
+      project_id INT NOT NULL PRIMARY KEY,
+      service_line_number VARCHAR(64) NULL,
+      total_used_gb DECIMAL(12,3) NULL,
+      metered_gb DECIMAL(12,3) NULL,
+      allowance_gb DECIMAL(12,3) NULL,
+      standard_used_gb DECIMAL(12,3) NULL,
+      cap_source VARCHAR(32) NULL,
+      cycle_start DATE NULL,
+      cycle_end DATE NULL,
+      line_active BOOLEAN NULL,
+      nickname VARCHAR(255) NULL,
+      fetch_ok BOOLEAN NOT NULL DEFAULT 0,
+      error_text VARCHAR(512) NULL,
+      checked_at TIMESTAMP NULL
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
+
     // Native Starlink telemetry, keyed by the DeviceId the stream reports.
     // One row per device per poll, already averaged over that poll's batch.
     // Short retention on purpose: this answers "is the dish up" and "how has

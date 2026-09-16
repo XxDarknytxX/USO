@@ -137,6 +137,9 @@ export default function OverviewPage() {
           ? sum((v) => v.starlink?.allowanceGb)
           : null,
         villagesWithTelemetry: sites.filter((v) => v.starlink?.configured).length,
+        // "No village has reported usage" and "the collector has never run"
+        // look identical in the numbers and are completely different problems.
+        usageCollected: data.summary?.usageCollected ?? sites.some((v) => v.starlink?.usedGb != null),
       }
     : null;
 
@@ -217,21 +220,35 @@ export default function OverviewPage() {
             The allowance total deliberately skips villages Starlink publishes
             no cap for rather than counting them as zero, which would make the
             estate look closer to its limit than it is. */}
-        <MeterCard
-          icon={<Activity size={18} />}
-          label="Starlink data · this cycle"
-          used={s?.starlinkUsedGb ?? 0}
-          total={s?.starlinkAllowanceGb ?? null}
-          unit="GB"
-          format={(n) => Math.round(Number(n || 0)).toLocaleString()}
-          color="violet"
-          sub={
-            s?.villagesWithTelemetry != null
-              ? `across ${s.villagesWithTelemetry} linked ${s.villagesWithTelemetry === 1 ? "kit" : "kits"}`
-              : "all villages combined"
-          }
-          noTotalNote="Starlink publishes no plan cap"
-        />
+        {s && !s.usageCollected ? (
+          // Never render 0 GB here. Before the usage collector has run, zero is
+          // not a measurement — it is the absence of one, and showing it as a
+          // figure sends someone hunting for missing traffic that was never
+          // missing. Say what is actually wrong and where to fix it.
+          <StatCard
+            icon={<Activity size={18} />}
+            label="Starlink data · this cycle"
+            value="—"
+            color="slate"
+            sub="usage collection is off — enable it in Settings"
+          />
+        ) : (
+          <MeterCard
+            icon={<Activity size={18} />}
+            label="Starlink data · this cycle"
+            used={s?.starlinkUsedGb ?? 0}
+            total={s?.starlinkAllowanceGb ?? null}
+            unit="GB"
+            format={(n) => Math.round(Number(n || 0)).toLocaleString()}
+            color="violet"
+            sub={
+              s?.villagesWithTelemetry != null
+                ? `across ${s.villagesWithTelemetry} linked ${s.villagesWithTelemetry === 1 ? "kit" : "kits"}`
+                : "all villages combined"
+            }
+            noTotalNote="Starlink publishes no plan cap"
+          />
+        )}
       </KpiGrid>
 
       <Toolbar>

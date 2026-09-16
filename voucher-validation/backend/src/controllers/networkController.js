@@ -8,6 +8,7 @@ import { getHealthSnapshot, setHealthSnapshot } from "../services/networkHealthS
 import * as starlink from "../services/starlinkService.js";
 import { collectOnceGuarded, isCollecting } from "../services/networkCollector.js";
 import { resolveDeviceId } from "../services/starlinkTelemetry.js";
+import { collectUsageGuarded } from "../services/starlinkUsageCollector.js";
 
 const send = {
   ok: (res, data = {}) => res.json(data),
@@ -113,6 +114,7 @@ export function makeNetworkController(pool) {
   // Set from server.js once the scheduler exists (it needs this controller first).
   let collectScheduler = null;
   let telemetryPoller = null;
+  let usageScheduler = null;
   const ruijie = new RuijieService();
 
   return {
@@ -138,6 +140,58 @@ export function makeNetworkController(pool) {
 
     setCollectScheduler: (s) => { collectScheduler = s; },
     setTelemetryPoller: (p) => { telemetryPoller = p; },
+    setUsageScheduler: (s) => { usageScheduler = s; },
+
+    // GET /api/network/starlink/usage/status  (admin)
+    // POST /api/network/starlink/usage/collect  (admin) — refresh every village
+    // now. One Starlink call per village, single-flighted, so a double click
+    // joins the run in progress rather than spending the calls twice.
+    usageStatus: async (_req, res) => {
+      try {
+        const [[c]] = await pool.query(
+          `SELECT COUNT(*) AS rows_stored,
+                  SUM(fetch_ok = 1) AS ok,
+                  MAX(checked_at) AS last_checked
+             FROM starlink_status`
+        );
+        return send.ok(res, {
+          scheduler: usageScheduler ? usageScheduler.status() : { enabled: false },
+          stored: {
+            villages: Number(c.rows_stored || 0),
+            fetchOk: Number(c.ok || 0),
+            lastChecked: c.last_checked || null,
+          },
+        });
+      } catch (e) {
+        // A missing table is the normal state before the first deploy of this
+        // feature; say so plainly rather than returning a 500.
+        return send.ok(res, {
+          scheduler: usageScheduler ? usageScheduler.status() : { enabled: false },
+          stored: { villages: 0, fetchOk: 0, lastChecked: null },
+          error: e.message,
+        });
+      }
+    },
+
+    usageCollectNow: async (_req, res) => {
+      try {
+        const r = await collectUsageGuarded(pool);
+        return send.ok(res, r);
+      } catch (e) {
+        console.error(e);
+        return send.serverErr(res, e.message);
+      }
+    },
+
+    usageReload: async (_req, res) => {
+      try {
+        if (!usageScheduler) return send.bad(res, "Usage scheduler is not running on this instance");
+        return send.ok(res, await usageScheduler.reload());
+      } catch (e) {
+        console.error(e);
+        return send.serverErr(res);
+      }
+    },
 
     // GET /api/network/telemetry/status  (admin)
     // What the poller is doing, plus how much of the estate it can actually
@@ -568,13 +622,22 @@ export function makeNetworkController(pool) {
         // Current-cycle data usage, written by the usage collector. Separate
         // from telemetry: telemetry says whether the dish is up, this says how
         // much it has carried this month.
+        // Do NOT swallow this. An earlier version caught and ignored the error,
+        // which turned "the usage collector has never run" into every village
+        // silently reporting no data and an estate meter reading 0 GB — a wrong
+        // number is worse than a visible failure, because nobody goes looking
+        // for the cause of a number that looks plausible.
         let usageByProject = {};
+        let usageCollected = false;
         try {
           const [usageRows] = await pool.query("SELECT * FROM starlink_status");
           for (const u of usageRows) usageByProject[u.project_id] = u;
-        } catch {
-          // The usage collector may not have been deployed yet. Telemetry does
-          // not depend on it, so an absent table must not fail the overview.
+          usageCollected = usageRows.length > 0;
+        } catch (e) {
+          console.error(
+            "[network] starlink_status unreadable — Starlink usage will show as unavailable:",
+            e.message
+          );
         }
 
         const telemetryEnabled = await isTelemetryEnabled(pool);
@@ -643,6 +706,9 @@ export function makeNetworkController(pool) {
             : null,
           telemetryEnabled,
           villagesWithTelemetry: sites.filter((v) => v.starlink?.configured).length,
+          // So the UI can distinguish "this estate has used no data" from "the
+          // usage collector has never run", which look identical otherwise.
+          usageCollected,
         };
         const lastCollected = sites.reduce(
           (m, v) => (v.checkedAt && (!m || v.checkedAt > m) ? v.checkedAt : m),

@@ -34,6 +34,12 @@ export function makeNetworkRouter(controller, attachScope) {
   router.post("/telemetry/poll", requireAdmin, controller.telemetryPollNow);
   router.post("/telemetry/reload", requireAdmin, controller.telemetryReload);
 
+  // Per-village Starlink data usage. One live Starlink call per village, so the
+  // manual refresh is admin-only and single-flighted in the collector.
+  router.get("/starlink/usage/status", requireAdmin, controller.usageStatus);
+  router.post("/starlink/usage/collect", requireAdmin, controller.usageCollectNow);
+  router.post("/starlink/usage/reload", requireAdmin, controller.usageReload);
+
   // Discover Ruijie network groups for the "add site" picker (admin)
   router.get("/discover", requireAdmin, controller.discoverGroups);
 
