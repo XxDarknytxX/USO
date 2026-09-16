@@ -205,6 +205,23 @@ export const userApi = {
   create: (body) => api("/users", { method: "POST", body }),
   update: (id, body) => api(`/users/${id}`, { method: "PUT", body }),
   remove: (id) => api(`/users/${id}`, { method: "DELETE" }),
+
+  // Admin rescue. Each returns { tempPassword?, emailed, emailError } — the
+  // account is changed either way, and whether the mail went is reported
+  // separately so a caller is never told "failed" about work that succeeded.
+  resetPassword: (id) => api(`/users/${id}/reset-password`, { method: "POST", body: {} }),
+  resetTwoFactor: (id) => api(`/users/${id}/reset-2fa`, { method: "POST", body: {} }),
+  resendOnboarding: (id) => api(`/users/${id}/resend-onboarding`, { method: "POST", body: {} }),
+};
+
+// Two-factor, for the current account and (policy) for the estate.
+export const twoFactorApi = {
+  status: () => api("/2fa/status"),
+  disable: (password) => api("/2fa/disable", { method: "POST", body: { password } }),
+  policy: () => api("/2fa/policy"),
+  setPolicy: (required) => api("/2fa/policy", { method: "PUT", body: { required } }),
+  changePassword: (currentPassword, newPassword) =>
+    api("/me/password", { method: "POST", body: { currentPassword, newPassword } }),
 };
 
 // M-PAiSA number→email mapping. `upload` sends the report as decoded text.

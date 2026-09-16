@@ -9,17 +9,17 @@
 // last part matters more than it looks — several of these settings spend the
 // Ruijie API quota, and the cost belongs next to the button that commits it.
 
-import { useEffect, useState } from "react";
+import { useEffect, useState , useCallback} from "react";
 import {
   Settings, Server, Eye, EyeOff, MapPin, Check, Globe2, RefreshCw, Mail,
-  Satellite, Send, Receipt, KeyRound,
+  Satellite, Send, Receipt, KeyRound, ShieldCheck,
 } from "lucide-react";
 import toast from "react-hot-toast";
 
-import { settingsApi, networkApi } from "../services/api";
+import { settingsApi, networkApi, twoFactorApi } from "../services/api";
 import { useSite } from "../hooks/useSite";
 import {
-  PageShell, PageHeader, Panel, Badge, Toggle, Select, Field, Input, Button, Tabs, Section,
+  PageShell, PageHeader, Panel, Badge, Toggle, Select, Field, Input, Button, Tabs, Section, SkeletonCard,
 } from "../components/ui";
 
 // Sync-frequency presets. Floor is 5 min to protect the Ruijie account-wide rate
@@ -54,6 +54,7 @@ const TABS = [
   { value: "schedules", label: "Schedules", icon: <RefreshCw size={14} /> },
   { value: "email", label: "Email", icon: <Mail size={14} /> },
   { value: "starlink", label: "Starlink", icon: <Satellite size={14} /> },
+  { value: "security", label: "Security", icon: <ShieldCheck size={14} /> },
 ];
 
 function cn(...p) {
@@ -525,6 +526,8 @@ export default function SettingsPage() {
 
       <div className="flex flex-col gap-5">
         {/* ═══════════════════════════ General ═══════════════════════════ */}
+        {tab === "security" && <SecurityTab />}
+
         {tab === "general" && (
           <>
             <Panel
@@ -1195,5 +1198,112 @@ export default function SettingsPage() {
         )}
       </div>
     </PageShell>
+  );
+}
+
+
+/* ============================================================================
+   Security — the estate-wide two-factor switch
+   ============================================================================ */
+
+/**
+ * Turning this ON does not enrol anyone or end any session. Accounts without
+ * two-factor are handed a setup token at their NEXT sign-in and enrol then,
+ * which is the difference between a policy change and an outage — and worth
+ * saying on the screen, because "require 2FA for everyone" reads like
+ * something that locks people out this afternoon.
+ */
+function SecurityTab() {
+  const [policy, setPolicy] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+
+  const load = useCallback(async () => {
+    try {
+      setPolicy(await twoFactorApi.policy());
+    } catch (e) {
+      toast.error("Could not read the two-factor policy: " + e.message);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => { load(); }, [load]);
+
+  async function toggle(next) {
+    setSaving(true);
+    try {
+      await twoFactorApi.setPolicy(next);
+      setPolicy((p) => ({ ...p, required: next }));
+      toast.success(
+        next
+          ? "Two-factor is now required. Accounts without it will set it up at their next sign-in."
+          : "Two-factor is no longer required. Accounts that have it keep it."
+      );
+    } catch (e) {
+      toast.error(e.message);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  if (loading) return <SkeletonCard height="h-[280px]" />;
+
+  const outstanding = Math.max(0, (policy?.users || 0) - (policy?.enrolled || 0));
+
+  return (
+    <div className="flex flex-col gap-5">
+      <Panel
+        title="Two-factor authentication"
+        subtitle="A code from an authenticator app, in addition to a password"
+        icon={<ShieldCheck size={15} />}
+        tone="green"
+      >
+        <div className="flex items-start justify-between gap-5">
+          <div className="min-w-0">
+            <p className="text-[13.5px] font-semibold text-[var(--fg-primary)]">
+              Require it for every account
+            </p>
+            <p className="mt-1.5 text-[12.5px] leading-relaxed text-[var(--fg-secondary)]">
+              Nobody is locked out when this is switched on. Existing sessions run to their normal
+              expiry, and an account without two-factor is walked through setting it up the next time
+              it signs in.
+            </p>
+          </div>
+          <Toggle checked={!!policy?.required} onChange={toggle} disabled={saving} />
+        </div>
+
+        <div className="mt-5 pt-4 border-t border-[var(--border-subtle)] grid grid-cols-3 gap-4">
+          <Fact label="Accounts" value={policy?.users ?? "—"} />
+          <Fact label="Enrolled" value={policy?.enrolled ?? "—"} />
+          <Fact
+            label="Still to enrol"
+            value={outstanding}
+            tone={outstanding > 0 ? "warning" : "success"}
+          />
+        </div>
+
+        {policy?.required && outstanding > 0 && (
+          <p className="mt-4 text-[12.5px] text-[var(--fg-muted)]">
+            {outstanding} account{outstanding === 1 ? "" : "s"} will be asked to set up two-factor at
+            their next sign-in. If someone has lost their phone, reset their two-factor from Users
+            rather than turning this off for everyone.
+          </p>
+        )}
+      </Panel>
+    </div>
+  );
+}
+
+function Fact({ label, value, tone }) {
+  const color =
+    tone === "warning" ? "var(--warning-fg)" : tone === "success" ? "var(--success-fg)" : "var(--fg-primary)";
+  return (
+    <div>
+      <p className="text-label">{label}</p>
+      <p className="mt-1.5 text-[20px] leading-none font-semibold tabular-nums" style={{ color }}>
+        {value}
+      </p>
+    </div>
   );
 }

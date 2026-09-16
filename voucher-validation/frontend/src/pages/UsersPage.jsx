@@ -18,6 +18,9 @@ import {
   EyeOff,
   Edit3,
   RefreshCw,
+  KeyRound,
+  ShieldOff,
+  Send,
   Check,
   MapPin,
   Wrench,
@@ -109,6 +112,13 @@ export default function UsersPage() {
   const [showCreate, setShowCreate] = useState(false);
   const [editTarget, setEditTarget] = useState(null);
   const [deleteTarget, setDeleteTarget] = useState(null);
+  // { user, kind: "password" | "twofactor" | "onboarding" }
+  const [rescue, setRescue] = useState(null);
+  const [rescueBusy, setRescueBusy] = useState(false);
+  // Held after a reset so the temporary password stays on screen: SMTP can be
+  // down or the address wrong, and an admin who cannot see what was set has no
+  // way to hand it over by another route.
+  const [rescueResult, setRescueResult] = useState(null);
   const [query, setQuery] = useState("");
   const [roleFilter, setRoleFilter] = useState("all");
   const { email: currentEmail } = useAuth();
@@ -127,6 +137,45 @@ export default function UsersPage() {
   useEffect(() => {
     loadUsers();
   }, []);
+
+  /**
+   * Runs one rescue action. Reports the mail separately from the change,
+   * because the account has already been altered by the time SMTP is tried and
+   * telling the admin "failed" would be a lie about the part that succeeded.
+   */
+  async function runRescue() {
+    if (!rescue) return;
+    const { user, kind } = rescue;
+    setRescueBusy(true);
+    try {
+      const r =
+        kind === "password" ? await userApi.resetPassword(user.id)
+        : kind === "twofactor" ? await userApi.resetTwoFactor(user.id)
+        : await userApi.resendOnboarding(user.id);
+
+      setRescue(null);
+      const mailLine = r.emailed
+        ? `An email has been sent to ${user.email}.`
+        : `The email could NOT be sent${r.emailError ? ` (${r.emailError})` : ""} — pass this on another way.`;
+
+      if (kind === "twofactor") {
+        setRescueResult({
+          title: "Two-factor reset",
+          message: `${user.email} will be asked to set up two-factor again at their next sign-in. ${mailLine}`,
+        });
+      } else {
+        setRescueResult({
+          title: kind === "password" ? "Password reset" : "Welcome email sent",
+          message: `Temporary password for ${user.email}:\n\n${r.tempPassword}\n\nThey will be asked to change it when they sign in. ${mailLine}`,
+        });
+      }
+      await loadUsers();
+    } catch (e) {
+      toast.error(e.message);
+    } finally {
+      setRescueBusy(false);
+    }
+  }
 
   async function handleDelete() {
     if (!deleteTarget) return;
@@ -308,6 +357,34 @@ export default function UsersPage() {
                           >
                             <Edit3 size={14} />
                           </IconButton>
+                          {/* The rescue actions. Each is confirmed first: all
+                              three invalidate something the account is using
+                              right now, and a mis-click should not be the thing
+                              that locks someone out on a Friday. */}
+                          <IconButton
+                            onClick={() => setRescue({ user: u, kind: "password" })}
+                            size="sm"
+                            title="Reset password and email a temporary one"
+                            aria-label={`Reset password for ${u.email}`}
+                          >
+                            <KeyRound size={14} />
+                          </IconButton>
+                          <IconButton
+                            onClick={() => setRescue({ user: u, kind: "twofactor" })}
+                            size="sm"
+                            title="Reset two-factor — for a lost or replaced phone"
+                            aria-label={`Reset two-factor for ${u.email}`}
+                          >
+                            <ShieldOff size={14} />
+                          </IconButton>
+                          <IconButton
+                            onClick={() => setRescue({ user: u, kind: "onboarding" })}
+                            size="sm"
+                            title="Resend the welcome email with a new temporary password"
+                            aria-label={`Resend onboarding for ${u.email}`}
+                          >
+                            <Send size={14} />
+                          </IconButton>
                           {/* You cannot delete yourself — the API refuses it, so
                               the row says why rather than offering the button. */}
                           {isSelf ? (
@@ -360,6 +437,33 @@ export default function UsersPage() {
         />
       )}
 
+      {/* One dialog for all three: they differ in wording and endpoint, not in
+          shape, and three near-identical dialogs drift apart. */}
+      <ConfirmDialog
+        open={!!rescue}
+        title={RESCUE_COPY[rescue?.kind]?.title || ""}
+        message={(RESCUE_COPY[rescue?.kind]?.message || "").replace("{email}", rescue?.user?.email || "")}
+        confirmLabel={RESCUE_COPY[rescue?.kind]?.verb || "Confirm"}
+        variant="danger"
+        loading={rescueBusy}
+        onConfirm={runRescue}
+        onCancel={() => setRescue(null)}
+      />
+
+      {/* The temporary password, kept on screen until dismissed. Shown even when
+          the email went, because "it was emailed" is not the same as "it
+          arrived" and this is the only other copy that exists. */}
+      {rescueResult && (
+        <ConfirmDialog
+          open
+          title={rescueResult.title}
+          message={rescueResult.message}
+          confirmLabel="Done"
+          onConfirm={() => setRescueResult(null)}
+          onCancel={() => setRescueResult(null)}
+        />
+      )}
+
       <ConfirmDialog
         open={!!deleteTarget}
         title="Delete user"
@@ -372,6 +476,24 @@ export default function UsersPage() {
     </PageShell>
   );
 }
+
+const RESCUE_COPY = {
+  "password": {
+    "title": "Reset password",
+    "verb": "Reset password",
+    "message": "A new temporary password will be set and emailed to {email}. Their current password stops working immediately, and they will be asked to choose a new one when they sign in."
+  },
+  "twofactor": {
+    "title": "Reset two-factor",
+    "verb": "Reset two-factor",
+    "message": "This clears the authenticator and every backup code for {email} \u2014 for a lost or replaced phone. They will set two-factor up again at their next sign-in, and will be emailed to say it happened."
+  },
+  "onboarding": {
+    "title": "Resend welcome email",
+    "verb": "Send welcome email",
+    "message": "A new temporary password will be set and the welcome email sent again to {email}. Any password they already have stops working."
+  }
+};
 
 /* ============================================================================
    User form modal — create OR edit
