@@ -90,7 +90,10 @@ export default function PlanBreakdown({
         </div>
       )}
 
-      <DataTable>
+      {/* There are ninety-odd plans across the estate — one per village per
+          package — so this list runs far longer than the village one. Same
+          contained scroll, same reasoning. */}
+      <DataTable maxHeight={320}>
         <thead>
           <tr>
             <Th>Plan</Th>

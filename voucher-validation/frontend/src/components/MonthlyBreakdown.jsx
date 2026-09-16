@@ -351,10 +351,15 @@ export function VillageRevenuePanel({ state, className }) {
       padding={false}
       className={className}
     >
+      {/* Every village with sales, scrolled in its own box rather than run out
+          down the page. Rows here are single-line (~39px) over a 35px header,
+          so 320px shows seven and clips the eighth as the cue that there is
+          more. Max-height, so a window with only three villages shrinks to fit
+          instead of leaving them stranded in an empty well. */}
       {byVillage.length === 0 ? (
         <div className="p-5"><EmptyState icon={MapPin} title="No sales in this window" /></div>
       ) : (
-        <DataTable>
+        <DataTable maxHeight={320}>
           <thead>
             <tr>
               <Th>Village</Th>
