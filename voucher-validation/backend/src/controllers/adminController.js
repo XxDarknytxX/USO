@@ -37,6 +37,29 @@ const send = {
  */
 const DUMMY_HASH = bcrypt.hashSync(crypto.randomBytes(32).toString("hex"), 10);
 
+/** How long a full session lasts. One place, so the three mint sites agree. */
+const SESSION_TTL = "2h";
+
+/**
+ * Mints a full session AND records that the person signed in.
+ *
+ * These were two separate facts at three different call sites, and one of them
+ * forgot the second: completing two-factor ENROLMENT hands back a real session,
+ * but never wrote last_login_at — so anyone who signed in for the first time
+ * under a policy that required enrolment was listed as "Never signed in" while
+ * being signed in. Both facts now happen in one function, because there is no
+ * such thing as issuing a session that is not a sign-in.
+ *
+ * The write is best-effort: a bookkeeping column must never be the reason
+ * somebody is refused their console.
+ */
+async function issueSession(pool, claims) {
+  await pool
+    .query("UPDATE users SET last_login_at = NOW() WHERE id = ?", [claims.id])
+    .catch((e) => console.error("[auth] could not record sign-in:", e.message));
+  return jwt.sign(claims, process.env.JWT_SECRET, { expiresIn: SESSION_TTL });
+}
+
 /** Thin data-access helpers */
 /**
  * The row the LOGIN path needs — every column it branches on, not just the ones
@@ -224,8 +247,7 @@ export function makeAdminController(pool) {
           return send.ok(res, { requires2FASetup: true, token: setupToken });
         }
 
-        await pool.query("UPDATE users SET last_login_at = NOW() WHERE id = ?", [user.id]).catch(() => {});
-        const token = jwt.sign(claims, process.env.JWT_SECRET, { expiresIn: "2h" });
+        const token = await issueSession(pool, claims);
         // mustChangePassword travels with the token so the SPA can force the
         // change immediately after an onboarding or reset mail.
         return send.ok(res, { token, mustChangePassword: !!user.must_change_password });
@@ -486,10 +508,9 @@ export function makeAdminController(pool) {
         });
 
         const { pending2FA, iat, exp, ...claims } = decoded;
-        await pool.query("UPDATE users SET last_login_at = NOW() WHERE id = ?", [decoded.id]).catch(() => {});
         const [rows] = await pool.query("SELECT must_change_password FROM users WHERE id = ?", [decoded.id]);
         return send.ok(res, {
-          token: jwt.sign(claims, process.env.JWT_SECRET, { expiresIn: "2h" }),
+          token: await issueSession(pool, claims),
           mustChangePassword: !!rows[0]?.must_change_password,
           usedBackupCode: !!r.usedBackupCode,
           // Surfaced so someone burning through their codes is told before the
@@ -549,7 +570,7 @@ export function makeAdminController(pool) {
         return send.ok(res, {
           enabled: true,
           backupCodes: r.backupCodes,
-          token: jwt.sign(claims, process.env.JWT_SECRET, { expiresIn: "2h" }),
+          token: await issueSession(pool, claims),
         });
       } catch (e) {
         console.error("[2fa] verify failed:", e.message);
