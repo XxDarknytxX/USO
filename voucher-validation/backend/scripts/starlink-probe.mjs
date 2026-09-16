@@ -27,8 +27,57 @@
  *   node backend/scripts/starlink-probe.mjs SL-1234-5678-9  # a specific line
  */
 
-import { getPool } from "../src/config/db.js";
+// The env is loaded from the BACKEND directory explicitly, resolved from this
+// file rather than from the working directory. PM2 runs the server with its cwd
+// set there, so a bare `import "dotenv/config"` works for the server but leaves
+// this script with no DATABASE_USER when it is run from anywhere else — which
+// surfaces as the distinctly unhelpful "Access denied for user ''@'localhost'".
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+import dotenv from "dotenv";
+import mysql from "mysql2/promise";
+
+const HERE = path.dirname(fileURLToPath(import.meta.url));
+const BACKEND = path.resolve(HERE, "..");
+for (const p of [
+  path.join(BACKEND, ".env"),
+  path.join(BACKEND, "..", ".env"),
+  path.join(BACKEND, "..", "..", ".env"),
+]) {
+  dotenv.config({ path: p, quiet: true });
+}
+
 import * as starlink from "../src/services/starlinkService.js";
+
+const unquote = (v) => (v || "").replace(/^"(.*)"$/, "$1").replace(/^'(.*)'$/, "$1");
+
+/**
+ * A plain read-only pool. Deliberately NOT config/db.js's getPool(), which
+ * issues CREATE DATABASE IF NOT EXISTS on the way up — a diagnostic has no
+ * business needing that privilege, or that side effect.
+ */
+function openPool() {
+  const user = unquote(process.env.DATABASE_USER);
+  if (!user) {
+    console.error(
+      "DATABASE_USER is not set.\n" +
+        `Looked for .env in:\n  ${path.join(BACKEND, ".env")}\n` +
+        `  ${path.resolve(BACKEND, "../.env")}\n  ${path.resolve(BACKEND, "../../.env")}\n` +
+        "Run it from the backend directory, or pass the values inline:\n" +
+        "  DATABASE_USER=... DATABASE_PASSWORD=... DATABASE_NAME=... node backend/scripts/starlink-probe.mjs"
+    );
+    process.exit(1);
+  }
+  return mysql.createPool({
+    host: process.env.DATABASE_HOST || "localhost",
+    port: Number(process.env.DATABASE_PORT || 3306),
+    user,
+    password: unquote(process.env.DATABASE_PASSWORD),
+    database: process.env.DATABASE_NAME,
+    waitForConnections: true,
+    connectionLimit: 2,
+  });
+}
 
 const CUT = 4000; // keep the console readable
 
@@ -41,7 +90,11 @@ function show(title, value) {
 let pool;
 
 async function main() {
-  pool = await getPool();
+  pool = openPool();
+  console.log(
+    `DB ${process.env.DATABASE_NAME || "(no DATABASE_NAME)"} on ` +
+      `${process.env.DATABASE_HOST || "localhost"} as ${unquote(process.env.DATABASE_USER)}`
+  );
   const cfg = await starlink.loadConfig(pool);
   if (!cfg) {
     console.error(
