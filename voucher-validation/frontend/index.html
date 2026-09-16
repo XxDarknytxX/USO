@@ -1,6 +1,10 @@
 <!DOCTYPE html>
 <html lang="en">
   <head>
+    <!-- Explicit rather than trusting the browser default. Cross-origin requests
+         (fonts, anything third-party) get the origin only, never a path or query
+         — which is where a one-time credential in a URL would otherwise leak. -->
+    <meta name="referrer" content="strict-origin-when-cross-origin" />
     <meta charset="UTF-8" />
     <link rel="icon" type="image/x-icon" href="/favicon.ico" />
     <link rel="icon" type="image/png" sizes="192x192" href="/logo192.png" />

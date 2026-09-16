@@ -14,7 +14,7 @@
 // picked a password and typed it twice.
 
 import { useCallback, useEffect, useState } from "react";
-import { useNavigate, useSearchParams } from "react-router-dom";
+import { useNavigate } from "react-router-dom";
 import { KeyRound, Eye, EyeOff, ArrowRight, ShieldCheck, Check, X, AlertTriangle } from "lucide-react";
 import toast from "react-hot-toast";
 
@@ -47,9 +47,33 @@ function Rule({ ok, label }) {
   );
 }
 
+/**
+ * Takes the token off the URL, once, and removes it from the address bar.
+ *
+ * Links carry it in the FRAGMENT (#token=…). A fragment is never sent to the
+ * server: it is not in the request line nginx writes to its access log, and it
+ * is not in the Referer header of anything the page loads. In the query string
+ * (?token=…) the credential was written to the server's access log on every
+ * link opened — readable by anyone with that file, for as long as the link
+ * lived. The query form is still accepted so links mailed before this change
+ * keep working until they expire.
+ *
+ * Captured at module evaluation of the first render and then replaced out of
+ * history, so the token does not survive in the back button, in a copied URL,
+ * or in the referrer of anything loaded afterwards.
+ */
+function takeTokenFromUrl() {
+  const fromHash = new URLSearchParams(window.location.hash.replace(/^#/, "")).get("token");
+  const fromQuery = new URLSearchParams(window.location.search).get("token");
+  const token = fromHash || fromQuery || "";
+  if (token) window.history.replaceState(null, "", window.location.pathname);
+  return token;
+}
+
 export default function SetPassword() {
-  const [params] = useSearchParams();
-  const token = params.get("token") || "";
+  // useState's initialiser runs once, so the URL is read — and cleaned — once,
+  // and a re-render after replaceState cannot see an empty URL and lose it.
+  const [token] = useState(takeTokenFromUrl);
   const navigate = useNavigate();
 
   const [state, setState] = useState("checking"); // checking | ready | dead

@@ -11,6 +11,7 @@ import {
 } from "../services/mailer.js";
 import {
   issuePasswordLink, discardPasswordLink, consumeInvite, findInvitee, revokeInvite, unusablePasswordHash, LINK_HOURS,
+  hashToken,
 } from "../services/invites.js";
 import { makeAttemptLimiter, clientIp, pause } from "../services/attemptLimiter.js";
 import { logTwoFactorEvent, readTwoFactorEvents } from "../services/twoFactorLog.js";
@@ -125,8 +126,11 @@ async function sendAccountMail(pool, user, kind, { linkToken } = {}) {
     const args = { name: user.name, email: user.email, url };
     // Both password emails carry a one-time link to the same page. No kind
     // puts a password in the message any more — there is nothing left for one.
+    // In the FRAGMENT, not the query string. A fragment never reaches the
+    // server, so the credential is not written to the web server's access log
+    // for every link opened, and cannot ride out in a Referer header.
     const link = linkToken
-      ? `${url.replace(/\/+$/, "")}/set-password?token=${encodeURIComponent(linkToken)}`
+      ? `${url.replace(/\/+$/, "")}/set-password#token=${encodeURIComponent(linkToken)}`
       : null;
     const mail =
       kind === "invite" ? buildInvite({
@@ -191,7 +195,7 @@ async function sendPasswordLink(pool, user, purpose) {
     );
     return { sent: false, error: mail.error };
   }
-  return { sent: true, error: null };
+  return { sent: true, error: null, token };
 }
 
 export function makeAdminController(pool) {
@@ -310,9 +314,16 @@ export function makeAdminController(pool) {
         // The link is in their inbox; now the old password stops working.
         // must_change_password is cleared rather than set — the new password
         // will be one they chose themselves, which is the whole point.
+        //
+        // CONDITIONAL on this reset's link still being outstanding. Unguarded,
+        // someone who opened the email and chose a password before this line
+        // ran would have that new password silently overwritten with one
+        // nobody holds — locked out by the act of doing what they were asked.
+        // A consumed link has cleared the hash, so this then matches nothing.
         await pool.query(
-          "UPDATE users SET password_hash = ?, must_change_password = 0, password_changed_at = NOW() WHERE id = ?",
-          [await unusablePasswordHash(), user.id]
+          `UPDATE users SET password_hash = ?, must_change_password = 0, password_changed_at = NOW()
+            WHERE id = ? AND password_set_token = ?`,
+          [await unusablePasswordHash(), user.id, hashToken(r.token)]
         );
         return send.ok(res, { success: true, emailed: true, expiresHours: LINK_HOURS.reset });
       } catch (e) {
