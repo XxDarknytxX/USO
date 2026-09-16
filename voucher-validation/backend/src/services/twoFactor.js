@@ -60,6 +60,26 @@ export async function setTwoFactorRequired(pool, on) {
  * see verifyEnrolment.
  */
 export async function beginEnrolment(pool, user) {
+  // Starting enrolment OVERWRITES totp_secret while leaving totp_enabled
+  // alone, so an account that already has a working second factor and merely
+  // opens this screen — then closes it — has had its secret replaced by one
+  // nothing holds. It is still marked as enrolled, so the next sign-in asks
+  // for a code no authenticator can produce: locked out, admin reset only.
+  //
+  // Turning it off first is the supported way to re-enrol, and that path asks
+  // for the password.
+  const [[current]] = await pool.query(
+    "SELECT totp_enabled FROM users WHERE id = ?",
+    [user.id]
+  );
+  if (current?.totp_enabled) {
+    const e = new Error(
+      "Two-factor is already on for this account. Turn it off first if you want to set it up again."
+    );
+    e.code = "ALREADY_ENROLLED";
+    throw e;
+  }
+
   const generated = speakeasy.generateSecret({
     name: `${ISSUER}:${user.email}`,
     issuer: ISSUER,

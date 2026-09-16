@@ -27,9 +27,22 @@ const send = {
 };
 
 /** Thin data-access helpers */
+/**
+ * The row the LOGIN path needs — every column it branches on, not just the ones
+ * that identify the account.
+ *
+ * totp_enabled and must_change_password were missing here while login read
+ * both. A column you did not select comes back `undefined`, which is falsy, so
+ * there was no error to notice: `if (user.totp_enabled)` simply never fired,
+ * every enrolled account was told to enrol again at its next sign-in, and no
+ * temporary password was ever forced to be changed.
+ *
+ * If you add a branch to login, add its column here.
+ */
 async function findUserByEmail(pool, email) {
   const [rows] = await pool.query(
-    "SELECT id, email, password_hash, name, role FROM users WHERE email = ?",
+    `SELECT id, email, password_hash, name, role, totp_enabled, must_change_password
+       FROM users WHERE email = ?`,
     [email]
   );
   return rows[0] || null;
@@ -386,6 +399,9 @@ export function makeAdminController(pool) {
       try {
         return send.ok(res, await beginEnrolment(pool, req.user));
       } catch (e) {
+        // "Already on" is the caller's situation, not a server fault — say so
+        // rather than answering 500 to something the person can act on.
+        if (e.code === "ALREADY_ENROLLED") return send.bad(res, e.message);
         console.error("[2fa] setup failed:", e.message);
         return send.serverErr(res);
       }
