@@ -127,8 +127,11 @@ async function persist(pool, parsed) {
 
   const byDevice = new Map();
   for (const { deviceId, point } of parsed) {
-    if (!byDevice.has(deviceId)) byDevice.set(deviceId, []);
-    byDevice.get(deviceId).push(point);
+    // Stored canonical so the overview's join never has to know about the
+    // prefix again.
+    const id = normalizeDeviceId(deviceId) || deviceId;
+    if (!byDevice.has(id)) byDevice.set(id, []);
+    byDevice.get(id).push(point);
   }
 
   const now = new Date();
@@ -182,9 +185,31 @@ async function persist(pool, parsed) {
 
 /* -------------------------------------------------------------- resolution */
 
-// A telemetry DeviceId looks like "ut5030988e-8610251b-d8c1116b".
+// A telemetry DeviceId looks like "ut50a82288-c500661b-586e1499".
 const DEVICE_ID_RE = /^ut[0-9a-f]{6,}/i;
-const DEVICE_ID_ANYWHERE = /\but[0-9a-f]{6,}(?:-[0-9a-f]+)*\b/i;
+
+/**
+ * Canonical form of a device id.
+ *
+ * The Starlink console shows a terminal's id WITHOUT the "ut" prefix, so that
+ * is what gets copied into the kit field — 28 of our 29 villages were stored as
+ * "1030909b-0841411b-d8755430" while the telemetry stream reports the same dish
+ * as "ut1030909b-0841411b-d8755430". Every one of them failed to match and
+ * silently fell back to the Ruijie signal, which is exactly the class of bug a
+ * fallback is good at hiding.
+ *
+ * So both sides are normalised before they are ever compared, and the stored
+ * value is rewritten to the canonical form as a matter of hygiene. Whichever
+ * way an admin types it in, it resolves.
+ */
+export function normalizeDeviceId(v) {
+  const s = String(v ?? "").trim().toLowerCase();
+  if (!s) return null;
+  const bare = s.startsWith("ut") ? s.slice(2) : s;
+  // Must still look like an id once the prefix is off, or this is not one.
+  if (!/^[0-9a-f]{6,}/.test(bare)) return null;
+  return `ut${bare}`;
+}
 
 /**
  * Finds the `ut…` device id for a village from whatever the admin typed.
@@ -199,37 +224,14 @@ const DEVICE_ID_ANYWHERE = /\but[0-9a-f]{6,}(?:-[0-9a-f]+)*\b/i;
  * Returns the device id, or null if it could not be resolved. Never throws.
  */
 export async function resolveDeviceId(pool, project) {
-  // 1. Already resolved.
-  if (project.starlink_device_id && DEVICE_ID_RE.test(project.starlink_device_id)) {
-    return project.starlink_device_id;
-  }
-  // 2. The admin pasted a device id into the kit field. Accept it.
-  const typed = String(project.starlink_kit_id || "").trim();
-  if (DEVICE_ID_RE.test(typed)) return typed;
-
-  // 3. Ask Starlink about the service line and look for a device-id-shaped
-  //    value anywhere in the record.
-  const line = project.starlink_service_line_number;
-  if (!line) return null;
-  try {
-    const cfg = await starlink.loadConfig(pool);
-    if (!cfg) return null;
-    const token = await starlink.getAccessToken(cfg);
-    const base = String(cfg.api_base_url).replace(/\/+$/, "");
-    const body = await starlink.starlinkRequest(
-      `${base}/v2/service-lines/${encodeURIComponent(line)}`,
-      { headers: { Authorization: `Bearer ${token}`, Accept: "application/json" }, timeoutMs: 30000 }
-    );
-    const match = JSON.stringify(body ?? {}).match(DEVICE_ID_ANYWHERE);
-    if (match) {
-      log(`resolved ${project.name}: ${line} → ${match[0]}`);
-      return match[0];
-    }
-    log(`no device id found in the service-line record for ${project.name} (${line})`);
-  } catch (e) {
-    log(`resolve failed for ${project.name}:`, starlink.describeError(e));
-  }
-  return null;
+  // Either field may hold it, in either spelling. The device id column is
+  // preferred because that is where a resolved value lands; the kit field is
+  // what the admin typed.
+  return (
+    normalizeDeviceId(project.starlink_device_id) ||
+    normalizeDeviceId(project.starlink_kit_id) ||
+    null
+  );
 }
 
 /**
@@ -239,21 +241,42 @@ export async function resolveDeviceId(pool, project) {
  */
 export async function resolveAllDeviceIds(pool) {
   const [projects] = await pool.query(
-    `SELECT id, name, starlink_service_line_number, starlink_device_id, starlink_kit_id
+    `SELECT id, name, starlink_device_id, starlink_kit_id
        FROM network_projects
       WHERE is_active = 1
-        AND (starlink_service_line_number IS NOT NULL OR starlink_kit_id IS NOT NULL)`
+        AND (starlink_device_id IS NOT NULL OR starlink_kit_id IS NOT NULL)`
   );
-  let resolved = 0;
+  let rewritten = 0;
   for (const p of projects) {
-    if (p.starlink_device_id && DEVICE_ID_RE.test(p.starlink_device_id)) continue;
     const id = await resolveDeviceId(pool, p);
-    if (!id) continue;
+    if (!id || id === p.starlink_device_id) continue;
     await pool.query("UPDATE network_projects SET starlink_device_id = ? WHERE id = ?", [id, p.id]);
-    resolved++;
+    rewritten++;
   }
-  if (resolved) log(`resolved ${resolved} device id(s)`);
-  return { checked: projects.length, resolved };
+  if (rewritten) log(`normalised ${rewritten} device id(s) to the ut… form`);
+  return { checked: projects.length, resolved: rewritten };
+}
+
+/**
+ * The device ids this deployment is allowed to store telemetry for.
+ *
+ * NOT optional. The Starlink account is shared across Vodafone Fiji — it
+ * carries 227 service lines, of which about thirty are USO villages; the rest
+ * belong to other customers entirely. The stream hands us every one of them, so
+ * without this filter the USO database would quietly accumulate other people's
+ * telemetry, at roughly seven times the volume we actually want.
+ */
+async function knownDeviceIds(pool) {
+  const [rows] = await pool.query(
+    `SELECT starlink_device_id, starlink_kit_id FROM network_projects
+      WHERE is_active = 1 AND (starlink_device_id IS NOT NULL OR starlink_kit_id IS NOT NULL)`
+  );
+  const set = new Set();
+  for (const r of rows) {
+    const id = normalizeDeviceId(r.starlink_device_id) || normalizeDeviceId(r.starlink_kit_id);
+    if (id) set.add(id);
+  }
+  return set;
 }
 
 /* ------------------------------------------------------------------ poller */
@@ -272,6 +295,7 @@ export function makeTelemetryPoller({ pool }) {
   let consecutiveErrors = 0;
   let lastError = null;
   let devicesSeen = 0;
+  let othersSeen = 0;
 
   async function seedDefaults() {
     try {
@@ -318,11 +342,24 @@ export function makeTelemetryPoller({ pool }) {
         timeoutMs: REQUEST_TIMEOUT_MS,
       });
 
-      const parsed = parseStreamResponse(body);
+      const all = parseStreamResponse(body);
       lastPollAt = new Date();
       consecutiveErrors = 0;
       lastError = null;
-      if (!parsed.length) return 0;
+      if (!all.length) return 0;
+
+      // Keep only our own dishes. See knownDeviceIds: this account is shared
+      // across Vodafone Fiji and most of what the stream carries is not ours.
+      const mine = await knownDeviceIds(pool);
+      const parsed = all.filter((p) => mine.has(normalizeDeviceId(p.deviceId)));
+      othersSeen = all.length - parsed.length;
+      if (!parsed.length) {
+        log(
+          `stream carried ${all.length} row(s), none for our ${mine.size} known device(s)` +
+            (mine.size === 0 ? " — no village has a device id set" : "")
+        );
+        return 0;
+      }
 
       const written = await persist(pool, parsed);
       devicesSeen = written;
@@ -434,6 +471,8 @@ export function makeTelemetryPoller({ pool }) {
         lastPollAt: lastPollAt ? lastPollAt.toISOString() : null,
         lastPersistAt: lastPersistAt ? lastPersistAt.toISOString() : null,
         devicesSeen,
+        // Rows belonging to other customers on the shared account, discarded.
+        othersDiscarded: othersSeen,
         totalPersisted,
         consecutiveErrors,
         lastError,

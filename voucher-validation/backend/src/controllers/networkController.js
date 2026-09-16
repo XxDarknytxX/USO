@@ -7,8 +7,19 @@ import { fetchProjectHealth } from "../services/networkHealth.js";
 import { getHealthSnapshot, setHealthSnapshot } from "../services/networkHealthStore.js";
 import * as starlink from "../services/starlinkService.js";
 import { collectOnceGuarded, isCollecting } from "../services/networkCollector.js";
-import { resolveDeviceId } from "../services/starlinkTelemetry.js";
+import { resolveDeviceId, normalizeDeviceId } from "../services/starlinkTelemetry.js";
 import { collectUsageGuarded } from "../services/starlinkUsageCollector.js";
+
+/**
+ * The form an operator reads and types: the kit id as the Starlink console
+ * shows it, with no "ut" prefix. Storage keeps the canonical prefixed form
+ * because that is what the telemetry stream uses as a key.
+ */
+const displayDeviceId = (v) => {
+  const s = String(v ?? "").trim();
+  if (!s) return null;
+  return s.toLowerCase().startsWith("ut") ? s.slice(2) : s;
+};
 
 const send = {
   ok: (res, data = {}) => res.json(data),
@@ -28,10 +39,12 @@ const mapProject = (r) => ({
   // graph, the device id is user-terminal kit info. Viewers only ever see
   // projects inside their own scope.
   starlinkServiceLineNumber: r.starlink_service_line_number || null,
-  starlinkDeviceId: r.starlink_device_id || null,
-  // What the admin typed. The device id above is resolved from this in the
-  // background and is not something an operator should have to know.
-  starlinkKitId: r.starlink_kit_id || null,
+  // Shown WITHOUT the "ut" prefix, which is how the Starlink console displays a
+  // terminal and therefore how an admin reads it off the kit. The prefix is a
+  // wire detail of the telemetry stream: the backend adds it when matching and
+  // strips it again here, so it never has to be typed or seen.
+  starlinkDeviceId: displayDeviceId(r.starlink_device_id),
+  starlinkKitId: displayDeviceId(r.starlink_kit_id),
   isActive: !!r.is_active,
   sortOrder: r.sort_order,
   createdAt: r.created_at,
@@ -81,13 +94,15 @@ function deriveOnline({ telemetryEnabled, tel, ruijieUp, nowMs }) {
 }
 
 /** The per-village Starlink block: live link quality, plus cycle consumption. */
-function buildStarlink({ project, tel, use, nowMs }) {
+function buildStarlink({ project, devId, tel, use, nowMs }) {
   const allowance =
     use && use.allowance_gb != null && Number(use.allowance_gb) > 0
       ? Number(use.allowance_gb)
       : null; // 0 means "Starlink published no cap", never "no data allowed"
   return {
-    configured: !!project.starlink_device_id,
+    // A village counts as configured when we have an id in either field — the
+    // kit alone is enough, because the device id is only ever derived from it.
+    configured: !!devId,
     lastSeenAt: tel?.last_seen_at ? new Date(tel.last_seen_at).toISOString() : null,
     ageSeconds: tel?.last_seen_at
       ? Math.max(0, Math.round((nowMs - new Date(tel.last_seen_at).getTime()) / 1000))
@@ -351,6 +366,13 @@ export function makeNetworkController(pool) {
             let v = req.body[key];
             if (col === "is_active") v = v ? 1 : 0;
             else if (nullable.has(col)) v = String(v ?? "").trim() || null;
+            // Normalise on the way IN as well as out, so whether the admin
+            // pastes the bare kit id or one copied from somewhere that already
+            // carries the prefix, storage ends up canonical and the telemetry
+            // join matches either way.
+            if (v && (col === "starlink_device_id" || col === "starlink_kit_id")) {
+              v = normalizeDeviceId(v) || v;
+            }
             vals.push(v);
           }
         }
@@ -617,7 +639,13 @@ export function makeNetworkController(pool) {
         // whole estate; no Starlink call is made here, the poller owns that.
         const [telemetryRows] = await pool.query("SELECT * FROM starlink_device_latest");
         const telemetryByDevice = {};
-        for (const t of telemetryRows) telemetryByDevice[t.device_id] = t;
+        // Keyed on the canonical id on BOTH sides. Villages entered before the
+        // backfill still hold the bare form the Starlink console shows, and
+        // matching those against the stream's ut-prefixed key is precisely what
+        // was silently sending every village to the Ruijie fallback.
+        for (const t of telemetryRows) {
+          telemetryByDevice[normalizeDeviceId(t.device_id) || t.device_id] = t;
+        }
 
         // Current-cycle data usage, written by the usage collector. Separate
         // from telemetry: telemetry says whether the dish is up, this says how
@@ -649,7 +677,8 @@ export function makeNetworkController(pool) {
           const uptimePct =
             u && u.samples > 0 ? Math.round((u.up_samples / u.samples) * 1000) / 10 : null;
           const ruijieUp = s.internet_up == null ? null : !!s.internet_up;
-          const tel = p.starlink_device_id ? telemetryByDevice[p.starlink_device_id] : null;
+          const devId = normalizeDeviceId(p.starlink_device_id) || normalizeDeviceId(p.starlink_kit_id);
+          const tel = devId ? telemetryByDevice[devId] : null;
           const use = usageByProject[p.id] || null;
           const verdict = deriveOnline({ telemetryEnabled, tel, ruijieUp, nowMs });
 
@@ -663,7 +692,7 @@ export function makeNetworkController(pool) {
             // which the topology view still needs.
             online: verdict.online,
             onlineSource: verdict.source,
-            starlink: buildStarlink({ project: p, tel, use, nowMs }),
+            starlink: buildStarlink({ project: p, devId, tel, use, nowMs }),
             gatewayOnline: s.gateway_online == null ? null : !!s.gateway_online,
             internetUp: ruijieUp,
             apsOnline: Number(s.aps_online ?? 0),
