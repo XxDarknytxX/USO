@@ -48,6 +48,10 @@ const fmtBytes = (b) => {
   return `${n.toFixed(n >= 10 || i === 0 ? 0 : 1)} ${u[i]}`;
 };
 const fmtNum = (n) => (n == null ? "—" : Number(n).toLocaleString());
+const fmtGb = (n) => {
+  const v = Number(n || 0);
+  return v >= 100 ? Math.round(v).toLocaleString() : v.toFixed(1);
+};
 const fmtMoney = (n) =>
   "$" + Number(n || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const hourLabel = (t) => {
@@ -145,6 +149,18 @@ export default function SiteDashboard({ groupId, site }) {
   const devices = health?.devices || [];
 
   const revenue = data?.revenue;
+
+  // Data this village's customers bought in the SELECTED WINDOW, from the same
+  // transactions as the revenue above it. mb is already scoped to this village,
+  // so summing its plans is the village total.
+  const purchased = (mb.data?.byPlan || []).reduce(
+    (a, p) => ({
+      mb: a.mb + Number(p.purchasedMb || 0),
+      used: a.used + Number(p.usedMb || 0),
+      sales: a.sales + Number(p.count || 0),
+    }),
+    { mb: 0, used: 0, sales: 0 }
+  );
 
   // Expired takes amber rather than STATUS_COLORS.expired: that token is slate,
   // which is also the only sensible colour for Inactive, and two identical
@@ -262,7 +278,7 @@ export default function SiteDashboard({ groupId, site }) {
 
       {/* Four headline KPIs, the same four as the estate dashboard. Every other
           figure lives in the tab it belongs to. */}
-      <KpiGrid cols={4}>
+      <KpiGrid cols={5}>
         <StatCard
           label={`Revenue · ${mb.label || "month"}`}
           value={fmtMoney(mb.totals.revenue)}
@@ -297,6 +313,21 @@ export default function SiteDashboard({ groupId, site }) {
           // link has been solid.
           sub={uptimePct == null ? publicIp || "no uptime data" : `gateway uptime ${uptimePct}% · 24h`}
         />
+        {/* What customers bought in this window, and the way into the vouchers
+            behind it. Clickable because the figure on its own cannot answer the
+            question it prompts — "which vouchers, and who has them". */}
+        <StatCard
+          label="Data purchased"
+          value={purchased.mb ? `${fmtGb(purchased.mb / 1024)} GB` : "—"}
+          icon={<HardDrive size={18} />}
+          color="teal"
+          sub={
+            purchased.sales
+              ? `${fmtNum(purchased.sales)} sale${purchased.sales === 1 ? "" : "s"} · ${mb.label || "this month"}`
+              : `nothing sold · ${mb.label || "this month"}`
+          }
+          onClick={() => navigate("/vouchers")}
+        />
       </KpiGrid>
 
       {/* Same primary chart row as the estate dashboard. */}
@@ -309,6 +340,14 @@ export default function SiteDashboard({ groupId, site }) {
         <Panel title="Sales" icon={<DollarSign size={15} />} tone="red">
           <BreakdownEmpty />
         </Panel>
+      )}
+
+      {/* Sits in the main flow rather than behind the Plans tab: this is the
+          way from a figure to the vouchers under it, and a drill-down nobody
+          finds is not one. Reads in order after the revenue charts — what we
+          earned, then what we sold to earn it. */}
+      {hasSalesHistory(mb) && (
+        <PlansPurchasedPanel state={mb} onOpenPlan={openPlanVouchers} />
       )}
 
       {/* The Starlink pair, deliberately adjacent: usage says how much this
@@ -368,7 +407,6 @@ export default function SiteDashboard({ groupId, site }) {
 
         {tab === "plans" && (
           <div className="flex flex-col gap-5">
-            <PlansPurchasedPanel state={mb} onOpenPlan={openPlanVouchers} />
             <SoldByPlanPanel state={mb} />
             <Panel
               title="Plan breakdown"
