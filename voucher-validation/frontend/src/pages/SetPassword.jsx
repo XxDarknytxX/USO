@@ -74,6 +74,7 @@ export default function SetPassword() {
 
   useEffect(() => { check(); }, [check]);
 
+  const isReset = account?.purpose === "reset";
   const passed = RULES.filter((r) => r.test(password)).length;
   const mismatch = confirm.length > 0 && password !== confirm;
   const ready = passed === RULES.length && password === confirm && !busy;
@@ -88,7 +89,7 @@ export default function SetPassword() {
       // Sent to sign in rather than straight through: the sign-in is what
       // proves the password works, and it is the route that already knows what
       // to do about two-factor.
-      toast.success("Password set — sign in to finish", { duration: 6000 });
+      toast.success(isReset ? "Password changed — sign in with your new one" : "Password set — sign in to finish", { duration: 6000 });
       navigate("/login", { replace: true });
     } catch (e) {
       setErr(e.message);
@@ -175,8 +176,9 @@ export default function SetPassword() {
                   This link has expired
                 </h1>
                 <p className="mt-2.5 text-[13.5px] leading-relaxed text-[var(--fg-secondary)]">
-                  {err || "It may already have been used, or it may be older than the window it was good for."}{" "}
-                  Ask whoever set up your account to send another — it takes them a moment.
+                  {err || "It may already have been used, or it may be older than the few hours it was good for."}{" "}
+                  These links only last a few hours on purpose. Ask your administrator to send another — it
+                  takes them a moment.
                 </p>
               </div>
               <Button variant="secondary" onClick={() => navigate("/login")}>
@@ -191,15 +193,21 @@ export default function SetPassword() {
                 <div className="mb-3 flex items-center gap-2.5">
                   <span className="h-[2.5px] w-7 rounded-full bg-[var(--brand)]" />
                   <span className="text-[9.5px] font-bold uppercase tracking-[0.18em] text-[var(--fg-muted)]">
-                    Finish setting up
+                    {isReset ? "Password reset" : "Finish setting up"}
                   </span>
                 </div>
+                {/* A reset and a first-time setup are different moments. Someone
+                    recovering an account wants to know their old password is gone
+                    and why; "Welcome" is the wrong thing to say to them. */}
                 <h1 className="font-display text-[32px] font-extrabold leading-[1.1] tracking-[-0.028em]">
-                  {account?.name ? `Welcome, ${account.name.split(" ")[0]}` : "Choose a password"}
+                  {isReset
+                    ? "Choose a new password"
+                    : account?.name ? `Welcome, ${account.name.split(" ")[0]}` : "Choose a password"}
                 </h1>
                 <p className="mt-2.5 text-[13.5px] leading-relaxed text-[var(--fg-secondary)]">
-                  Setting the password for{" "}
+                  {isReset ? "An administrator reset the password for " : "Setting the password for "}
                   <span className="font-medium text-[var(--fg-primary)]">{account?.email}</span>.
+                  {isReset && " The old one no longer works."}
                 </p>
               </div>
 

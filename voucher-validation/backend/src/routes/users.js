@@ -15,10 +15,12 @@ export function makeUserRouter(controller) {
 
   // Admin rescue. All of these change the account first and report whether the
   // mail went, rather than failing the whole request when SMTP is down.
+  // Password reset: a one-time link, and the old password retired once it is sent.
   router.post("/:id/reset-password", controller.resetUserPassword);
   router.post("/:id/reset-2fa", controller.resetUserTwoFactor);
-  router.post("/:id/resend-onboarding", controller.resendOnboarding);
-  // Invites: send another (replacing any outstanding one), or cancel.
+  // Onboarding: a one-time link to set a password. Two routes, one handler —
+  // they used to differ by one of them mailing a temporary password.
+  router.post("/:id/resend-onboarding", controller.resendInvite);
   router.post("/:id/invite", controller.resendInvite);
   router.delete("/:id/invite", controller.revokeInvite);
 

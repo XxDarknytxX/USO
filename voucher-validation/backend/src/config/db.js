@@ -73,6 +73,11 @@ export async function getPool() {
     `ALTER TABLE users ADD COLUMN password_set_token CHAR(64) NULL`,
     `ALTER TABLE users ADD COLUMN password_set_expires TIMESTAMP NULL`,
     `ALTER TABLE users ADD COLUMN invited_at TIMESTAMP NULL`,
+    // What the outstanding one-time link is FOR: 'invite' (onboarding) or
+    // 'reset'. Without it a reset link and an unaccepted invite look identical
+    // in the Users list, and the set-password page cannot tell someone whether
+    // they are finishing setup or recovering an account.
+    `ALTER TABLE users ADD COLUMN password_set_purpose VARCHAR(16) NULL`,
 
     // The last TOTP time-step this account successfully used. A code stays
     // valid for about ninety seconds across the accepted window, and without

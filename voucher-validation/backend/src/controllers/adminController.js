@@ -4,13 +4,13 @@ import crypto from "node:crypto";
 import jwt from "jsonwebtoken";
 import {
   isTwoFactorRequired, setTwoFactorRequired, beginEnrolment, verifyEnrolment,
-  verifyCode, clearTwoFactor, generateTempPassword, regenerateBackupCodes,
+  verifyCode, clearTwoFactor, regenerateBackupCodes,
 } from "../services/twoFactor.js";
 import {
-  loadSmtpTransport, buildOnboarding, buildPasswordReset, buildTwoFactorReset, buildInvite,
+  loadSmtpTransport, buildPasswordResetLink, buildTwoFactorReset, buildInvite,
 } from "../services/mailer.js";
 import {
-  issueInvite, consumeInvite, findInvitee, revokeInvite, unusablePasswordHash, INVITE_TTL_DAYS,
+  issuePasswordLink, discardPasswordLink, consumeInvite, findInvitee, revokeInvite, unusablePasswordHash, LINK_HOURS,
 } from "../services/invites.js";
 import { makeAttemptLimiter, clientIp, pause } from "../services/attemptLimiter.js";
 import { logTwoFactorEvent, readTwoFactorEvents } from "../services/twoFactorLog.js";
@@ -114,7 +114,7 @@ async function insertUser(pool, { email, passwordHash, name, role }) {
  * request because SMTP is down would leave the caller thinking nothing
  * happened when the password has in fact already changed.
  */
-async function sendAccountMail(pool, user, kind, { password, inviteToken } = {}) {
+async function sendAccountMail(pool, user, kind, { linkToken } = {}) {
   try {
     const smtp = await loadSmtpTransport(pool);
     if (!smtp) return { sent: false, error: "SMTP is not configured in Settings" };
@@ -122,17 +122,23 @@ async function sendAccountMail(pool, user, kind, { password, inviteToken } = {})
     // "sign in at" line reads "the operations console" is a mail that cannot be
     // acted on. CONSOLE_URL overrides it for staging.
     const url = process.env.CONSOLE_URL || process.env.APP_URL || "https://admin.vodafonefiji.cloud";
-    const args = { name: user.name, email: user.email, password, url };
+    const args = { name: user.name, email: user.email, url };
+    // Both password emails carry a one-time link to the same page. No kind
+    // puts a password in the message any more — there is nothing left for one.
+    const link = linkToken
+      ? `${url.replace(/\/+$/, "")}/set-password?token=${encodeURIComponent(linkToken)}`
+      : null;
     const mail =
       kind === "invite" ? buildInvite({
-        ...args,
-        link: `${url.replace(/\/+$/, "")}/set-password?token=${encodeURIComponent(inviteToken)}`,
+        ...args, link,
         roleLabel: ROLE_LABELS[user.role] || null,
-        expiresDays: INVITE_TTL_DAYS,
+        expiresHours: LINK_HOURS.invite,
       })
-      : kind === "onboarding" ? buildOnboarding(args)
-      : kind === "password-reset" ? buildPasswordReset(args)
+      : kind === "reset" ? buildPasswordResetLink({ ...args, link, expiresHours: LINK_HOURS.reset })
       : buildTwoFactorReset(args);
+    if ((kind === "invite" || kind === "reset") && !link) {
+      throw new Error(`a ${kind} email needs a link token`);
+    }
     await smtp.transport.sendMail({
       from: smtp.from, to: user.email,
       subject: mail.subject, text: mail.text, html: mail.html,
@@ -167,6 +173,26 @@ const tooMany = (res, seconds) => {
     error: `Too many attempts. Try again in ${seconds < 60 ? `${seconds} seconds` : `${Math.ceil(seconds / 60)} minutes`}.`,
   });
 };
+
+/**
+ * Issues a one-time password link and emails it. Returns { sent, error }.
+ *
+ * A link whose email could not be sent is DISCARDED before this returns. A live
+ * credential that nobody was given is not "harmless because nobody has it" — it
+ * is a live credential with no owner, and it also makes the Users list report
+ * an invite or reset as outstanding when nothing is on its way to anyone.
+ */
+async function sendPasswordLink(pool, user, purpose) {
+  const token = await issuePasswordLink(pool, user.id, purpose);
+  const mail = await sendAccountMail(pool, user, purpose, { linkToken: token });
+  if (!mail.sent) {
+    await discardPasswordLink(pool, user.id, token).catch((e) =>
+      console.error(`[users] could not discard undelivered ${purpose} link:`, e.message)
+    );
+    return { sent: false, error: mail.error };
+  }
+  return { sent: true, error: null };
+}
 
 export function makeAdminController(pool) {
   return {
@@ -260,24 +286,35 @@ export function makeAdminController(pool) {
     /* ═══════════ ADMIN RESCUE: password / 2FA / onboarding ═══════════ */
 
     // POST /api/users/:id/reset-password  (admin)
-    // Sets a temporary password, flags the account to change it on first use,
-    // and mails it. The password is returned in the response as well: SMTP may
-    // be unconfigured or the address wrong, and an admin who cannot see what
-    // was set has no way to hand it over by another route.
+    //
+    // Emails a one-time link to choose a new password. NOT a new password: a
+    // mailed password stays readable for as long as the mailbox exists, and the
+    // account can be entered with it the whole time.
+    //
+    // Order matters. The link goes out FIRST, and only once the mail server has
+    // accepted it is the current password retired. The other way round, an SMTP
+    // failure leaves an account whose old password is dead and whose new link
+    // went nowhere — locked, with nobody told. If the email fails here, the link
+    // is discarded and the account is exactly as it was.
     resetUserPassword: async (req, res) => {
       try {
-        const [rows] = await pool.query("SELECT id, email, name FROM users WHERE id = ?", [req.params.id]);
+        const [rows] = await pool.query("SELECT id, email, name, role FROM users WHERE id = ?", [req.params.id]);
         const user = rows[0];
         if (!user) return send.notFound(res, "User not found");
 
-        const tempPassword = generateTempPassword();
-        await pool.query(
-          "UPDATE users SET password_hash = ?, must_change_password = 1, password_changed_at = NOW() WHERE id = ?",
-          [await bcrypt.hash(tempPassword, 10), user.id]
-        );
+        const r = await sendPasswordLink(pool, user, "reset");
+        if (!r.sent) {
+          return send.ok(res, { success: false, emailed: false, emailError: r.error, changed: false });
+        }
 
-        const mail = await sendAccountMail(pool, user, "password-reset", { password: tempPassword });
-        return send.ok(res, { success: true, tempPassword, emailed: mail.sent, emailError: mail.error });
+        // The link is in their inbox; now the old password stops working.
+        // must_change_password is cleared rather than set — the new password
+        // will be one they chose themselves, which is the whole point.
+        await pool.query(
+          "UPDATE users SET password_hash = ?, must_change_password = 0, password_changed_at = NOW() WHERE id = ?",
+          [await unusablePasswordHash(), user.id]
+        );
+        return send.ok(res, { success: true, emailed: true, expiresHours: LINK_HOURS.reset });
       } catch (e) {
         console.error("[users] password reset failed:", e.message);
         return send.serverErr(res);
@@ -322,10 +359,18 @@ export function makeAdminController(pool) {
       }
     },
 
-    // POST /api/users/:id/invite  (admin)
-    // Mints a fresh invite and sends it. Used both to re-send one that was
-    // never opened and to replace one that expired — the old token dies either
-    // way, because issueInvite overwrites the stored hash.
+    // POST /api/users/:id/invite           (admin)
+    // POST /api/users/:id/resend-onboarding (admin)
+    //
+    // Emails a one-time link to set a password. Both routes are this handler:
+    // "resend the invite" and "resend onboarding" used to differ only in that
+    // the second mailed a temporary password, and there is no longer any such
+    // thing to mail.
+    //
+    // Unlike a reset, this does NOT retire an existing password. Onboarding is
+    // "here is how to get in", not "your way in has been taken away" — for an
+    // account that has never set one, there is nothing to retire anyway.
+    // Issuing it does kill any earlier link, of either kind.
     resendInvite: async (req, res) => {
       try {
         const [rows] = await pool.query(
@@ -335,16 +380,15 @@ export function makeAdminController(pool) {
         const user = rows[0];
         if (!user) return send.notFound(res, "User not found");
 
-        const token = await issueInvite(pool, user.id);
-        const mail = await sendAccountMail(pool, user, "invite", { inviteToken: token });
+        const r = await sendPasswordLink(pool, user, "invite");
         return send.ok(res, {
-          success: true,
-          emailed: mail.sent,
-          emailError: mail.error,
-          expiresDays: INVITE_TTL_DAYS,
+          success: r.sent,
+          emailed: r.sent,
+          emailError: r.error,
+          expiresHours: LINK_HOURS.invite,
         });
       } catch (e) {
-        console.error("[users] invite resend failed:", e.message);
+        console.error("[users] onboarding link failed:", e.message);
         return send.serverErr(res);
       }
     },
@@ -376,7 +420,12 @@ export function makeAdminController(pool) {
       try {
         const user = await findInvitee(pool, req.body?.token);
         if (!user) return send.bad(res, "This link is no longer valid. Ask your administrator to send a new one.");
-        return send.ok(res, { valid: true, email: user.email, name: user.name || null });
+        return send.ok(res, {
+          valid: true,
+          email: user.email,
+          name: user.name || null,
+          purpose: user.purpose === "reset" ? "reset" : "invite",
+        });
       } catch (e) {
         console.error("[invite] check failed:", e.message);
         return send.serverErr(res);
@@ -398,28 +447,6 @@ export function makeAdminController(pool) {
         return send.ok(res, { success: true });
       } catch (e) {
         console.error("[invite] accept failed:", e.message);
-        return send.serverErr(res);
-      }
-    },
-
-    // POST /api/users/:id/resend-onboarding  (admin)
-    // Same as a password reset in effect, worded as a welcome — for an account
-    // created before the mail worked, or one that never arrived.
-    resendOnboarding: async (req, res) => {
-      try {
-        const [rows] = await pool.query("SELECT id, email, name FROM users WHERE id = ?", [req.params.id]);
-        const user = rows[0];
-        if (!user) return send.notFound(res, "User not found");
-
-        const tempPassword = generateTempPassword();
-        await pool.query(
-          "UPDATE users SET password_hash = ?, must_change_password = 1 WHERE id = ?",
-          [await bcrypt.hash(tempPassword, 10), user.id]
-        );
-        const mail = await sendAccountMail(pool, user, "onboarding", { password: tempPassword });
-        return send.ok(res, { success: true, tempPassword, emailed: mail.sent, emailError: mail.error });
-      } catch (e) {
-        console.error("[users] onboarding resend failed:", e.message);
         return send.serverErr(res);
       }
     },
@@ -880,6 +907,7 @@ export function makeAdminController(pool) {
           `SELECT id, email, name, role, created_at, last_login_at, invited_at,
                   totp_enabled, must_change_password,
                   password_set_token IS NOT NULL AS has_invite,
+                  password_set_purpose,
                   password_set_expires,
                   (password_set_token IS NOT NULL AND password_set_expires > NOW()) AS invite_live
              FROM users
@@ -896,9 +924,15 @@ export function makeAdminController(pool) {
           twoFactorEnabled: !!u.totp_enabled,
           mustChangePassword: !!u.must_change_password,
           inviteExpiresAt: u.has_invite ? u.password_set_expires : null,
-          // Three states an admin acts on differently: waiting on the person,
-          // waiting on a resend, or done.
-          status: u.has_invite ? (u.invite_live ? "invited" : "invite-expired") : "active",
+          // States an admin acts on differently: waiting on the person, waiting
+          // on a resend, or done. A reset is distinguished from an invite
+          // because an expired RESET is an account whose old password is
+          // already gone — locked until someone sends another link.
+          status: !u.has_invite
+            ? "active"
+            : u.password_set_purpose === "reset"
+              ? (u.invite_live ? "reset-sent" : "reset-expired")
+              : (u.invite_live ? "invited" : "invite-expired"),
         }));
         return send.ok(res, { users });
       } catch (e) {
@@ -965,14 +999,16 @@ export function makeAdminController(pool) {
       if (password) {
         return send.created(res, { ...created, invited: false, emailed: false });
       }
-      const token = await issueInvite(pool, userId);
-      const mail = await sendAccountMail(pool, created, "invite", { inviteToken: token });
+      // Same rule as every other link: undelivered means discarded. The account
+      // still exists, with a password nobody holds, and the admin is told to
+      // send the onboarding link again once mail is working.
+      const r = await sendPasswordLink(pool, created, "invite");
       return send.created(res, {
         ...created,
         invited: true,
-        emailed: mail.sent,
-        emailError: mail.error,
-        expiresDays: INVITE_TTL_DAYS,
+        emailed: r.sent,
+        emailError: r.error,
+        expiresHours: LINK_HOURS.invite,
       });
     },
 

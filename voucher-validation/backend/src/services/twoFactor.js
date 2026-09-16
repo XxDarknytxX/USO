@@ -323,13 +323,3 @@ export async function clearTwoFactor(pool, userId) {
   );
 }
 
-/** A readable temporary password for an onboarding or reset mail. */
-export function generateTempPassword() {
-  // Ambiguous characters are left out: these get read off a screen and typed,
-  // and "was that a 1 or an l" turns a reset into a support call.
-  const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789";
-  const bytes = crypto.randomBytes(14);
-  let out = "";
-  for (const b of bytes) out += alphabet[b % alphabet.length];
-  return `${out.slice(0, 5)}-${out.slice(5, 10)}-${out.slice(10, 14)}`;
-}

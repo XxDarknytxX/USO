@@ -206,9 +206,9 @@ export const userApi = {
   update: (id, body) => api(`/users/${id}`, { method: "PUT", body }),
   remove: (id) => api(`/users/${id}`, { method: "DELETE" }),
 
-  // Admin rescue. Each returns { tempPassword?, emailed, emailError } — the
-  // account is changed either way, and whether the mail went is reported
-  // separately so a caller is never told "failed" about work that succeeded.
+  // Admin rescue. Returns { emailed, emailError, expiresHours }. Reset and
+  // onboarding each email a one-time link — there is no password in any
+  // response — and a link that could not be emailed is discarded server-side.
   resetPassword: (id) => api(`/users/${id}/reset-password`, { method: "POST", body: {} }),
   resetTwoFactor: (id) => api(`/users/${id}/reset-2fa`, { method: "POST", body: {} }),
   resendOnboarding: (id) => api(`/users/${id}/resend-onboarding`, { method: "POST", body: {} }),

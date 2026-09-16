@@ -116,28 +116,41 @@ function RolePill({ role }) {
 }
 
 /** What the server says about an account's state, turned into a badge. */
+/** "until 3:40 pm" today, or "until 17 Sep, 9:10 am" if it runs past midnight. */
+function linkExpiry(at) {
+  if (!at) return "Waiting";
+  const d = new Date(at);
+  const sameDay = d.toDateString() === new Date().toDateString();
+  const time = d.toLocaleTimeString("en-AU", { hour: "numeric", minute: "2-digit" });
+  return sameDay
+    ? `until ${time}`
+    : `until ${d.toLocaleDateString("en-AU", { day: "numeric", month: "short" })}, ${time}`;
+}
+
 function StatusCell({ user }) {
-  if (user.status === "invited") {
+  // A link that lives for hours needs its time shown, not its date — "Expires
+  // 17 Sep" says nothing useful about something that dies at 3:40 this afternoon.
+  const pending = {
+    invited:          { label: "Invited",        tone: "info",    Icon: Mail,          live: true },
+    "invite-expired": { label: "Invite expired", tone: "warning", Icon: AlertTriangle, live: false },
+    "reset-sent":     { label: "Reset sent",     tone: "info",    Icon: KeyRound,      live: true },
+    // An expired RESET is worse than an expired invite: the old password was
+    // retired when the link went out, so this account is locked until someone
+    // sends another. Said in the loudest tone the table has.
+    "reset-expired":  { label: "Reset expired — locked", tone: "danger", Icon: AlertTriangle, live: false },
+  }[user.status];
+
+  if (pending) {
     return (
       <span className="inline-flex flex-col gap-1">
-        <StatusPill tone="info" dot={false}>
-          <Mail size={11} />
-          Invited
+        <StatusPill tone={pending.tone} dot={false}>
+          <pending.Icon size={11} />
+          {pending.label}
         </StatusPill>
-        <span className="text-[11px] text-[var(--fg-subtle)]">
-          {user.inviteExpiresAt
-            ? `Expires ${new Date(user.inviteExpiresAt).toLocaleDateString("en-AU", { day: "numeric", month: "short" })}`
-            : "Waiting"}
-        </span>
+        {pending.live && (
+          <span className="text-[11px] text-[var(--fg-subtle)]">{linkExpiry(user.inviteExpiresAt)}</span>
+        )}
       </span>
-    );
-  }
-  if (user.status === "invite-expired") {
-    return (
-      <StatusPill tone="warning" dot={false}>
-        <AlertTriangle size={11} />
-        Invite expired
-      </StatusPill>
     );
   }
   if (!user.lastLoginAt) {
@@ -197,9 +210,12 @@ export default function UsersPage() {
   }, []);
 
   /**
-   * Runs one rescue action. Reports the mail separately from the change,
-   * because the account has already been altered by the time SMTP is tried and
-   * telling the admin "failed" would be a lie about the part that succeeded.
+   * Runs one rescue action and reports what actually happened.
+   *
+   * Nothing here ever shows a password. Resets and onboarding both email a
+   * one-time link, and the link exists only inside that email — so when the
+   * email fails, the honest report is "nothing was sent, send it again", not a
+   * credential for the admin to pass on by hand.
    */
   async function runRescue() {
     if (!rescue) return;
@@ -209,38 +225,36 @@ export default function UsersPage() {
       const r =
         kind === "password" ? await userApi.resetPassword(user.id)
         : kind === "twofactor" ? await userApi.resetTwoFactor(user.id)
-        : kind === "invite" ? await userApi.resendInvite(user.id)
         : await userApi.resendOnboarding(user.id);
 
       setRescue(null);
-      const mailLine = r.emailed
-        ? `An email has been sent to ${user.email}.`
-        : `The email could NOT be sent${r.emailError ? ` (${r.emailError})` : ""} — pass this on another way.`;
 
       if (kind === "twofactor") {
         setRescueResult({
           title: "Two-factor reset",
-          message: `${user.email} will be asked to set up two-factor again at their next sign-in. ${mailLine}`,
+          message:
+            `${user.email} will be asked to set up two-factor again at their next sign-in. ` +
+            (r.emailed
+              ? "They have been emailed to say it happened."
+              : `The notification email could NOT be sent${r.emailError ? ` (${r.emailError})` : ""}, so tell them another way.`),
         });
-      } else if (kind === "invite") {
-        // Nothing to show and nothing to copy: the link is in the mail and
-        // nowhere else, which is the entire point of sending one.
-        if (r.emailed) {
-          toast.success(`Invite sent to ${user.email} — good for ${r.expiresDays || 7} days`);
-        } else {
-          setRescueResult({
-            title: "Invite not sent",
-            message:
-              `A new link was created for ${user.email} but the email did not go out` +
-              `${r.emailError ? ` (${r.emailError})` : ""}.\n\n` +
-              `The link exists only inside that email, so there is nothing to pass on by hand — ` +
-              `fix SMTP under Settings and send it again, or set a password for them directly by editing the account.`,
-          });
-        }
+      } else if (r.emailed) {
+        const hours = r.expiresHours;
+        toast.success(
+          kind === "password"
+            ? `Reset link sent to ${user.email} — valid ${hours} hour${hours === 1 ? "" : "s"}. Their old password no longer works.`
+            : `Onboarding link sent to ${user.email} — valid ${hours} hour${hours === 1 ? "" : "s"}.`,
+          { duration: 7000 }
+        );
       } else {
         setRescueResult({
-          title: kind === "password" ? "Password reset" : "Welcome email sent",
-          message: `Temporary password for ${user.email}:\n\n${r.tempPassword}\n\nThey will be asked to change it when they sign in. ${mailLine}`,
+          title: kind === "password" ? "Reset link not sent" : "Onboarding link not sent",
+          message:
+            `The email to ${user.email} could not be sent${r.emailError ? ` (${r.emailError})` : ""}.\n\n` +
+            (kind === "password"
+              ? "Nothing was changed: their current password still works, and no link exists. "
+              : "No link exists, and any earlier one has stopped working. ") +
+            "Fix email under Settings and try again — or edit the account and set a password for them directly.",
         });
       }
       await loadUsers();
@@ -282,7 +296,7 @@ export default function UsersPage() {
   }, [users, query, roleFilter]);
 
   const filtered = query.trim() !== "" || roleFilter !== "all";
-  const pending = users.filter((u) => u.status === "invited" || u.status === "invite-expired").length;
+  const pending = users.filter((u) => u.status !== "active").length;
 
   return (
     <PageShell>
@@ -291,7 +305,7 @@ export default function UsersPage() {
         title="User Management"
         subtitle={
           pending
-            ? `${users.length.toLocaleString()} account${users.length !== 1 ? "s" : ""} · ${pending} waiting on an invite`
+            ? `${users.length.toLocaleString()} account${users.length !== 1 ? "s" : ""} · ${pending} waiting on a password link`
             : `${users.length.toLocaleString()} account${users.length !== 1 ? "s" : ""} with console access.`
         }
         icon={<Users size={22} />}
@@ -374,7 +388,8 @@ export default function UsersPage() {
                 shown.map((u) => {
                   const r = roleOf(u.role);
                   const isSelf = u.email === currentEmail;
-                  const awaiting = u.status === "invited" || u.status === "invite-expired";
+                  // Waiting on a link — onboarding or reset, live or lapsed.
+                  const awaiting = u.status !== "active";
                   return (
                     <tr key={u.id}>
                       <Td>
@@ -411,23 +426,6 @@ export default function UsersPage() {
                             <Edit3 size={14} />
                           </IconButton>
 
-                          {/* An account still waiting on its invite gets ONE
-                              obvious action — send it again. The password and
-                              onboarding resets below would work, but both mail
-                              a temporary password, which is the thing the
-                              invite flow exists to avoid. */}
-                          {awaiting && (
-                            <IconButton
-                              onClick={() => setRescue({ user: u, kind: "invite" })}
-                              size="sm"
-                              title="Send the invite link again"
-                              aria-label={`Resend invite to ${u.email}`}
-                              className="text-[var(--info-fg)] hover:bg-[var(--info-soft)]"
-                            >
-                              <MailCheck size={14} />
-                            </IconButton>
-                          )}
-
                           {/* The rescue actions. Each is confirmed first: all
                               invalidate something the account is using right
                               now, and a mis-click should not be the thing that
@@ -435,7 +433,7 @@ export default function UsersPage() {
                           <IconButton
                             onClick={() => setRescue({ user: u, kind: "password" })}
                             size="sm"
-                            title="Reset password and email a temporary one"
+                            title="Reset password — emails a one-time link, and the old password stops working"
                             aria-label={`Reset password for ${u.email}`}
                           >
                             <KeyRound size={14} />
@@ -449,10 +447,15 @@ export default function UsersPage() {
                             <ShieldOff size={14} />
                           </IconButton>
                           <IconButton
-                            onClick={() => setRescue({ user: u, kind: "onboarding" })}
+                            onClick={() => setRescue({ user: u, kind: awaiting && u.status.startsWith("reset") ? "password" : "onboarding" })}
                             size="sm"
-                            title="Resend the welcome email with a new temporary password"
-                            aria-label={`Resend onboarding for ${u.email}`}
+                            title={
+                              awaiting
+                                ? "Send the link again — the earlier one stops working"
+                                : "Send an onboarding link to set a password"
+                            }
+                            aria-label={`Send a password link to ${u.email}`}
+                            className={awaiting ? "text-[var(--info-fg)] hover:bg-[var(--info-soft)]" : ""}
                           >
                             <Send size={14} />
                           </IconButton>
@@ -551,9 +554,10 @@ export default function UsersPage() {
 const RESCUE_COPY = {
   password: {
     title: "Reset password",
-    verb: "Reset password",
+    verb: "Send reset link",
     message:
-      "A new temporary password will be set and emailed to {email}. Their current password stops working immediately, and they will be asked to choose a new one when they sign in.",
+      "A one-time link to choose a new password will be emailed to {email}. It works once and expires in a couple of hours. " +
+      "Their current password stops working as soon as the email is sent — if the email cannot be sent, nothing changes.",
   },
   twofactor: {
     title: "Reset two-factor",
@@ -562,16 +566,11 @@ const RESCUE_COPY = {
       "This clears the authenticator and every backup code for {email} — for a lost or replaced phone. They will set two-factor up again at their next sign-in, and will be emailed to say it happened.",
   },
   onboarding: {
-    title: "Resend welcome email",
-    verb: "Send welcome email",
+    title: "Send onboarding link",
+    verb: "Send link",
     message:
-      "A new temporary password will be set and the welcome email sent again to {email}. Any password they already have stops working.",
-  },
-  invite: {
-    title: "Send the invite again",
-    verb: "Send invite",
-    message:
-      "A fresh link will be emailed to {email} so they can choose their own password. Any earlier link stops working straight away.",
+      "A one-time link to set their password will be emailed to {email}. It works once and expires within hours, and any earlier link stops working. " +
+      "A password they already have is left alone.",
   },
 };
 
@@ -702,7 +701,7 @@ function UserFormModal({ mode, user, onClose, onSaved }) {
         return;
       }
       if (r.emailed) {
-        toast.success(`Invite sent to ${form.email} — good for ${r.expiresDays || 7} days`);
+        toast.success(`Onboarding link sent to ${form.email} — valid ${r.expiresHours} hour${r.expiresHours === 1 ? "" : "s"}`);
         onSaved();
         return;
       }
@@ -873,7 +872,7 @@ function UserFormModal({ mode, user, onClose, onSaved }) {
             <p className="text-[12.5px] leading-relaxed text-[var(--info-fg)]">
               We’ll email{" "}
               <span className="font-semibold">{form.email || "them"}</span> a link to choose their own
-              password. It works once, expires in seven days, and nobody here — including you — ever
+              password. It works once, expires within hours, and nobody here — including you — ever
               sees what they pick.
             </p>
           </div>

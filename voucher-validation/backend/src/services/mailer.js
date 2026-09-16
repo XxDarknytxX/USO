@@ -778,10 +778,30 @@ function accountShell(title, lead, blocks, footer) {
  * any other way before signing in, and "you have been given an account" without
  * "to do what" is a mail people ignore.
  */
-export function buildInvite({ name, email, url, link, roleLabel, expiresDays = 7 }) {
+/** "8 hours", "1 hour" — the only unit these links are measured in now. */
+const hoursText = (h) => `${h} hour${Number(h) === 1 ? "" : "s"}`;
+
+/** The button and the pasteable fallback, identical in both link emails. */
+function linkBlock(link, label, footer) {
+  return `<a href="${link}" style="display:inline-block;background:#e60000;color:#ffffff;text-decoration:none;font-size:14px;font-weight:600;padding:11px 22px;border-radius:8px;">${label}</a>
+       <br><br><span style="font-size:12px;color:#6b7580;">Or paste this into your browser:</span>
+       <br><span style="font-size:12px;color:#4a5560;word-break:break-all;">${link}</span>
+       <br><br>${footer}`;
+}
+
+/**
+ * Onboarding. Carries a link, never a password — so there is nothing in this
+ * mail still worth stealing a few hours after it was sent, and nothing that
+ * works twice.
+ *
+ * The role is stated because it is the one thing the recipient cannot find out
+ * any other way before signing in, and "you have been given an account" without
+ * "to do what" is a mail people ignore.
+ */
+export function buildInvite({ name, email, url, link, roleLabel, expiresHours = 8 }) {
   const what = roleLabel ? ` as ${/^[aeiou]/i.test(roleLabel) ? "an" : "a"} ${roleLabel}` : "";
   const footer =
-    `This link works once and stops working after ${expiresDays} days. ` +
+    `This link works once and stops working after ${hoursText(expiresHours)}. ` +
     "If it has expired by the time you open it, ask your administrator to send another. " +
     "If two-factor authentication is switched on, you will be walked through setting it up when you first sign in.";
   return {
@@ -791,7 +811,7 @@ export function buildInvite({ name, email, url, link, roleLabel, expiresDays = 7
       `Choose your password here:\n${link}\n\n` +
       `Email: ${email}\n` +
       `Console: ${url}\n\n` +
-      `This link works once and expires in ${expiresDays} days. If you were not expecting this, tell your administrator.`,
+      `This link works once and expires in ${hoursText(expiresHours)}. If you were not expecting this, tell your administrator.`,
     html: accountShell(
       `Welcome${name ? `, ${name}` : ""}`,
       `An account has been created for you${what} on the USO operations console. Choose your own password to finish setting it up — nobody else has seen it, and nobody can.`,
@@ -799,47 +819,43 @@ export function buildInvite({ name, email, url, link, roleLabel, expiresDays = 7
         { label: "Email", value: email },
         { label: "Console", value: url },
       ],
-      `<a href="${link}" style="display:inline-block;background:#e60000;color:#ffffff;text-decoration:none;font-size:14px;font-weight:600;padding:11px 22px;border-radius:8px;">Choose your password</a>
-       <br><br><span style="font-size:12px;color:#6b7580;">Or paste this into your browser:</span>
-       <br><span style="font-size:12px;color:#4a5560;word-break:break-all;">${link}</span>
-       <br><br>${footer}`
+      linkBlock(link, "Choose your password", footer)
     ),
   };
 }
 
-export function buildOnboarding({ name, email, password, url }) {
-  const subject = "Your Vodafone Fiji USO console account";
+/**
+ * Password reset, by an administrator. A link to choose a new password — not a
+ * new password. The old one has already stopped working by the time this is
+ * read, and the mail says so, because the recipient's first question is
+ * whether they can still get in the old way.
+ *
+ * The "if you did not ask for this" line is not boilerplate: an unexpected
+ * reset is how a person finds out somebody else is working on their account.
+ */
+export function buildPasswordResetLink({ name, email, url, link, expiresHours = 2 }) {
   const footer =
-    "You will be asked to set your own password the first time you sign in. If two-factor authentication is switched on, you will also be walked through setting it up.";
+    `This link works once and stops working after ${hoursText(expiresHours)}. ` +
+    "If it has expired, ask your administrator to send another. " +
+    "<strong>If you did not ask for this reset, contact your administrator now</strong> \u2014 someone else may have requested it.";
   return {
-    subject,
-    text: `An account has been created for you on the Vodafone Fiji USO operations console.\n\nSign in at: ${url}\nEmail: ${email}\nTemporary password: ${password}\n\nYou will be asked to change this password when you first sign in.`,
+    subject: "Reset your USO console password",
+    text:
+      `An administrator reset the password on your Vodafone Fiji USO console account${name ? ` (${name})` : ""}.\n` +
+      `Your previous password no longer works.\n\n` +
+      `Choose a new password here:\n${link}\n\n` +
+      `Email: ${email}\n` +
+      `Console: ${url}\n\n` +
+      `This link works once and expires in ${hoursText(expiresHours)}. ` +
+      `If you did not ask for this, contact your administrator now.`,
     html: accountShell(
-      `Welcome${name ? `, ${name}` : ""}`,
-      "An account has been created for you on the USO operations console. Use the temporary password below to sign in.",
+      "Choose a new password",
+      `An administrator reset the password on this account${name ? ` for ${name}` : ""}. Your previous password no longer works — choose a new one with the link below.`,
       [
-        { label: "Sign in at", value: url },
         { label: "Email", value: email },
-        { label: "Temporary password", value: password, mono: true },
+        { label: "Console", value: url },
       ],
-      footer
-    ),
-  };
-}
-
-export function buildPasswordReset({ name, email, password, url }) {
-  return {
-    subject: "Your USO console password has been reset",
-    text: `Your password for the Vodafone Fiji USO operations console has been reset by an administrator.\n\nSign in at: ${url}\nEmail: ${email}\nTemporary password: ${password}\n\nYou will be asked to set a new password when you sign in. If you did not ask for this, contact your administrator now.`,
-    html: accountShell(
-      "Your password has been reset",
-      `An administrator reset the password on this account${name ? ` for ${name}` : ""}. Use the temporary password below, then set your own.`,
-      [
-        { label: "Sign in at", value: url },
-        { label: "Email", value: email },
-        { label: "Temporary password", value: password, mono: true },
-      ],
-      "You will be asked to set a new password as soon as you sign in. <strong>If you did not ask for this reset, contact your administrator now</strong> \u2014 someone else may have requested it."
+      linkBlock(link, "Choose a new password", footer)
     ),
   };
 }
