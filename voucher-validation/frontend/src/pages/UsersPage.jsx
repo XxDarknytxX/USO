@@ -56,10 +56,11 @@ const ROLES = {
     icon: Eye,
     tone: "info",
     tile: "blue",
-    blurb: "Reads the numbers. Changes nothing, anywhere.",
+    blurb: "Reads the numbers and the maintenance record. Changes nothing, anywhere.",
     opens: [
       { label: "Dashboard", Icon: LayoutDashboard },
       { label: "Overview", Icon: Gauge },
+      { label: "Maintenance (view)", Icon: Wrench },
     ],
     scoped: true,
   },
@@ -68,7 +69,7 @@ const ROLES = {
     icon: Wrench,
     tone: "warning",
     tile: "orange",
-    blurb: "Everything a viewer sees, and files maintenance reports with photos from site.",
+    blurb: "Everything a viewer sees, and also files maintenance reports with photos from site.",
     opens: [
       { label: "Dashboard", Icon: LayoutDashboard },
       { label: "Overview", Icon: Gauge },
@@ -127,74 +128,90 @@ function linkExpiry(at) {
     : `until ${d.toLocaleDateString("en-AU", { day: "numeric", month: "short" })}, ${time}`;
 }
 
+/*
+ * Every status is exactly TWO lines — a pill, and one line under it (blank when
+ * there is nothing to say) — so every row in the table is the same height.
+ * A third line for "link out until …" made one row taller than its neighbours,
+ * and the pill column stretched the pill to the width of that line.
+ *
+ * A live password link on an account that can still sign in is shown as a
+ * small mail mark INSIDE the pill row, with the expiry in its tooltip, rather
+ * than as another line of text.
+ */
+function StatusLine({ children }) {
+  return (
+    <span className="block h-[15px] truncate text-[11px] leading-[15px] text-[var(--fg-subtle)]">
+      {children}
+    </span>
+  );
+}
+
+function LinkMark({ at }) {
+  const label = `Password link out ${linkExpiry(at)}`;
+  return (
+    <span
+      title={label}
+      aria-label={label}
+      className="grid h-[18px] w-[18px] shrink-0 place-items-center rounded-full bg-[var(--info-soft)] text-[var(--info-fg)]"
+    >
+      <Mail size={10} />
+    </span>
+  );
+}
+
 function StatusCell({ user }) {
-  // A link that lives for hours needs its time shown, not its date — "Expires
-  // 17 Sep" says nothing useful about something that dies at 3:40 this afternoon.
+  // A link that lives for hours needs its time shown, not its date.
   const pending = {
     invited:          { label: "Invited",        tone: "info",    Icon: Mail,          live: true },
     "invite-expired": { label: "Invite expired", tone: "warning", Icon: AlertTriangle, live: false },
     "reset-sent":     { label: "Reset sent",     tone: "info",    Icon: KeyRound,      live: true },
-    // An expired RESET is worse than an expired invite: the old password was
-    // retired when the link went out, so this account is locked until someone
-    // sends another. Said in the loudest tone the table has.
-    "reset-expired":  { label: "Reset expired — locked", tone: "danger", Icon: AlertTriangle, live: false },
+    // The old password was retired when this link went out, so the account is
+    // locked until someone sends another. The loudest tone the table has.
+    "reset-expired":  { label: "Locked",         tone: "danger",  Icon: AlertTriangle, live: false },
   }[user.status];
 
+  let pill, line;
   if (pending) {
-    return (
-      <span className="inline-flex flex-col gap-1">
-        <StatusPill tone={pending.tone} dot={false}>
-          <pending.Icon size={11} />
-          {pending.label}
-        </StatusPill>
-        {pending.live && (
-          <span className="text-[11px] text-[var(--fg-subtle)]">{linkExpiry(user.inviteExpiresAt)}</span>
-        )}
-      </span>
+    pill = (
+      <StatusPill tone={pending.tone} dot={false}>
+        <pending.Icon size={11} />
+        {pending.label}
+      </StatusPill>
     );
-  }
-  if (!user.lastLoginAt) {
-    return (
-      <span className="inline-flex flex-col gap-1">
-        <StatusPill tone="neutral" dot={false}>
-          <Clock size={11} />
-          Never signed in
-        </StatusPill>
-        {user.linkLive && <LinkOut at={user.inviteExpiresAt} />}
-      </span>
+    line = pending.live
+      ? linkExpiry(user.inviteExpiresAt)
+      : user.status === "reset-expired" ? "reset link expired" : "send the link again";
+  } else if (!user.lastLoginAt) {
+    pill = (
+      <StatusPill tone="neutral" dot={false}>
+        <Clock size={11} />
+        Never signed in
+      </StatusPill>
     );
-  }
-  return (
-    <span className="inline-flex flex-col gap-1">
+    line = "";
+  } else {
+    pill = (
       <StatusPill tone="success" dot={false}>
         <Check size={11} />
         Active
       </StatusPill>
-      <span className="text-[11px] text-[var(--fg-subtle)]">
-        {new Date(user.lastLoginAt).toLocaleDateString("en-AU", { day: "numeric", month: "short", year: "numeric" })}
-      </span>
-      {user.linkLive && <LinkOut at={user.inviteExpiresAt} />}
-    </span>
-  );
-}
+    );
+    line = new Date(user.lastLoginAt).toLocaleDateString("en-AU", { day: "numeric", month: "short", year: "numeric" });
+  }
 
-/**
- * A working account that ALSO has a live password link — onboarding sent to
- * someone who can already sign in. Not a status, because nothing is wrong, but
- * worth a line: the link is a way into the account until it expires.
- */
-function LinkOut({ at }) {
   return (
-    <span className="inline-flex items-center gap-1 text-[11px] text-[var(--info-fg)]">
-      <Mail size={10} />
-      link out {linkExpiry(at)}
+    // items-start: the pill keeps its own width instead of stretching to the
+    // widest line beneath it.
+    <span className="inline-flex flex-col items-start gap-1">
+      <span className="inline-flex items-center gap-1.5">
+        {pill}
+        {!pending && user.linkLive && <LinkMark at={user.inviteExpiresAt} />}
+      </span>
+      <StatusLine>{line}</StatusLine>
     </span>
   );
 }
 
-/* ============================================================================
-   Page
-   ========================================================================= */
 export default function UsersPage() {
   const [users, setUsers] = useState([]);
   const [loading, setLoading] = useState(true);
