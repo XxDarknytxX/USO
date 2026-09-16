@@ -9,6 +9,7 @@
 // on a different product — which is exactly how the two used to read.
 
 import { useEffect, useState, useCallback } from "react";
+import { useNavigate } from "react-router-dom";
 import {
   PieChart, Pie, Cell, BarChart, Bar, AreaChart, Area,
   XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
@@ -28,7 +29,7 @@ import { useMonthlyBreakdown } from "../../hooks/useMonthlyBreakdown";
 import {
   hasSalesHistory, BreakdownEmpty,
   RevenueTrendPanel, RevenuePlanMix, SalesTotals, RiskTotals,
-  SalesByHourPanel, SoldByPlanPanel, OutcomesPanel,
+  SalesByHourPanel, SoldByPlanPanel, OutcomesPanel, PlansPurchasedPanel,
 } from "../../components/MonthlyBreakdown";
 import {
   PageShell, PageHeader, KpiGrid, StatCard, Panel, Tabs, Button,
@@ -59,6 +60,7 @@ const DEVICE_TONE = { gateway: "indigo", ap: "teal", switch: "violet", other: "s
 
 export default function SiteDashboard({ groupId, site }) {
   const { setActiveSiteId } = useSite();
+  const navigate = useNavigate();
   // One window drives every historical figure on this page.
   const mb = useMonthlyBreakdown(groupId);
   const ct = useChartTheme();
@@ -66,6 +68,15 @@ export default function SiteDashboard({ groupId, site }) {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [tab, setTab] = useState("sales");
+
+  // Opens this village's vouchers for one plan. VouchersPage already scopes
+  // itself to the village in the switcher, so only the plan has to travel —
+  // and it arrives as a filter the operator can see and widen, rather than a
+  // hidden query they cannot undo.
+  const openPlanVouchers = useCallback(
+    (plan) => navigate(`/vouchers?package=${encodeURIComponent(plan.name)}`),
+    [navigate]
+  );
 
   const load = useCallback(
     async (isRefresh = false) => {
@@ -357,6 +368,7 @@ export default function SiteDashboard({ groupId, site }) {
 
         {tab === "plans" && (
           <div className="flex flex-col gap-5">
+            <PlansPurchasedPanel state={mb} onOpenPlan={openPlanVouchers} />
             <SoldByPlanPanel state={mb} />
             <Panel
               title="Plan breakdown"

@@ -94,7 +94,11 @@ export default function VouchersPage() {
   // Prefill the status filter from the URL so a dashboard card can drill in
   // (e.g. "Vouchers sold" → /vouchers?status=sold).
   const [statusFilter, setStatusFilter] = useState(() => searchParams.get("status") || "");
-  const [packageFilter, setPackageFilter] = useState("");
+  // Prefilled from the URL too, so a plan on a village dashboard can drill
+  // straight in: /vouchers?package=Daily%20Pass. It lands in the visible filter
+  // control rather than as a hidden query, so the operator can see why the list
+  // is narrowed and widen it.
+  const [packageFilter, setPackageFilter] = useState(() => searchParams.get("package") || "");
   const [phoneInput, setPhoneInput] = useState("");
   const [phoneFilter, setPhoneFilter] = useState("");
   const [packages, setPackages] = useState([]);

@@ -339,13 +339,21 @@ export default function Dashboard() {
         // rather than as zero, so "nothing reported" never outranks a village
         // that genuinely used very little.
         slUsed: net?.starlink?.usedGb ?? -1,
-        // Data PURCHASED by customers, and how much of it they actually used.
-        // Sold-only on the server: the old figure summed every voucher ever
-        // printed, so it grew when stock was generated and measured nothing a
-        // customer had bought.
-        sold: Number(s.total || 0) - Number(s.unused || 0),
-        soldQ: Number(s.sold_quota_mb || 0),
-        soldUsedQ: Number(s.sold_used_quota_mb || 0),
+        // Data PURCHASED by customers IN THE SELECTED WINDOW, and how much of
+        // it they used.
+        //
+        // Read from the breakdown, not from the all-time voucher rollup. The
+        // first version used the rollup and so reported every voucher ever
+        // sold while the revenue and sales beside it moved with the month
+        // picker — a village could read "no sales this month" and "4 GB
+        // purchased" in the same row, which is what made it untrustworthy.
+        //
+        // The breakdown ties each sale in the window to the voucher it issued
+        // and sums that voucher's real quota, so this figure and the sales
+        // count beside it are two views of the same transactions.
+        sold: Number(rev?.count || 0),
+        soldQ: Number(rev?.purchasedMb || 0),
+        soldUsedQ: Number(rev?.usedMb || 0),
       };
     });
   }, [scopedPerSite, sites, netByGroup, revWindowByGroup]);
@@ -1291,7 +1299,14 @@ function StarlinkDataCell({ sl }) {
 function VoucherDataCell({ soldQ, usedQ, sold }) {
   if (!soldQ) {
     return (
-      <span className="text-[var(--fg-subtle)]" title="No vouchers sold in this village yet">
+      <span
+        className="text-[var(--fg-subtle)]"
+        title={
+          sold
+            ? `${fmtNum(sold)} sale(s) in this window, but none could be matched to a voucher.`
+            : "Nothing purchased here in the selected window."
+        }
+      >
         —
       </span>
     );
@@ -1317,14 +1332,14 @@ function VoucherDataCell({ soldQ, usedQ, sold }) {
       {unreported ? (
         <span
           className="hidden lg:block w-12 text-[10.5px] text-[var(--fg-subtle)] shrink-0 text-left"
-          title={`${fmtNum(sold)} voucher${sold === 1 ? "" : "s"} sold carrying ${fmtGb(purchasedGb)} GB. This village's gateway does not report per-voucher usage, so how much was consumed is unknown.`}
+          title={`${fmtNum(sold)} sale${sold === 1 ? "" : "s"} in this window carrying ${fmtGb(purchasedGb)} GB. This village's gateway does not report per-voucher usage, so how much was consumed is unknown.`}
         >
           no report
         </span>
       ) : (
         <span
           className="hidden lg:block w-12 h-1.5 rounded-full bg-[var(--bg-surface)] overflow-hidden shrink-0"
-          title={`${pct}% of the ${fmtGb(purchasedGb)} GB sold across ${fmtNum(sold)} voucher${sold === 1 ? "" : "s"} has been used`}
+          title={`${pct}% of the ${fmtGb(purchasedGb)} GB sold across ${fmtNum(sold)} sale${sold === 1 ? "" : "s"} in this window has been used`}
         >
           <span
             className="block h-full rounded-full"

@@ -721,6 +721,7 @@ export function makePortalConfigController(pool) {
                   MAX(l.user_group_id) AS user_group_id,
                   MAX(l.customer_phone) AS customer_phone,
                   MAX(l.event_type='voucher_claimed')             AS has_voucher,
+                  MAX(CASE WHEN l.event_type='voucher_claimed' THEN l.voucher_code END) AS voucher_code,
                   MAX(l.event_type='auth_success')                AS has_auth,
                   MAX(l.event_type='manual_assistance_created')   AS has_manual
              FROM portal_audit_logs l
@@ -769,6 +770,44 @@ export function makePortalConfigController(pool) {
           }
         }
         const byHour = Array.from({ length: 24 }, (_, h) => ({ h: String(h).padStart(2, '0'), count: 0, revenue: 0 }));
+        // DATA PURCHASED IN THIS WINDOW, from the vouchers the window's sales
+        // actually issued.
+        //
+        // Not from portal_plan_configs.data_allowance: that column is display
+        // text ("1GB", and it falls back to the user-group name when unset), so
+        // it cannot be summed. The voucher's own quota is what Ruijie assigned
+        // and is the number a customer really bought.
+        //
+        // Archived vouchers are included — a voucher sold this month and since
+        // rotated out of the live table was still sold this month, and omitting
+        // it would quietly shrink the past.
+        const codes = [...new Set(txns.map((t) => t.voucher_code).filter(Boolean))];
+        const quotaByCode = {};
+        if (codes.length) {
+          const ph = codes.map(() => '?').join(',');
+          try {
+            const [vq] = await pool.query(
+              `SELECT voucher_code, quota, used_quota, package_name FROM vouchers WHERE voucher_code IN (${ph})
+               UNION ALL
+               SELECT voucher_code, quota, used_quota, package_name FROM vouchers_historical WHERE voucher_code IN (${ph})`,
+              [...codes, ...codes]
+            );
+            // First row wins: the live table is listed first, and a code present
+            // in both is the same voucher mid-archive.
+            for (const v of vq) {
+              if (!quotaByCode[v.voucher_code]) {
+                quotaByCode[v.voucher_code] = {
+                  quota: Number(v.quota) || 0,
+                  used: Number(v.used_quota) || 0,
+                  pkg: v.package_name || null,
+                };
+              }
+            }
+          } catch (e) {
+            console.error('[breakdown] voucher quota lookup failed:', e.message);
+          }
+        }
+
         const planAgg = {}, villageAgg = {};
         const phones = new Set();
         let revenue = 0, count = 0, connected = 0, manual = 0, noVoucher = 0, atRisk = 0;
@@ -792,11 +831,14 @@ export function makePortalConfigController(pool) {
           }
           const pk = t.plan_key || 'unknown';
           const pn = planName[pk] || pk;
-          if (!planAgg[pn]) planAgg[pn] = { name: pn, revenue: 0, count: 0 };
+          const vq = t.voucher_code ? quotaByCode[t.voucher_code] : null;
+          if (!planAgg[pn]) planAgg[pn] = { name: pn, planKey: pk, revenue: 0, count: 0, purchasedMb: 0, usedMb: 0, withQuota: 0 };
           planAgg[pn].revenue += amt; planAgg[pn].count++;
+          if (vq) { planAgg[pn].purchasedMb += vq.quota; planAgg[pn].usedMb += vq.used; planAgg[pn].withQuota++; }
           const vk = grp == null ? 'unassigned' : String(grp);
-          if (!villageAgg[vk]) villageAgg[vk] = { groupId: grp, name: villageName[vk] || (grp ? `Group ${grp}` : 'Unassigned'), revenue: 0, count: 0 };
+          if (!villageAgg[vk]) villageAgg[vk] = { groupId: grp, name: villageName[vk] || (grp ? `Group ${grp}` : 'Unassigned'), revenue: 0, count: 0, purchasedMb: 0, usedMb: 0, withQuota: 0 };
           villageAgg[vk].revenue += amt; villageAgg[vk].count++;
+          if (vq) { villageAgg[vk].purchasedMb += vq.quota; villageAgg[vk].usedMb += vq.used; villageAgg[vk].withQuota++; }
         }
 
         // What happened across the whole window, money or not — the failure

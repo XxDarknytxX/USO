@@ -283,6 +283,94 @@ export function SoldByPlanPanel({ state, className }) {
   );
 }
 
+/**
+ * Plans purchased in the window, as an auditable list.
+ *
+ * The bar chart beside it answers "which plan sells"; this answers "what
+ * exactly was bought, and can I go and look at it". Each row carries the data
+ * those sales issued — summed from the real quota on the vouchers the
+ * transactions handed out, not from the plan's display text — and opens the
+ * voucher list filtered to that plan.
+ *
+ * `onOpenPlan` is what makes it a drill rather than a read: without somewhere
+ * to go, a number a customer disputes is a dead end.
+ */
+export function PlansPurchasedPanel({ state, onOpenPlan, className }) {
+  const byPlan = state.data?.byPlan || [];
+  if (isCold(state)) return <SkeletonCard height="h-80" className={className} />;
+
+  const totalMb = byPlan.reduce((a, p) => a + Number(p.purchasedMb || 0), 0);
+  const gb = (mb) => {
+    const v = Number(mb || 0) / 1024;
+    return v >= 100 ? Math.round(v).toLocaleString() : v.toFixed(1);
+  };
+  // A plan whose vouchers we could not price in data is reported rather than
+  // silently counted as zero — otherwise the column would understate the
+  // month and nobody would know why.
+  const unpriced = byPlan.reduce((a, p) => a + (Number(p.count || 0) - Number(p.withQuota || 0)), 0);
+
+  return (
+    <Panel
+      title="Plans purchased"
+      subtitle={`${num(byPlan.reduce((a, p) => a + Number(p.count || 0), 0))} sale(s) · ${gb(totalMb)} GB issued · ${rangeLabel(state.month)}`}
+      icon={<Ticket size={15} />}
+      tone="violet"
+      padding={false}
+      className={className}
+    >
+      {byPlan.length === 0 ? (
+        <div className="p-5">
+          <EmptyState
+            icon={Ticket}
+            title="No plans purchased in this window"
+            description="Nothing was sold here in the selected period. Widen the window to see earlier sales."
+          />
+        </div>
+      ) : (
+        <>
+          <DataTable maxHeight={320}>
+            <thead>
+              <tr>
+                <Th>Plan</Th>
+                <Th align="right">Sold</Th>
+                <Th align="right">Revenue</Th>
+                <Th align="right">Issued GB</Th>
+                <Th align="right">Used GB</Th>
+              </tr>
+            </thead>
+            <tbody>
+              {byPlan.map((p) => (
+                <tr
+                  key={p.name}
+                  onClick={onOpenPlan ? () => onOpenPlan(p) : undefined}
+                  className={onOpenPlan ? "cursor-pointer" : undefined}
+                  title={onOpenPlan ? `Open the ${p.name} vouchers` : undefined}
+                >
+                  <Td strong>{p.name}</Td>
+                  <Td align="right" className="tabular-nums">{num(p.count)}</Td>
+                  <Td align="right" strong className="tabular-nums">{money(p.revenue)}</Td>
+                  <Td align="right" className="tabular-nums">{gb(p.purchasedMb)}</Td>
+                  <Td align="right" className="tabular-nums">
+                    {/* Zero used across sold vouchers is usually the gateway not
+                        reporting flow rather than nobody connecting. */}
+                    {p.usedMb ? gb(p.usedMb) : <span className="text-[var(--fg-subtle)]">—</span>}
+                  </Td>
+                </tr>
+              ))}
+            </tbody>
+          </DataTable>
+          {unpriced > 0 && (
+            <p className="px-5 py-3 border-t border-[var(--border-subtle)] text-[12px] text-[var(--fg-muted)]">
+              {num(unpriced)} sale{unpriced === 1 ? "" : "s"} could not be matched to a voucher, so their
+              data is not counted above — usually a payment that never got one.
+            </p>
+          )}
+        </>
+      )}
+    </Panel>
+  );
+}
+
 /** Revenue per village — only meaningful across villages, so the estate scope only. */
 export function RevenueByVillagePanel({ state, className }) {
   const ct = useChartTheme();
