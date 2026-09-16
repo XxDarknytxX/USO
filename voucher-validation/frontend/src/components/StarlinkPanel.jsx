@@ -137,6 +137,11 @@ export default function StarlinkPanel({ projectId, compact = false }) {
 
   return (
     <Panel
+      // In the half-width slot this sits beside the taller link-quality
+      // column. Filling the cell and letting the plot take the slack keeps the
+      // two the same height without padding this one out with dead space.
+      className={compact ? "h-full" : undefined}
+      bodyClassName={compact ? "flex flex-col" : undefined}
       title="Starlink"
       subtitle={kit.nickname || kit.serviceLineNumber || "Data usage"}
       icon={<Satellite size={15} />}
@@ -185,7 +190,8 @@ export default function StarlinkPanel({ projectId, compact = false }) {
         />
       ) : (
         <>
-          <ResponsiveContainer width="100%" height={compact ? 200 : 300}>
+          <div className={compact ? "flex-1 min-h-[200px]" : ""}>
+          <ResponsiveContainer width="100%" height={compact ? "100%" : 300}>
             <BarChart data={days} margin={{ top: 8, right: 4, left: -8, bottom: 0 }} barCategoryGap={BAR_CATEGORY_GAP}>
               <CartesianGrid {...gridProps(ct)} />
               <XAxis dataKey="d" {...axisX(ct)} />
@@ -205,6 +211,7 @@ export default function StarlinkPanel({ projectId, compact = false }) {
               ))}
             </BarChart>
           </ResponsiveContainer>
+          </div>
 
           {/* Breakdown, mirroring the premium dashboard's summary block. The
               share meters read against each allowance's cap, so `amount` is the

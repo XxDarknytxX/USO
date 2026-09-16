@@ -318,9 +318,11 @@ export default function SiteDashboard({ groupId, site }) {
         // Stacks below xl. At 1280px and under, two half-width charts are
         // narrower than the data in them, and a cramped chart answers nothing.
         //
-        // items-start so the shorter panel keeps its own height instead of
-        // stretching to match the taller one and padding itself with space.
-        <div className="grid grid-cols-1 xl:grid-cols-2 gap-5 items-start">
+        // The two stretch to a common height (grid's default), and the usage
+        // panel spends the slack on a taller plot rather than on empty space —
+        // see its `compact` branch. Equal heights only read as deliberate when
+        // both cards are actually full.
+        <div className="grid grid-cols-1 xl:grid-cols-2 gap-5">
           <StarlinkPanel projectId={site.id} compact />
           <StarlinkTelemetry projectId={site.id} compact />
         </div>
