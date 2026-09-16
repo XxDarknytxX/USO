@@ -2,7 +2,7 @@
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { lazy, Suspense } from "react";
 import AppLayout from "./components/layout/AppLayout";
-import { getAuthRole } from "./hooks/useAuth";
+import { getAuthRole, canSeeDashboard, homePathFor } from "./hooks/useAuth";
 
 const Login = lazy(() => import("./pages/Login"));
 const SetPassword = lazy(() => import("./pages/SetPassword"));
@@ -30,27 +30,31 @@ function ProtectedRoute({ children }) {
   return token ? children : <Navigate to="/login" replace />;
 }
 
+// Every bounce goes to the account's OWN home page, never to a fixed one: a
+// fixed "/dashboard" would send a field engineer from one refused page straight
+// into another.
+function Home() {
+  return <Navigate to={homePathFor(getAuthRole())} replace />;
+}
+
 function AdminRoute({ children }) {
-  return getAuthRole() === "admin" ? children : <Navigate to="/dashboard" replace />;
+  return getAuthRole() === "admin" ? children : <Home />;
 }
 
 // Every role reaches Maintenance: admins and engineers to work in it, viewers to
 // read it. What each may DO is enforced on the server by HTTP method.
 function MaintenanceRoute({ children }) {
   const role = getAuthRole();
-  return ["admin", "engineer", "viewer"].includes(role) ? children : <Navigate to="/dashboard" replace />;
+  return ["admin", "engineer", "viewer"].includes(role) ? children : <Home />;
 }
 
-// The monitoring pages: every signed-in role reaches them, and the SERVER
-// decides which villages are in the answer. That is the whole point of the
-// scope model — the client does not need a role check here, because a viewer
-// and an admin opening the same page get different data from the same call.
-//
-// This exists as a named component rather than a bare route so the intent is
-// stated once: "open to all roles, scoped server-side" is a deliberate
-// position, not a route somebody forgot to guard.
-function ScopedRoute({ children }) {
-  return children;
+// The monitoring pages — Dashboard and Overview. Admins and viewers; the SERVER
+// decides which villages are in the answer, so a viewer and an admin opening
+// the same page get different data from the same call. Field engineers are
+// maintenance-only and are sent there; the API refuses them the data anyway
+// (requireDashboardAccess), this only spares them a page of errors.
+function DashboardRoute({ children }) {
+  return canSeeDashboard(getAuthRole()) ? children : <Home />;
 }
 
 function PageLoader() {
@@ -77,20 +81,19 @@ export default function App() {
               </ProtectedRoute>
             }
           >
-            {/* The only tab a read-only viewer may reach is the Dashboard.
-                Everything else is AdminRoute-wrapped (with two roles,
-                AdminRoute == "block viewers", redirecting them to /dashboard). */}
-            <Route path="/dashboard" element={<DashboardRouter />} />
+            {/* Admins and viewers. Engineers are sent to Maintenance. */}
+            <Route path="/dashboard" element={<DashboardRoute><DashboardRouter /></DashboardRoute>} />
             {/* Profile: every signed-in user (incl. viewers) — not admin-gated. */}
             <Route path="/profile" element={<ProfilePage />} />
             <Route path="/mpaisa" element={<AdminRoute><MpaisaMappingPage /></AdminRoute>} />
             <Route path="/billing" element={<AdminRoute><BillingPage /></AdminRoute>} />
-            {/* Admins and engineers. The server enforces the same pair. */}
+            {/* Every role: admins and engineers file, viewers read. The server
+                enforces the same split by HTTP method. */}
             <Route path="/maintenance" element={<MaintenanceRoute><MaintenancePage /></MaintenanceRoute>} />
             <Route path="/maintenance/village/:projectId" element={<MaintenanceRoute><VillageProfilePage /></MaintenanceRoute>} />
-            {/* Viewers and engineers see the same page as an admin, narrowed
-                to their villages by attachScope on the server. */}
-            <Route path="/overview" element={<ScopedRoute><OverviewPage /></ScopedRoute>} />
+            {/* Viewers see the same page as an admin, narrowed to the estate
+                default by attachScope on the server. */}
+            <Route path="/overview" element={<DashboardRoute><OverviewPage /></DashboardRoute>} />
             <Route path="/vouchers" element={<AdminRoute><VouchersPage /></AdminRoute>} />
             <Route path="/vouchers/:uuid" element={<AdminRoute><VouchersPage /></AdminRoute>} />
             <Route path="/activity" element={<AdminRoute><ActivityLogPage /></AdminRoute>} />
@@ -160,13 +163,14 @@ export default function App() {
               }
             />
           </Route>
-          {/* Every role has a dashboard now, so every role starts on it. */}
-          <Route path="/" element={<Navigate to="/dashboard" replace />} />
+          {/* Each role starts on its own home page: the dashboard, or for a
+              field engineer, maintenance. */}
+          <Route path="/" element={<Home />} />
           {/* A signed-in user who mistypes a URL gets their console back, not
               a sign-in form they do not need. */}
           <Route
             path="*"
-            element={<Navigate to={localStorage.getItem("token") ? "/dashboard" : "/login"} replace />}
+            element={localStorage.getItem("token") ? <Home /> : <Navigate to="/login" replace />}
           />
         </Routes>
       </Suspense>

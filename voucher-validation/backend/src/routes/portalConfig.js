@@ -1,13 +1,15 @@
 // src/routes/portalConfig.js
 // Admin-authenticated routes for portal plan configuration management
 import { Router } from "express";
-import { requireAuth, requireAdmin, requireNotViewer } from "../middleware/auth.js";
+import { requireAuth, requireAdmin, requireNotViewer, requireDashboardAccess } from "../middleware/auth.js";
 
 export function makePortalConfigRouter(controller, attachScope) {
   const router = Router();
 
-  // All portal config routes require authentication
-  router.use(requireAuth);
+  // All portal config routes require authentication. Revenue and the breakdown
+  // are the only non-admin routes here, and they are dashboard data, which field
+  // engineers do not see.
+  router.use(requireAuth, requireDashboardAccess);
   // Village scope so the viewer-reachable /revenue can clamp to assigned villages.
   if (attachScope) router.use(attachScope);
 

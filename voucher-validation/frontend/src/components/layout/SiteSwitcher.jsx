@@ -29,7 +29,7 @@ function cn(...p) {
 
 export default function SiteSwitcher({ collapsed }) {
   const { sites, activeSite, isGlobal, setActiveSiteId, loading, isSiteVisible, activeSiteId } = useSite();
-  const { isAdmin } = useAuth();
+  const { isAdmin, canSeeDashboard } = useAuth();
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState("");
   const [health, setHealth] = useState(null); // projectId -> online|offline|unknown
@@ -59,9 +59,14 @@ export default function SiteSwitcher({ collapsed }) {
 
   // Health dots, fetched once when the panel is first opened. Cheap (it reads
   // stored snapshots, no Ruijie calls) and it turns the switcher into the
-  // quickest way to reach a village that is down.
+  // quickest way to reach a village that is down. Health is dashboard data, so
+  // a field engineer's switcher is a plain list: asking would only be refused.
   useEffect(() => {
     if (!open || health) return;
+    if (!canSeeDashboard) {
+      setHealth({});
+      return;
+    }
     let cancelled = false;
     networkApi
       .overview()
@@ -73,7 +78,7 @@ export default function SiteSwitcher({ collapsed }) {
       })
       .catch(() => setHealth({}));
     return () => { cancelled = true; };
-  }, [open, health]);
+  }, [open, health, canSeeDashboard]);
 
   const label = loading ? "Loading…" : isGlobal ? "All villages" : activeSite?.name || "Select village";
 

@@ -69,12 +69,8 @@ const ROLES = {
     icon: Wrench,
     tone: "warning",
     tile: "orange",
-    blurb: "Everything a viewer sees, and also files maintenance reports with photos from site.",
-    opens: [
-      { label: "Dashboard", Icon: LayoutDashboard },
-      { label: "Overview", Icon: Gauge },
-      { label: "Maintenance", Icon: Wrench },
-    ],
+    blurb: "Files maintenance reports with photos from site. Sees no dashboard, figures or vouchers.",
+    opens: [{ label: "Maintenance", Icon: Wrench }],
     scoped: true,
   },
   admin: {

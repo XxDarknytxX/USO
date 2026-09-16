@@ -20,6 +20,7 @@ import { Mail, Lock, ArrowRight, Eye, EyeOff, ShieldCheck, Wifi, Ticket, Wrench,
 import toast from "react-hot-toast";
 
 import { api } from "../services/api";
+import { homePathFor } from "../hooks/useAuth";
 import { Button } from "../components/ui";
 import VodafoneLogo from "../components/ui/VodafoneLogo";
 import { TwoFactorEnrolModal } from "../components/TwoFactorEnrol";
@@ -97,13 +98,16 @@ export default function Login() {
    */
   function completeLogin(token, mustChangePassword) {
     localStorage.setItem("token", token);
+    let role = null;
     try {
       const payload = JSON.parse(atob(token.split(".")[1]));
-      if (payload.role) localStorage.setItem("role", payload.role);
+      role = payload.role || null;
+      if (role) localStorage.setItem("role", role);
     } catch {
       /* token will still be validated server-side */
     }
-    navigate(mustChangePassword ? "/profile?changePassword=1" : "/dashboard");
+    // An unreadable role lands on "/", whose own redirect reads the token again.
+    navigate(mustChangePassword ? "/profile?changePassword=1" : role ? homePathFor(role) : "/");
   }
 
   function onVerified(r) {

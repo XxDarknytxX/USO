@@ -100,6 +100,27 @@ export function requireMaintenanceAccess(req, res, next) {
   next();
 }
 
+/**
+ * The monitoring data behind the Dashboard and Overview — revenue, vouchers,
+ * network health, Starlink usage and telemetry. Admins and viewers.
+ *
+ * NOT engineers. A field engineer's console is Maintenance and nothing else:
+ * they are contractors sent to a site, and the estate's revenue and voucher
+ * figures are not theirs to see. Hiding the tabs was never going to be the
+ * whole answer, because the tabs are only a view onto these endpoints.
+ *
+ * An allow-list, applied at ROUTER level on the routers that serve that data,
+ * so an endpoint added to one of them later is closed to engineers by default.
+ */
+const DASHBOARD_ROLES = new Set(["admin", "viewer"]);
+
+export function requireDashboardAccess(req, res, next) {
+  if (!DASHBOARD_ROLES.has(req.user?.role)) {
+    return res.status(403).json({ error: "Your account does not have access to this data" });
+  }
+  next();
+}
+
 // Which roles are LIMITED to a subset of the estate. Admins are unrestricted
 // and are handled before this is consulted; anything NOT listed here is
 // restricted to nothing, so a role added later cannot default to seeing

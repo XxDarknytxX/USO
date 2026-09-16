@@ -28,6 +28,7 @@ export function useAuth() {
       isViewer: role === "viewer",
       // Field contractor: maintenance only, nothing else in the app.
       isEngineer: role === "engineer",
+      canSeeDashboard: canSeeDashboard(role),
       logout: () => {
         localStorage.removeItem("token");
         localStorage.removeItem("role");
@@ -35,6 +36,22 @@ export function useAuth() {
       },
     };
   }, [navigate]);
+}
+
+// Roles that may read dashboard data: the dashboard, the overview, and the
+// numbers behind them. Mirrors DASHBOARD_ROLES in the backend's auth middleware,
+// which is the real boundary — this copy only keeps the SPA from sending someone
+// to a page whose every request would be refused.
+const DASHBOARD_ROLES = new Set(["admin", "viewer"]);
+
+export function canSeeDashboard(role) {
+  return DASHBOARD_ROLES.has(role);
+}
+
+// Where an account lands: after sign-in, at "/", and whenever it is bounced
+// from a page it may not open. A field engineer has one page, so that is home.
+export function homePathFor(role) {
+  return canSeeDashboard(role) ? "/dashboard" : "/maintenance";
 }
 
 // Standalone helper (no hooks) for use outside React components

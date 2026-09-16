@@ -1,13 +1,14 @@
 // src/routes/vouchers.js
 import { Router } from "express";
 import { query, param, body } from "express-validator";
-import { requireAuth, requireAdmin, requireNotViewer } from "../middleware/auth.js";
+import { requireAuth, requireAdmin, requireNotViewer, requireDashboardAccess } from "../middleware/auth.js";
 
 export function makeVoucherRouter(controller, attachScope) {
   const router = Router();
 
-  // All voucher routes require authentication
-  router.use(requireAuth);
+  // All voucher routes require authentication, and none of them are for field
+  // engineers — their console is Maintenance only.
+  router.use(requireAuth, requireDashboardAccess);
   // Attach the caller's village scope (viewer = restricted set; admin = unrestricted)
   // so /stats and the list can clamp their results server-side.
   if (attachScope) router.use(attachScope);

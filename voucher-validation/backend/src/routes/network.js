@@ -1,7 +1,7 @@
 // src/routes/network.js
 import { Router } from "express";
 import { body, param } from "express-validator";
-import { requireAuth, requireAdmin } from "../middleware/auth.js";
+import { requireAuth, requireAdmin, requireDashboardAccess } from "../middleware/auth.js";
 
 export function makeNetworkRouter(controller, attachScope) {
   const router = Router();
@@ -12,8 +12,16 @@ export function makeNetworkRouter(controller, attachScope) {
   // overview rows, trend, and per-project health.
   if (attachScope) router.use(attachScope);
 
-  // Projects (any authenticated user can view)
+  // Projects — the village list. Every signed-in role, engineers included: the
+  // maintenance village picker and the site switcher are built from it, and it
+  // is names and hostnames, not figures.
   router.get("/projects", controller.listProjects);
+
+  // Everything registered BELOW this line is dashboard data — health, overview,
+  // trends, Starlink usage and telemetry — and closed to field engineers. Placed
+  // here, after the one route they need, so any route added further down is
+  // closed to them by default rather than open until someone notices.
+  router.use(requireDashboardAccess);
 
   // All-villages overview dashboard (from collector snapshots)
   router.get("/overview", controller.getOverview);

@@ -34,14 +34,16 @@ const navSections = [
     title: "Monitoring",
     items: [
       // Two flags, read as "this role may see this item". Dashboard and
-      // Overview are open to every role — the SERVER narrows both to the
-      // villages that account was assigned, so the page is the same and the
-      // answer is not. Network stays admin-only: it is where villages are
+      // Overview are open to viewers — the SERVER narrows both to the estate
+      // default, so the page is the same and the answer is not. Field
+      // engineers are maintenance-only, and the API refuses them the data
+      // behind these two. Network stays admin-only: it is where villages are
       // added and edited, not where they are read.
-      { to: "/dashboard", label: "Dashboard", Icon: LayoutDashboard, end: true, viewerOk: true, engineerOk: true },
-      { to: "/overview", label: "Overview", Icon: Gauge, viewerOk: true, engineerOk: true },
+      { to: "/dashboard", label: "Dashboard", Icon: LayoutDashboard, end: true, viewerOk: true },
+      { to: "/overview", label: "Overview", Icon: Gauge, viewerOk: true },
       { to: "/network", label: "Network", Icon: Network },
-      // Viewers read the maintenance record; engineers and admins also file it.
+      // Every role: viewers read the maintenance record, engineers and admins
+      // also file it.
       { to: "/maintenance", label: "Maintenance", Icon: Wrench, viewerOk: true, engineerOk: true },
     ],
   },
