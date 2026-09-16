@@ -26,13 +26,10 @@ export const ISSUER = "Vodafone Fiji USO";
 /**
  * Global enforcement, owned by an admin in Settings.
  *
- * DEFAULTS TO ON. An absent row means the setting has never been touched, and
- * for a console that can move money and read customer data the safe reading of
- * "nobody has decided yet" is the strict one. An admin can turn it off in
- * Settings; the absence of a decision is not consent to run without it.
- *
- * Only a read failure returns false, and only so a database hiccup locks
- * nobody out of their own console.
+ * DEFAULTS TO OFF. Enforcement is a deliberate act by an administrator who has
+ * enrolled first and knows the reset path — not something a deploy turns on for
+ * an estate that has never seen it. Anyone can still enrol individually while
+ * it is off; the switch only decides whether it is compulsory.
  */
 export async function isTwoFactorRequired(pool) {
   try {
@@ -40,7 +37,7 @@ export async function isTwoFactorRequired(pool) {
       "SELECT setting_value FROM app_settings WHERE setting_key = 'require_2fa'"
     );
     const v = rows[0]?.setting_value;
-    if (v == null) return true;
+    if (v == null) return false;
     return String(v).toLowerCase() === "true" || String(v) === "1";
   } catch {
     return false;

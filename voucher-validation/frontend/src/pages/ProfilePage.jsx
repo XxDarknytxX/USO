@@ -9,12 +9,13 @@
 // short panels side by side, which is what stops a three-fact page reading as
 // an afterthought.
 
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { UserCircle, Shield, Eye, Moon, Sun, Check, LogOut, Wrench, Mail, IdCard } from "lucide-react";
 
 import { useAuth } from "../hooks/useAuth";
 import { useTheme } from "../hooks/useTheme";
 import { PageShell, PageHeader, Panel, Button, StatusPill, ObjectTile } from "../components/ui";
+import AccountSecurity from "../components/AccountSecurity";
 
 function cn(...p) {
   return p.filter(Boolean).join(" ");
@@ -102,6 +103,11 @@ function DetailRow({ icon, tone = "slate", label, children }) {
 
 export default function ProfilePage() {
   const navigate = useNavigate();
+  // An account on a temporary password is sent here with ?changePassword=1.
+  // The flag is dropped from the URL the moment the change lands, so a reload
+  // does not reopen a dialog for something already done.
+  const [params, setParams] = useSearchParams();
+  const forcePasswordChange = params.get("changePassword") === "1";
   const { email, name, role, isAdmin, isEngineer, logout } = useAuth();
   const { theme, setTheme } = useTheme();
 
@@ -173,6 +179,15 @@ export default function ProfilePage() {
             <ThemeCard mode="light" active={theme === "light"} onClick={() => setTheme("light")} />
           </div>
         </Panel>
+
+        {/* Security spans both columns: it is the only part of this page with
+            consequences, and a half-width panel would read as an aside. */}
+        <div className="lg:col-span-2">
+          <AccountSecurity
+            forcePasswordChange={forcePasswordChange}
+            onPasswordChanged={() => setParams({}, { replace: true })}
+          />
+        </div>
       </div>
     </PageShell>
   );

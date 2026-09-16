@@ -1,30 +1,79 @@
 // src/pages/Login.jsx
 //
-// Sign-in, rebuilt as a two-panel layout after Salesforce's product login: a
-// branded panel that says what this system is and what it is for, beside a calm
-// white form panel that does one job.
+// Sign-in: a branded panel that says what this system is, beside a form panel
+// that does one job.
 //
-// The previous version was a single card floating on an ambient wash — it could
-// have been any admin tool. The brand panel is where the product gets to have a
-// personality; the form side stays deliberately plain, because nobody wants a
-// designed experience while typing a password. On narrow screens the brand panel
-// collapses to a compact header so the form is never pushed below the fold.
+// The form is a single bordered block with the two rows joined by a hairline,
+// each row carrying its own icon rail and a label that sits inside the row
+// rather than floating above it. Two free-standing boxes with labels stacked
+// over them is what every admin tool ships; joining them makes the credential
+// pair read as one instrument, and gives the focused row somewhere to light up.
+//
+// The two-factor steps are dialogs over this screen, not replacements for it.
+// An attempt that is halfway done should still look halfway done — and the
+// tokens those steps hold are short-lived, so they stay in this component's
+// state and are never written anywhere that outlives the attempt.
 
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Mail, Lock, ArrowRight, Eye, EyeOff, ShieldCheck, Wifi, Ticket, Wrench, KeyRound } from "lucide-react";
+import { Mail, Lock, ArrowRight, Eye, EyeOff, ShieldCheck, Wifi, Ticket, Wrench, AlertTriangle } from "lucide-react";
 import toast from "react-hot-toast";
 
 import { api } from "../services/api";
-import { Field, Input, Button } from "../components/ui";
+import { Button } from "../components/ui";
 import VodafoneLogo from "../components/ui/VodafoneLogo";
-import TwoFactorEnrol from "../components/TwoFactorEnrol";
+import { TwoFactorEnrolModal } from "../components/TwoFactorEnrol";
+import TwoFactorVerifyModal from "../components/TwoFactorVerifyModal";
 
 const HIGHLIGHTS = [
   { Icon: Wifi, title: "Village connectivity", copy: "Live health for every USO site, in one place." },
   { Icon: Ticket, title: "Vouchers & revenue", copy: "Sales, stock and usage across the estate." },
   { Icon: Wrench, title: "Field maintenance", copy: "Six-monthly inspections, with photographic evidence." },
 ];
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   One row of the joined credential block.
+   The label lives inside the row, above the value, so the row is a single
+   target and the focused state has a whole surface to tint rather than a
+   1px border to thicken.
+   ───────────────────────────────────────────────────────────────────────── */
+function CredentialRow({ icon: Icon, label, trailing, children, focused }) {
+  return (
+    <div
+      className={
+        "relative flex items-stretch transition-colors duration-150 " +
+        (focused ? "bg-[var(--brand-soft)]" : "bg-transparent")
+      }
+    >
+      <span
+        aria-hidden
+        className="absolute left-0 top-0 bottom-0 w-[2.5px] bg-[var(--brand)] origin-center transition-transform duration-150"
+        style={{ transform: focused ? "scaleY(1)" : "scaleY(0)" }}
+      />
+      <span
+        className={
+          "w-[52px] shrink-0 flex items-center justify-center border-r transition-colors duration-150 " +
+          (focused
+            ? "border-[var(--brand-soft-hover)] text-[var(--brand)]"
+            : "border-[var(--border-default)] text-[var(--fg-subtle)]")
+        }
+      >
+        <Icon size={16} strokeWidth={1.9} />
+      </span>
+      <span className="flex min-w-0 flex-1 flex-col justify-center px-4 py-2.5">
+        <span className="text-[9.5px] font-bold uppercase tracking-[0.14em] text-[var(--fg-muted)] leading-none mb-1.5">
+          {label}
+        </span>
+        {children}
+      </span>
+      {trailing && <span className="flex items-center pr-3">{trailing}</span>}
+    </div>
+  );
+}
+
+const inputClass =
+  "w-full bg-transparent outline-none border-0 p-0 text-[14.5px] leading-[1.35] " +
+  "text-[var(--fg-primary)] placeholder:text-[var(--fg-subtle)] font-sans";
 
 export default function Login() {
   const [email, setEmail] = useState("");
@@ -35,10 +84,11 @@ export default function Login() {
   const [stage, setStage] = useState("password");
   const [tempToken, setTempToken] = useState("");
   const [setupToken, setSetupToken] = useState("");
-  const [code, setCode] = useState("");
   const [err, setErr] = useState("");
   const [loading, setLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
+  const [focusField, setFocusField] = useState(null);
+  const [capsLock, setCapsLock] = useState(false);
   const navigate = useNavigate();
 
   /**
@@ -56,31 +106,26 @@ export default function Login() {
     navigate(mustChangePassword ? "/profile?changePassword=1" : "/dashboard");
   }
 
-  async function onVerify(e) {
-    e.preventDefault();
-    setErr("");
-    setLoading(true);
-    try {
-      const r = await api("/2fa/login-verify", {
-        method: "POST",
-        body: { tempToken, code: code.replace(/\s+/g, "") },
-      });
-      if (r.usedBackupCode) {
-        // Said now rather than discovered later: someone down to their last
-        // codes should know while they are still able to generate more.
-        toast(
-          r.backupCodesRemaining === 0
-            ? "That was your last backup code. Set up two-factor again to get a new set."
-            : `Backup code used — ${r.backupCodesRemaining} left.`,
-          { icon: "🔑", duration: 8000 }
-        );
-      }
-      completeLogin(r.token, r.mustChangePassword);
-    } catch (e) {
-      setErr(e.message);
-    } finally {
-      setLoading(false);
+  function onVerified(r) {
+    if (r.usedBackupCode) {
+      // Said now rather than discovered later: someone down to their last
+      // codes should know while they are still able to generate more.
+      toast(
+        r.backupCodesRemaining === 0
+          ? "That was your last backup code. Set up two-factor again to get a new set."
+          : `Backup code used — ${r.backupCodesRemaining} left.`,
+        { icon: "🔑", duration: 8000 }
+      );
     }
+    completeLogin(r.token, r.mustChangePassword);
+  }
+
+  function abandonChallenge() {
+    setStage("password");
+    setTempToken("");
+    setSetupToken("");
+    setPassword("");
+    setErr("");
   }
 
   async function onSubmit(e) {
@@ -175,8 +220,22 @@ export default function Login() {
       </aside>
 
       {/* ============================= Form panel ============================ */}
-      <main className="flex flex-col justify-center px-6 py-12 sm:px-10 lg:px-14 xl:px-20">
-        <div className="w-full max-w-[400px] mx-auto">
+      <main className="relative flex flex-col justify-center px-6 py-12 sm:px-10 lg:px-14 xl:px-20">
+        {/* Faint engineering grid — the form sits on a surface rather than in a
+            void, without competing with anything on it. */}
+        <div
+          aria-hidden
+          className="pointer-events-none absolute inset-0"
+          style={{
+            backgroundImage:
+              "linear-gradient(var(--border-default) 1px, transparent 1px), linear-gradient(90deg, var(--border-default) 1px, transparent 1px)",
+            backgroundSize: "36px 36px",
+            maskImage: "radial-gradient(ellipse 78% 60% at 50% 46%, #000 18%, transparent 76%)",
+            WebkitMaskImage: "radial-gradient(ellipse 78% 60% at 50% 46%, #000 18%, transparent 76%)",
+          }}
+        />
+
+        <div className="relative w-full max-w-[404px] mx-auto">
           {/* Compact brand lockup for narrow screens, where the panel is hidden */}
           <div className="lg:hidden flex items-center gap-3 mb-10">
             <span className="h-11 w-11 rounded-[14px] bg-[var(--brand-soft)] flex items-center justify-center">
@@ -188,109 +247,88 @@ export default function Login() {
             </div>
           </div>
 
-          <div className="mb-8">
-            <h1 className="text-h1 text-[var(--fg-primary)]">
-              {stage === "verify" ? "Two-factor check" : stage === "enrol" ? "Set up two-factor" : "Sign in"}
+          <div className="mb-7">
+            <div className="flex items-center gap-2.5 mb-3">
+              <span className="h-[2.5px] w-7 rounded-full bg-[var(--brand)]" />
+              <span className="text-[9.5px] font-bold uppercase tracking-[0.18em] text-[var(--fg-muted)]">
+                Operations console
+              </span>
+            </div>
+            <h1 className="font-display font-extrabold text-[32px] leading-[1.1] tracking-[-0.028em] text-[var(--fg-primary)]">
+              Sign in
             </h1>
-            <p className="text-[13.5px] text-[var(--fg-secondary)] mt-2">
-              {stage === "verify"
-                ? "Enter the six-digit code from your authenticator app, or one of your backup codes."
-                : stage === "enrol"
-                  ? "This console requires two-factor authentication. It takes a minute and only has to be done once."
-                  : "Use your Vodafone Fiji account to continue to the operations console."}
+            <p className="text-[13.5px] leading-relaxed text-[var(--fg-secondary)] mt-2.5">
+              Use your Vodafone Fiji account to continue.
             </p>
           </div>
 
-          {/* ENROL — the account has no second factor and the estate requires
-              one. Rendered here rather than behind a route because the setup
-              token must not outlive the attempt, and a route can be navigated
-              back to with a stale one. */}
-          {stage === "enrol" && (
-            <TwoFactorEnrol
-              token={setupToken}
-              onDone={(token) => completeLogin(token, false)}
-              onCancel={() => { setStage("password"); setSetupToken(""); setPassword(""); }}
-            />
-          )}
-
-          {/* VERIFY — enrolled already; one code away from a session. */}
-          {stage === "verify" && (
-            <form onSubmit={onVerify} className="flex flex-col gap-5">
-              <Field label="Authentication code" required>
-                <div className="relative">
-                  <KeyRound size={15} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-[var(--fg-muted)] pointer-events-none" />
-                  <Input
-                    value={code}
-                    onChange={(e) => setCode(e.target.value)}
-                    placeholder="123456"
-                    required
-                    autoFocus
-                    // one-time-code lets a phone offer the code from the
-                    // notification instead of making someone switch apps.
-                    autoComplete="one-time-code"
-                    inputMode="text"
-                    className="pl-10 font-mono tracking-[0.2em]"
-                  />
-                </div>
-              </Field>
-              {err && (
-                <p className="text-[13px] text-[var(--danger-fg)] bg-[var(--danger-soft)] border border-[var(--danger-border)] rounded-lg px-3.5 py-2.5">
-                  {err}
-                </p>
-              )}
-              <Button type="submit" loading={loading} iconRight={!loading && <ArrowRight size={16} />}>
-                Verify
-              </Button>
-              <button
-                type="button"
-                onClick={() => { setStage("password"); setTempToken(""); setCode(""); setErr(""); }}
-                className="text-[12.5px] text-[var(--fg-muted)] hover:text-[var(--fg-primary)] transition-colors"
-              >
-                Use a different account
-              </button>
-            </form>
-          )}
-
-          {stage === "password" && (
-          <form onSubmit={onSubmit} className="flex flex-col gap-5">
-            <Field label="Email" required>
-              <div className="relative">
-                <Mail size={15} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-[var(--fg-muted)] pointer-events-none" />
-                <Input
+          <form onSubmit={onSubmit} className="flex flex-col gap-4">
+            {/* The joined credential block */}
+            <div
+              className={
+                "overflow-hidden rounded-2xl border bg-[var(--surface)] transition-shadow duration-150 " +
+                (focusField
+                  ? "border-[var(--brand)] shadow-[0_0_0_4px_var(--brand-soft)]"
+                  : "border-[var(--input-border)] shadow-[var(--shadow-sm)]")
+              }
+            >
+              <CredentialRow icon={Mail} label="Email" focused={focusField === "email"}>
+                <input
                   type="email"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
+                  onFocus={() => setFocusField("email")}
+                  onBlur={() => setFocusField(null)}
                   placeholder="you@vodafone.com.fj"
                   required
                   autoComplete="email"
-                  className="pl-10"
+                  autoFocus
+                  className={inputClass}
                 />
-              </div>
-            </Field>
+              </CredentialRow>
 
-            <Field label="Password" required>
-              <div className="relative">
-                <Lock size={15} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-[var(--fg-muted)] pointer-events-none" />
-                <Input
+              <div className="h-px bg-[var(--border-default)]" />
+
+              <CredentialRow
+                icon={Lock}
+                label="Password"
+                focused={focusField === "password"}
+                trailing={
+                  <button
+                    type="button"
+                    onClick={() => setShowPassword((v) => !v)}
+                    tabIndex={-1}
+                    className="rounded-lg p-1.5 text-[var(--fg-muted)] transition-colors hover:bg-[var(--surface-hover)] hover:text-[var(--fg-primary)]"
+                    aria-label={showPassword ? "Hide password" : "Show password"}
+                  >
+                    {showPassword ? <EyeOff size={15} /> : <Eye size={15} />}
+                  </button>
+                }
+              >
+                <input
                   type={showPassword ? "text" : "password"}
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
+                  onFocus={() => setFocusField("password")}
+                  onBlur={() => { setFocusField(null); setCapsLock(false); }}
+                  // Checked on the way in as well as the way out, so the
+                  // warning appears on the first keystroke and not the second.
+                  onKeyDown={(e) => setCapsLock(e.getModifierState?.("CapsLock") ?? false)}
+                  onKeyUp={(e) => setCapsLock(e.getModifierState?.("CapsLock") ?? false)}
                   placeholder="Enter your password"
                   required
                   autoComplete="current-password"
-                  className="pl-10 pr-11"
+                  className={`${inputClass} ${showPassword || !password ? "" : "tracking-[0.12em]"}`}
                 />
-                <button
-                  type="button"
-                  onClick={() => setShowPassword((v) => !v)}
-                  tabIndex={-1}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-[var(--fg-muted)] hover:text-[var(--fg-secondary)] transition-colors"
-                  aria-label={showPassword ? "Hide password" : "Show password"}
-                >
-                  {showPassword ? <EyeOff size={15} /> : <Eye size={15} />}
-                </button>
-              </div>
-            </Field>
+              </CredentialRow>
+            </div>
+
+            {capsLock && (
+              <p className="flex items-center gap-2 text-[12px] font-medium text-[var(--warning-fg)]">
+                <AlertTriangle size={13} className="shrink-0" />
+                Caps Lock is on.
+              </p>
+            )}
 
             {err && (
               <div
@@ -313,7 +351,6 @@ export default function Login() {
               {loading ? "Signing in…" : "Sign in"}
             </Button>
           </form>
-          )}
 
           <div className="mt-8 pt-6 border-t border-[var(--border-subtle)] flex items-center justify-center gap-2 text-[11.5px] text-[var(--fg-muted)]">
             <ShieldCheck size={13} />
@@ -321,6 +358,21 @@ export default function Login() {
           </div>
         </div>
       </main>
+
+      {/* ===================== Two-factor, over the form ===================== */}
+      <TwoFactorVerifyModal
+        open={stage === "verify"}
+        tempToken={tempToken}
+        email={email}
+        onSuccess={onVerified}
+        onCancel={abandonChallenge}
+      />
+      <TwoFactorEnrolModal
+        open={stage === "enrol"}
+        token={setupToken}
+        onDone={(token) => completeLogin(token, false)}
+        onCancel={abandonChallenge}
+      />
     </div>
   );
 }

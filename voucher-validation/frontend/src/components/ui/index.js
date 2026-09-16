@@ -6,6 +6,7 @@ export { default as Button, IconButton } from "./Button";
 export { default as Modal } from "./Modal";
 export { default as ConfirmDialog } from "./ConfirmDialog";
 export { Field, Input, Select, Textarea, Toggle, TagInput } from "./Field";
+export { default as CodeInput } from "./CodeInput";
 export {
   Card,
   CardHeader,
