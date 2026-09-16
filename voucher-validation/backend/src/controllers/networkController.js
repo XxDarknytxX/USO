@@ -157,6 +157,110 @@ export function makeNetworkController(pool) {
     setTelemetryPoller: (p) => { telemetryPoller = p; },
     setUsageScheduler: (s) => { usageScheduler = s; },
 
+    // GET /api/network/projects/:id/telemetry?range=A|B|C
+    //
+    // The link's recent behaviour for one village: throughput, latency, packet
+    // loss, signal quality and obstruction over time. Reads the stored
+    // telemetry only — the poller owns every Starlink call, so opening this
+    // costs nothing upstream however many people have it open.
+    //
+    // DOWNSAMPLED SERVER-SIDE. The poller writes a row roughly every 15s, so a
+    // day is ~5,700 rows per village; sending those raw would be a megabyte of
+    // JSON to draw a line a few hundred pixels wide. Each range buckets to
+    // about 200 points, which is more than a chart that size can resolve.
+    getProjectTelemetry: async (req, res) => {
+      try {
+        const RANGES = {
+          A: { minutes: 15, bucketSec: 15, label: "15 minutes" },
+          B: { minutes: 180, bucketSec: 60, label: "3 hours" },
+          C: { minutes: 1440, bucketSec: 300, label: "24 hours" },
+        };
+        const r = RANGES[String(req.query.range || "B").toUpperCase()] || RANGES.B;
+
+        const [[project]] = await pool.query(
+          "SELECT id, name, starlink_device_id, starlink_kit_id FROM network_projects WHERE id = ?",
+          [req.params.id]
+        );
+        if (!project) return send.notFound(res, "Village not found");
+
+        const devId =
+          normalizeDeviceId(project.starlink_device_id) ||
+          normalizeDeviceId(project.starlink_kit_id);
+        if (!devId) {
+          // Not an error: most of the estate may simply have no kit recorded.
+          return send.ok(res, {
+            configured: false,
+            range: r.label,
+            points: [],
+            stats: {},
+            reason: "No Starlink kit is linked to this village.",
+          });
+        }
+
+        const [rows] = await pool.query(
+          `SELECT FROM_UNIXTIME(FLOOR(UNIX_TIMESTAMP(recorded_at) / ?) * ?) AS t,
+                  AVG(downlink_mbps)   AS downlink,
+                  AVG(uplink_mbps)     AS uplink,
+                  AVG(latency_ms)      AS latency,
+                  AVG(drop_rate)       AS drop_rate,
+                  AVG(signal_quality)  AS signal_quality,
+                  AVG(obstruction_pct) AS obstruction
+             FROM starlink_telemetry
+            WHERE device_id = ?
+              AND recorded_at >= DATE_SUB(NOW(), INTERVAL ? MINUTE)
+            GROUP BY t
+            ORDER BY t ASC`,
+          [r.bucketSec, r.bucketSec, devId, r.minutes]
+        );
+
+        // Throughput arrives in Mbps already; drop rate and signal quality are
+        // 0..1 fractions and are sent as percentages so every chart on the page
+        // shares one convention.
+        const points = rows.map((x) => ({
+          t: new Date(x.t).toISOString(),
+          downlink: numOrNull(x.downlink),
+          uplink: numOrNull(x.uplink),
+          latency: numOrNull(x.latency),
+          drop: x.drop_rate == null ? null : Number(x.drop_rate) * 100,
+          signal: x.signal_quality == null ? null : Number(x.signal_quality) * 100,
+          obstruction: numOrNull(x.obstruction),
+        }));
+
+        const stat = (key) => {
+          const v = points.map((p) => p[key]).filter((n) => n != null && Number.isFinite(n));
+          if (!v.length) return null;
+          return {
+            last: round2(v[v.length - 1]),
+            min: round2(Math.min(...v)),
+            max: round2(Math.max(...v)),
+            avg: round2(v.reduce((a, b) => a + b, 0) / v.length),
+          };
+        };
+
+        return send.ok(res, {
+          configured: true,
+          deviceId: devId,
+          range: r.label,
+          bucketSeconds: r.bucketSec,
+          points,
+          stats: {
+            downlink: stat("downlink"),
+            uplink: stat("uplink"),
+            latency: stat("latency"),
+            drop: stat("drop"),
+            signal: stat("signal"),
+            obstruction: stat("obstruction"),
+          },
+          // Distinguishes "the dish has been quiet" from "telemetry is switched
+          // off", which look identical as an empty chart.
+          telemetryEnabled: await isTelemetryEnabled(pool),
+        });
+      } catch (e) {
+        console.error("[network] telemetry query failed:", e.message);
+        return send.serverErr(res);
+      }
+    },
+
     // GET /api/network/starlink/usage/status  (admin)
     // POST /api/network/starlink/usage/collect  (admin) — refresh every village
     // now. One Starlink call per village, single-flighted, so a double click

@@ -22,6 +22,7 @@ import { useSite } from "../../hooks/useSite";
 import { voucherApi, networkApi, portalConfigApi } from "../../services/api";
 import PlanBreakdown from "../../components/PlanBreakdown";
 import StarlinkPanel from "../../components/StarlinkPanel";
+import StarlinkTelemetry from "../../components/StarlinkTelemetry";
 import MonthPicker from "../../components/MonthPicker";
 import { useMonthlyBreakdown } from "../../hooks/useMonthlyBreakdown";
 import {
@@ -299,9 +300,20 @@ export default function SiteDashboard({ groupId, site }) {
         </Panel>
       )}
 
-      {/* Starlink kit + data usage. Self-fetching and self-hiding: renders
-          nothing at all when this village has no Starlink configured. */}
-      {site?.id && <StarlinkPanel projectId={site.id} />}
+      {/* The Starlink pair, deliberately adjacent: usage says how much this
+          village consumed, link quality says what the connection was like while
+          they consumed it. An operator holding a complaint needs both at once —
+          "slow" and "used their whole allowance" are different problems with
+          different answers, and either one alone invites the wrong one.
+
+          Both are self-fetching and self-hiding, so a village with no kit
+          recorded renders neither. */}
+      {site?.id && (
+        <>
+          <StarlinkPanel projectId={site.id} />
+          <StarlinkTelemetry projectId={site.id} />
+        </>
+      )}
 
       <div className="flex flex-col gap-5">
         <Tabs tabs={tabs} value={tab} onChange={setTab} variant="underline" />

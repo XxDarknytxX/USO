@@ -70,6 +70,11 @@ export function makeNetworkRouter(controller, attachScope) {
     controller.getProjectStarlink
   );
 
+  // Per-village Starlink telemetry series (throughput, latency, loss, signal,
+  // obstruction). Reads stored rows only — no Starlink call — so it is safe for
+  // any scoped user to open as often as they like.
+  router.get("/projects/:id/telemetry", controller.getProjectTelemetry);
+
   // Per-project device health + topology
   router.get(
     "/projects/:id/health",
