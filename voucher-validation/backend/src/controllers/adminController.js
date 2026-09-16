@@ -516,7 +516,11 @@ export function makeAdminController(pool) {
         const user = rows[0];
         if (!user) return send.unauthorized(res, "User not found");
         let villages = [];
-        if (user.role === "viewer") {
+        // Every scoped role, not just "viewer" — an engineer is scoped too, and
+        // naming one role here while SCOPED_ROLES names two is how the two
+        // drift apart. This one failed safe (too few villages, never too many),
+        // but it was the same deny-list shape that hid the engineer bug.
+        if (SCOPED_ROLES.has(user.role)) {
           const [vrows] = await pool.query(
             `SELECT p.id, p.name, p.hostname, p.ruijie_group_id
                FROM user_villages uv JOIN network_projects p ON p.id = uv.project_id

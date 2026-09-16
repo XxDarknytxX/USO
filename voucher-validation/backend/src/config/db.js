@@ -633,16 +633,27 @@ export async function getPool() {
     console.log('Network project seed note:', e.message);
   }
 
-  // ── One-time: give existing engineers the scope they used to have ─────────
-  // Engineers were previously unscoped because attachScope handed every
-  // non-viewer an empty set and nothing engineers could reach was scoped. Now
-  // that they see the dashboard and overview, an empty set means an empty
-  // console — so every engineer that predates this change inherits every
-  // active village, and an admin narrows it from there.
+  // ── One-time: give existing engineers back the villages they WORKED ───────
+  // Engineers were previously unscoped, because attachScope handed every
+  // non-viewer an empty set and nothing they could reach was scoped anyway.
+  // Now that maintenance is scoped, an empty set means an empty console, so
+  // accounts that predate this change need something.
+  //
+  // That something is NOT "every active village". The estate carries test
+  // villages an admin adds and removes, and keeping contractors out of those
+  // is the entire reason scope was applied here — a blanket grant would hand
+  // every engineer the test villages on the way in and call it a migration.
+  //
+  // Instead each engineer inherits exactly the villages they have already
+  // filed a report against. A village someone has serviced is a village they
+  // demonstrably belong to; a test village nobody has ever attended is
+  // granted to nobody. Engineers with no history start empty and an admin
+  // assigns them, which is what "scope set by the admin" is supposed to mean.
   //
   // Guarded by a marker row, not by "has no rows yet": an admin who
   // deliberately clears an engineer's villages must not have them handed back
-  // on the next restart.
+  // on the next restart. The marker is written AFTER the grant, so a failure
+  // leaves it unset and the migration retries on the next boot.
   try {
     const [[marker]] = await pool.query(
       "SELECT setting_value FROM app_settings WHERE setting_key = 'engineer_scope_backfilled'"
@@ -650,18 +661,23 @@ export async function getPool() {
     if (!marker) {
       const [r] = await pool.query(
         `INSERT IGNORE INTO user_villages (user_id, project_id)
-         SELECT u.id, p.id
-           FROM users u
-           JOIN network_projects p ON p.is_active = 1
-          WHERE u.role = 'engineer'`
+         SELECT DISTINCT v.engineer_id, v.project_id
+           FROM maintenance_visits v
+           JOIN users u ON u.id = v.engineer_id AND u.role = 'engineer'
+           JOIN network_projects p ON p.id = v.project_id AND p.is_active = 1
+          WHERE v.engineer_id IS NOT NULL`
       );
       await pool.query(
         `INSERT INTO app_settings (setting_key, setting_value, setting_type, description)
          VALUES ('engineer_scope_backfilled', '1', 'boolean',
-                 'Existing engineers were granted every active village when scope began applying to them.')
+                 'Existing engineers were granted the villages they had already filed reports against, when scope began applying to maintenance.')
          ON DUPLICATE KEY UPDATE setting_value = '1'`
       );
-      if (r.affectedRows) console.log(`Engineer scope backfill: ${r.affectedRows} village grants`);
+      console.log(
+        r.affectedRows
+          ? `Engineer scope backfill: ${r.affectedRows} village grant(s) from filed reports`
+          : 'Engineer scope backfill: no prior reports to grant from — assign villages under Users'
+      );
     }
   } catch (e) {
     console.log('Engineer scope backfill note:', e.message);

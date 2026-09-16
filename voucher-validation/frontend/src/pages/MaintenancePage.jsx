@@ -63,6 +63,10 @@ function ConditionPill({ value }) {
 }
 
 export default function MaintenancePage() {
+  // The page speaks for the whole estate to an admin and for one contractor's
+  // own list to everyone else. Telling someone who can see two villages of
+  // thirty-one that "every village is in window" is a compliance claim they
+  // are not in a position to make.
   const { isAdmin } = useAuth();
   const navigate = useNavigate();
   // Follow the scope switcher and the "All Villages" set from Settings, the
@@ -138,6 +142,16 @@ export default function MaintenancePage() {
 
   // Both the reports and the submissions views filter by village, and they share
   // one piece of state so switching between them keeps the village you picked.
+  // A village picked here can stop being on offer — the scope switcher changed,
+  // or an admin took it off this account. Left alone, the <Select> has no
+  // matching <option> and renders blank while load() keeps querying the village
+  // that is no longer listed: an empty table with no visible cause and no
+  // control to clear it. Reconciling drops the filter back to "all".
+  useEffect(() => {
+    if (!filterProject || loading) return;
+    if (!sites.some((s) => String(s.projectId) === String(filterProject))) setFilterProject("");
+  }, [sites, filterProject, loading]);
+
   const villageFilter = (
     <Select value={filterProject} onChange={(e) => setFilterProject(e.target.value)} className="min-w-[180px]">
       <option value="">All villages</option>
@@ -152,7 +166,10 @@ export default function MaintenancePage() {
       <PageHeader
         eyebrow="Field service"
         title="Maintenance"
-        subtitle={`Every village is inspected every ${schedule?.intervalMonths ?? 6} months. Open a village to record what you found, component by component.`}
+        subtitle={
+          `${isAdmin ? "Every village" : "Each village assigned to you"} is inspected every ` +
+          `${schedule?.intervalMonths ?? 6} months. Open one to record what you found, component by component.`
+        }
         icon={<Wrench size={22} />}
         tone="orange"
         actions={
@@ -174,14 +191,22 @@ export default function MaintenancePage() {
         <StatCard
           label="Overdue"
           value={overdue.length}
-          sub={overdue.length ? "past the service window" : "every village is in window"}
+          sub={
+            overdue.length
+              ? "past the service window"
+              : isAdmin ? "every village is in window" : "all of yours are in window"
+          }
           icon={<AlertTriangle size={18} />}
           color={overdue.length ? "red" : "green"}
         />
         <StatCard
           label="Never serviced"
           value={neverServiced.length}
-          sub={neverServiced.length ? "no inspection on record" : "all villages have a record"}
+          sub={
+            neverServiced.length
+              ? "no inspection on record"
+              : isAdmin ? "all villages have a record" : "all of yours have a record"
+          }
           icon={<CircleDashed size={18} />}
           color={neverServiced.length ? "orange" : "green"}
         />
@@ -232,13 +257,23 @@ export default function MaintenancePage() {
           subtitle={
             overdue.length
               ? `${overdue.length} village${overdue.length === 1 ? "" : "s"} due or overdue`
-              : "Every village is within its service window"
+              : isAdmin
+                ? "Every village is within its service window"
+                : "Every village assigned to you is within its service window"
           }
           icon={<ClipboardCheck size={15} />}
           tone="orange"
         >
           {!loading && sites.length === 0 ? (
-            <EmptyState icon={Wrench} title="No villages" description="Add sites under Network first." />
+            <EmptyState
+              icon={Wrench}
+              title={isAdmin ? "No villages" : "No villages assigned to you"}
+              description={
+                isAdmin
+                  ? "Add sites under Network first."
+                  : "Ask an administrator to add the villages you service to your account."
+              }
+            />
           ) : (
             <DataTable>
               <thead>

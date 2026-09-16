@@ -88,16 +88,23 @@ export default function VillageProfilePage() {
   const canService = isAdmin || isEngineer;
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [err, setErr] = useState("");
   const [tab, setTab] = useState("overview");
   const [lightbox, setLightbox] = useState(null);
   const [uploadOpen, setUploadOpen] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
+    setErr("");
     try {
       setData(await maintenanceApi.villageProfile(projectId));
     } catch (e) {
-      toast.error("Could not load that village: " + e.message);
+      // Reachable by typing a URL: villages are scoped now, and one that was
+      // never assigned to this account answers "no such village". Held in
+      // state rather than only toasted — a toast disappears and leaves a page
+      // that looks broken rather than one that says what happened.
+      setData(null);
+      setErr(e.message);
     } finally {
       setLoading(false);
     }
@@ -197,6 +204,19 @@ export default function VillageProfilePage() {
       {loading ? (
         <Panel padding={false}>
           <div className="py-16 text-center text-[13px] text-[var(--fg-muted)]">Loading…</div>
+        </Panel>
+      ) : err ? (
+        <Panel padding={false}>
+          <EmptyState
+            icon={AlertTriangle}
+            title="This village is not on your list"
+            description={`${err} If you have been sent to this site, ask an administrator to add it to your account.`}
+            action={
+              <Button variant="secondary" size="sm" onClick={() => navigate("/maintenance")} iconLeft={<ArrowLeft size={14} />}>
+                Back to villages
+              </Button>
+            }
+          />
         </Panel>
       ) : tab === "overview" ? (
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">

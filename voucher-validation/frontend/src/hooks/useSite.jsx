@@ -69,6 +69,16 @@ export function SiteProvider({ children }) {
 
     if (!projRes.ok) {
       setSites([]);
+      // Bailing out here used to leave a stale single-village selection in
+      // force. isInScope then collapses to `id === activeSiteId`, and pages
+      // fed by OTHER endpoints — Maintenance reads its own schedule — filter
+      // every row away and render as if the account had nothing, with no error
+      // to explain it. Drop back to "all villages" so a failed fetch degrades
+      // to showing too much rather than to showing nothing.
+      //
+      // Deliberately NOT written to localStorage: the selection is the user's
+      // and should come back on the next load that actually succeeds.
+      setActiveSiteIdState(null);
       setLoading(false);
       return;
     }

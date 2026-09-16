@@ -2,7 +2,7 @@
 import { Router } from "express";
 import { requireAuth, requireAdmin, requireMaintainer } from "../middleware/auth.js";
 
-export function makeMaintenanceRouter(controller) {
+export function makeMaintenanceRouter(controller, attachScope) {
   const router = Router();
 
   // Admins and engineers.
@@ -13,12 +13,17 @@ export function makeMaintenanceRouter(controller) {
   // anything behind requireAdmin or requireNotViewer — vouchers, settings,
   // audit logs, transaction flows, user management.
   //
-  // These maintenance routes are deliberately NOT village-scoped. An engineer
-  // can file a report for any village, because being sent to a site at short
-  // notice is normal fieldwork and a scope list that lagged the dispatch board
-  // would block the job. Scope governs what they can SEE of the estate's
-  // numbers, not where they are allowed to do the work.
+  // Maintenance is village-scoped, like everything else a non-admin reaches.
+  // The estate carries test villages that an admin adds and removes, and a
+  // contractor has no business seeing one — still less filing a report against
+  // it, which would put that account in the evidence trail for a site nobody
+  // sent them to. An engineer who needs a village they do not have is one edit
+  // away from having it.
+  //
+  // Admins are unrestricted, so the admin-only routes below (reopen, document
+  // removal) are unaffected by this.
   router.use(requireAuth, requireMaintainer);
+  if (attachScope) router.use(attachScope);
 
   // The checklist itself, so the UI never drifts from server validation.
   router.get("/components", controller.getComponents);

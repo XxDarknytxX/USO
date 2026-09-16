@@ -31,6 +31,64 @@ const SERVICE_INTERVAL_MONTHS = 6;
 
 const isAdmin = (req) => req.user?.role === "admin";
 
+/* ── Village scope ─────────────────────────────────────────────────────────
+   Maintenance is limited to the villages an admin assigned the account, the
+   same as the dashboard and the overview. The reason is concrete: the estate
+   carries test villages that get added and removed, and a contractor has no
+   business seeing one — let alone filing a report against it.
+
+   Admins are unrestricted. Everyone else is limited, including a role nobody
+   has invented yet: the default below is a closed scope, so forgetting to add
+   a role to SCOPED_ROLES shows up as "sees nothing", never as "sees all".
+   ------------------------------------------------------------------------ */
+
+/**
+ * The caller's scope, or a safe stand-in when attachScope was not mounted.
+ *
+ * The stand-in reads the ROLE rather than defaulting everyone to a closed set.
+ * A closed default is right for a contractor — a wiring mistake should show up
+ * as "sees nothing", never as "sees everything" — but applying it to an admin
+ * as well turns the same mistake into an estate-wide outage, and an admin is
+ * unrestricted by definition, so there is nothing to protect there.
+ */
+const scopeOf = (req) =>
+  req.scope ||
+  (req.user?.role === "admin"
+    ? { isViewer: false, projectIds: null }
+    : { isViewer: true, projectIds: [] });
+
+/** True when the caller may act on this village at all. */
+function inScope(req, projectId) {
+  const s = scopeOf(req);
+  if (!s.isViewer) return true;
+  return (s.projectIds || []).includes(Number(projectId));
+}
+
+/**
+ * A WHERE fragment limiting rows to the caller's villages, or null when the
+ * caller is unrestricted.
+ *
+ * An EMPTY scope returns a constant-false clause rather than no clause at all.
+ * `IN ()` is a syntax error in MySQL, so the obvious alternative — skip the
+ * fragment when there is nothing to put in it — silently widens the query to
+ * every row, which is the exact opposite of what an empty scope means.
+ */
+function scopeClause(req, column) {
+  const s = scopeOf(req);
+  if (!s.isViewer) return null;
+  const ids = (s.projectIds || []).map(Number).filter(Number.isFinite);
+  if (!ids.length) return { clause: "1 = 0", params: [] };
+  return { clause: `${column} IN (${ids.map(() => "?").join(", ")})`, params: ids };
+}
+
+/**
+ * The answer for a village the caller was not given. "Not found" rather than
+ * "forbidden" on purpose: a 403 confirms the village exists, which is itself
+ * something an out-of-scope caller is not owed — and for a test village that
+ * is the whole question.
+ */
+const outOfScope = (res) => send.notFound(res, "No such village");
+
 function mapVisit(r) {
   return {
     id: r.id,
@@ -60,8 +118,12 @@ export function makeMaintenanceController(pool) {
     // GET /api/maintenance/schedule
     // Every active village with its last submitted visit and when the next one
     // is due. This is the "are we compliant" view.
-    getSchedule: async (_req, res) => {
+    getSchedule: async (req, res) => {
       try {
+        // "Are we compliant" means compliant across the villages THIS account
+        // is responsible for. A contractor counting an unassigned village as
+        // overdue is being shown someone else's problem.
+        const sc = scopeClause(req, "p.id");
         const [rows] = await pool.query(
           `SELECT p.id, p.name, p.hostname,
                   v.id            AS last_visit_id,
@@ -74,8 +136,9 @@ export function makeMaintenanceController(pool) {
                          SELECT id FROM maintenance_visits
                           WHERE project_id = p.id AND status = 'submitted'
                           ORDER BY visit_date DESC, id DESC LIMIT 1)
-            WHERE p.is_active = 1
-            ORDER BY p.sort_order, p.name`
+            WHERE p.is_active = 1${sc ? ` AND ${sc.clause}` : ""}
+            ORDER BY p.sort_order, p.name`,
+          sc ? sc.params : []
         );
         const now = new Date();
         const sites = rows.map((r) => {
@@ -126,6 +189,8 @@ export function makeMaintenanceController(pool) {
       try {
         const projectId = Number(req.params.projectId);
         if (!Number.isFinite(projectId)) return send.bad(res, 'A numeric village id is required');
+
+        if (!inScope(req, projectId)) return outOfScope(res);
 
         const [[project]] = await pool.query(
           'SELECT id, name, hostname, ruijie_group_id FROM network_projects WHERE id = ? LIMIT 1', [projectId]
@@ -293,6 +358,7 @@ export function makeMaintenanceController(pool) {
       try {
         const projectId = Number(req.params.projectId);
         if (!Number.isFinite(projectId)) return send.bad(res, 'A numeric village id is required');
+        if (!inScope(req, projectId)) return outOfScope(res);
         const [[project]] = await pool.query('SELECT id FROM network_projects WHERE id = ? LIMIT 1', [projectId]);
         if (!project) return send.notFound(res, 'No such village');
 
@@ -324,7 +390,7 @@ export function makeMaintenanceController(pool) {
            saved.rel, fileName || null, mimeType, saved.bytes, req.user?.id ?? null]
         );
         return send.created(res, { documentId: r.insertId, bytes: saved.bytes });
-      } catch (e) { console.error('[maintenance] addDocument:', e); return send.serverErr(res, e.message); }
+      } catch (e) { console.error('[maintenance] addDocument:', e); return send.serverErr(res); }
     },
 
     // GET /api/maintenance/documents/:id — streams it, behind auth like photos.
@@ -332,9 +398,12 @@ export function makeMaintenanceController(pool) {
       try {
         const id = Number(req.params.id);
         const [[d]] = await pool.query(
-          'SELECT file_path, file_name, mime_type FROM maintenance_documents WHERE id = ? LIMIT 1', [id]
+          'SELECT project_id, file_path, file_name, mime_type FROM maintenance_documents WHERE id = ? LIMIT 1', [id]
         );
         if (!d || !resolveDocument(d.file_path)) return send.notFound(res, 'No such document');
+        // Site paperwork belongs to a village, so it inherits that village's
+        // scope — an id that is easy to guess must not be a way around it.
+        if (!inScope(req, d.project_id)) return send.notFound(res, 'No such document');
         const stream = streamDocument(d.file_path);
         if (!stream) return send.notFound(res, 'No such document');
         res.setHeader('Content-Type', d.mime_type || 'application/octet-stream');
@@ -374,6 +443,8 @@ export function makeMaintenanceController(pool) {
           where.push("(v.status = 'submitted' OR v.engineer_id = ?)");
           params.push(req.user?.id ?? 0);
         }
+        const sc = scopeClause(req, "v.project_id");
+        if (sc) { where.push(sc.clause); params.push(...sc.params); }
         const limit = Math.min(200, Math.max(1, Number(req.query.limit) || 50));
         const [rows] = await pool.query(
           `SELECT v.*, p.name AS project_name,
@@ -400,6 +471,7 @@ export function makeMaintenanceController(pool) {
             WHERE v.id = ? LIMIT 1`, [id]
         );
         if (!v) return send.notFound(res, 'No such visit');
+        if (!inScope(req, v.project_id)) return send.notFound(res, 'No such visit');
         if (!isAdmin(req) && v.status !== 'submitted' && v.engineer_id !== req.user?.id) {
           return send.forbidden(res, "That draft belongs to another engineer");
         }
@@ -439,6 +511,10 @@ export function makeMaintenanceController(pool) {
       try {
         const projectId = Number(req.body?.projectId);
         if (!Number.isFinite(projectId)) return send.bad(res, 'projectId is required');
+        // The one that matters most: filing a report against a village nobody
+        // assigned you puts a record in the evidence trail for a site — quite
+        // possibly a test site — that this account was never sent to.
+        if (!inScope(req, projectId)) return outOfScope(res);
         const [[proj]] = await pool.query(
           'SELECT id FROM network_projects WHERE id = ? AND is_active = 1 LIMIT 1', [projectId]
         );
@@ -471,6 +547,7 @@ export function makeMaintenanceController(pool) {
         const id = Number(req.params.id);
         const [[v]] = await pool.query('SELECT * FROM maintenance_visits WHERE id = ? LIMIT 1', [id]);
         if (!v) return send.notFound(res, 'No such visit');
+        if (!inScope(req, v.project_id)) return send.notFound(res, 'No such visit');
         if (v.status === 'submitted') {
           return send.forbidden(res, 'This report is filed and cannot be edited. An admin can reopen it.');
         }
@@ -515,6 +592,7 @@ export function makeMaintenanceController(pool) {
         const id = Number(req.params.id);
         const [[v]] = await pool.query('SELECT * FROM maintenance_visits WHERE id = ? LIMIT 1', [id]);
         if (!v) return send.notFound(res, 'No such visit');
+        if (!inScope(req, v.project_id)) return send.notFound(res, 'No such visit');
         if (v.status === 'submitted') {
           return send.forbidden(res, 'This report is filed — photos cannot be added or removed.');
         }
@@ -552,7 +630,7 @@ export function makeMaintenanceController(pool) {
           [id, componentKey, rel, mimeType, buf.length, String(req.body?.caption || '').slice(0, 255) || null, req.user?.id ?? null]
         );
         return send.created(res, { photoId: r.insertId, bytes: buf.length });
-      } catch (e) { console.error('[maintenance] addPhoto:', e); return send.serverErr(res, e.message); }
+      } catch (e) { console.error('[maintenance] addPhoto:', e); return send.serverErr(res); }
     },
 
     // GET /api/maintenance/photos/:id — streams the file. Served through the API
@@ -561,9 +639,16 @@ export function makeMaintenanceController(pool) {
       try {
         const id = Number(req.params.id);
         const [[p]] = await pool.query(
-          'SELECT file_path, mime_type FROM maintenance_photos WHERE id = ? LIMIT 1', [id]
+          `SELECT ph.file_path, ph.mime_type, v.project_id
+             FROM maintenance_photos ph
+             JOIN maintenance_visits v ON v.id = ph.visit_id
+            WHERE ph.id = ? LIMIT 1`, [id]
         );
         if (!p) return send.notFound(res, 'No such photo');
+        // Photo ids are sequential, so without this the whole estate's site
+        // photography is a for-loop away for any account that can reach the
+        // maintenance API at all.
+        if (!inScope(req, p.project_id)) return send.notFound(res, 'No such photo');
         if (!resolvePhoto(p.file_path)) return send.notFound(res, 'No such photo');
         const stream = streamPhoto(p.file_path);
         if (!stream) return send.notFound(res, 'No such photo');
@@ -579,7 +664,7 @@ export function makeMaintenanceController(pool) {
       try {
         const id = Number(req.params.id);
         const [[p]] = await pool.query(
-          `SELECT ph.id, ph.file_path, ph.component_key, v.status, v.engineer_id,
+          `SELECT ph.id, ph.file_path, ph.component_key, v.status, v.engineer_id, v.project_id,
                   ck.status AS check_status
              FROM maintenance_photos ph
              JOIN maintenance_visits v ON v.id = ph.visit_id
@@ -588,6 +673,7 @@ export function makeMaintenanceController(pool) {
             WHERE ph.id = ? LIMIT 1`, [id]
         );
         if (!p) return send.notFound(res, 'No such photo');
+        if (!inScope(req, p.project_id)) return send.notFound(res, 'No such photo');
         if (p.status === 'submitted') return send.forbidden(res, 'This report is filed — photos cannot be removed.');
         if (p.check_status === 'submitted') return send.forbidden(res, 'That component is filed — its photos are locked.');
         if (!isAdmin(req) && p.engineer_id !== req.user?.id) return send.forbidden(res, "That draft belongs to another engineer");
@@ -610,6 +696,7 @@ export function makeMaintenanceController(pool) {
 
         const [[v]] = await pool.query('SELECT * FROM maintenance_visits WHERE id = ? LIMIT 1', [id]);
         if (!v) return send.notFound(res, 'No such visit');
+        if (!inScope(req, v.project_id)) return send.notFound(res, 'No such visit');
         if (!isAdmin(req) && v.engineer_id !== req.user?.id) return send.forbidden(res, "That draft belongs to another engineer");
 
         const [[chk]] = await pool.query(
@@ -702,6 +789,7 @@ export function makeMaintenanceController(pool) {
         const id = Number(req.params.id);
         const [[v]] = await pool.query('SELECT * FROM maintenance_visits WHERE id = ? LIMIT 1', [id]);
         if (!v) return send.notFound(res, 'No such visit');
+        if (!inScope(req, v.project_id)) return send.notFound(res, 'No such visit');
         if (v.status === 'submitted') {
           return send.forbidden(res, 'Filed reports cannot be deleted. An admin can reopen one instead.');
         }
@@ -729,6 +817,8 @@ export function makeMaintenanceController(pool) {
         if (req.query.component && COMPONENT_KEYS.has(String(req.query.component))) {
           where.push('ck.component_key = ?'); params.push(String(req.query.component));
         }
+        const sc = scopeClause(req, "v.project_id");
+        if (sc) { where.push(sc.clause); params.push(...sc.params); }
         const limit = Math.min(500, Math.max(1, Number(req.query.limit) || 200));
         const [rows] = await pool.query(
           `SELECT ck.visit_id, ck.component_key, ck.condition_rating, ck.notes, ck.submitted_at,
@@ -768,6 +858,7 @@ export function makeMaintenanceController(pool) {
         const id = Number(req.params.id);
         const [[v]] = await pool.query('SELECT * FROM maintenance_visits WHERE id = ? LIMIT 1', [id]);
         if (!v) return send.notFound(res, 'No such visit');
+        if (!inScope(req, v.project_id)) return send.notFound(res, 'No such visit');
         if (v.status === 'submitted') return send.bad(res, 'Already filed');
         if (!isAdmin(req) && v.engineer_id !== req.user?.id) return send.forbidden(res, "That draft belongs to another engineer");
 

@@ -123,7 +123,7 @@ app.use("/api/network", makeNetworkRouter(network, attachScope));
 // Host health (CPU, memory, disk, database size, pm2). Admin only.
 app.use("/api/system", makeSystemRouter(pool));
 app.use("/api/mpaisa", makeMpaisaRouter(mpaisa));
-app.use("/api/maintenance", makeMaintenanceRouter(maintenance));
+app.use("/api/maintenance", makeMaintenanceRouter(maintenance, attachScope));
 
 // Health check (no secrets exposed)
 app.get("/health", (_req, res) =>

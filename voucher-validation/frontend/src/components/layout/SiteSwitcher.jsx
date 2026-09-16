@@ -18,6 +18,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { useAuth } from "../../hooks/useAuth";
 import { MapPin, Globe2, ChevronsUpDown, Check, Search, Settings2, X } from "lucide-react";
 import { useSite } from "../../hooks/useSite";
 import { networkApi } from "../../services/api";
@@ -28,6 +29,7 @@ function cn(...p) {
 
 export default function SiteSwitcher({ collapsed }) {
   const { sites, activeSite, isGlobal, setActiveSiteId, loading, isSiteVisible, activeSiteId } = useSite();
+  const { isAdmin } = useAuth();
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState("");
   const [health, setHealth] = useState(null); // projectId -> online|offline|unknown
@@ -174,12 +176,18 @@ export default function SiteSwitcher({ collapsed }) {
         ) : (
           <span className="text-[11px] text-[var(--fg-muted)]">{sites.length} villages</span>
         )}
-        <button
-          onClick={() => { setOpen(false); navigate("/settings"); }}
-          className="inline-flex items-center gap-1.5 text-[11.5px] font-semibold text-[var(--fg-secondary)] hover:text-[var(--brand)] transition-colors font-display"
-        >
-          <Settings2 size={12} /> Manage scope
-        </button>
+        {/* Settings is admin-only, so for anyone else this button is a link
+            that bounces them straight back to the dashboard — offered, most
+            likely, at the exact moment they are trying to work out why their
+            village list looks short. */}
+        {isAdmin && (
+          <button
+            onClick={() => { setOpen(false); navigate("/settings"); }}
+            className="inline-flex items-center gap-1.5 text-[11.5px] font-semibold text-[var(--fg-secondary)] hover:text-[var(--brand)] transition-colors font-display"
+          >
+            <Settings2 size={12} /> Manage scope
+          </button>
+        )}
       </div>
     </div>
   );
