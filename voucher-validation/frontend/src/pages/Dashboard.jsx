@@ -53,6 +53,22 @@ const fmtMoney = (n) =>
   "$" + Number(n || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const fmtNum = (n) => Number(n || 0).toLocaleString();
 
+// Gigabytes read better without decimals once they are into the hundreds; a
+// village on 3.4 GB and one on 1,204 GB want different precision.
+const fmtGb = (n) => {
+  const v = Number(n || 0);
+  return v >= 100 ? Math.round(v).toLocaleString() : v.toFixed(1);
+};
+
+// Relative age for the status tooltip. Seconds matter near the online
+// threshold; days matter for a dish that has been dark a while.
+const fmtAge = (s) => {
+  if (s < 60) return `${Math.round(s)}s`;
+  if (s < 3600) return `${Math.round(s / 60)}m`;
+  if (s < 86400) return `${Math.round(s / 3600)}h`;
+  return `${Math.round(s / 86400)}d`;
+};
+
 /** Data meters go teal → orange → red, so a village near its allocation reads hot. */
 function usageColor(pct) {
   return pct >= 90 ? "var(--danger-fg)" : pct >= 70 ? "var(--tile-orange)" : "var(--tile-teal)";
@@ -295,10 +311,19 @@ export default function Dashboard() {
         totalQ,
         dataPct: totalQ ? Math.round((usedQ / totalQ) * 100) : 0,
         online: net ? net.online : undefined,
+        onlineSource: net?.onlineSource ?? null,
         uptimePct: net?.uptimePct ?? null,
         apsOnline: net?.apsOnline ?? 0,
         apsTotal: net?.apsTotal ?? 0,
         hasNet: !!net,
+        // Starlink: the backhaul's own account of itself. `sl.usedGb` is what
+        // the dish actually carried this cycle, which is the figure the old
+        // Ruijie voucher-quota column could never give us.
+        sl: net?.starlink || null,
+        // Sort key for the Starlink column. Villages with no figure sort last
+        // rather than as zero, so "nothing reported" never outranks a village
+        // that genuinely used very little.
+        slUsed: net?.starlink?.usedGb ?? -1,
       };
     });
   }, [scopedPerSite, sites, netByGroup, revWindowByGroup]);
@@ -515,9 +540,15 @@ export default function Dashboard() {
           value={netHealth.total ? `${netHealth.up}/${netHealth.total}` : "—"}
           icon={netHealth.down > 0 ? <WifiOff size={18} /> : <Wifi size={18} />}
           color={netHealth.down > 0 ? "rose" : netHealth.total ? "emerald" : "slate"}
+          // The online count and the uptime % answer DIFFERENT questions and
+          // used to be concatenated as if they were one. Online is Starlink —
+          // is the village's internet up right now. Uptime is the Ruijie
+          // gateway's local link, sampled every few minutes over 30 days.
+          // "31/31 online · 71% uptime" is not defensible unless it says which
+          // is which, so the label now does.
           sub={
             netHealth.total
-              ? `villages online${netHealth.avgUptime != null ? ` · ${netHealth.avgUptime}% uptime · 30d` : ""}`
+              ? `villages online${netHealth.avgUptime != null ? ` · gateway uptime ${netHealth.avgUptime}% · 30d` : ""}`
               : "no collector data yet"
           }
           onClick={isViewer ? undefined : () => navigate("/network")}
@@ -579,7 +610,7 @@ export default function Dashboard() {
                 <SortTh label="Live" sortKey="live" sort={sort} onSort={toggleSort} align="right" />
                 <SortTh label="Revenue" sortKey="revenue" sort={sort} onSort={toggleSort} align="right" />
                 <SortTh label="Sales" sortKey="sales" sort={sort} onSort={toggleSort} align="right" />
-                <SortTh label="Data used" sortKey="usedQ" sort={sort} onSort={toggleSort} align="right" />
+                <SortTh label="Starlink data" sortKey="slUsed" sort={sort} onSort={toggleSort} align="right" />
                 <SortTh label="Uptime" sortKey="uptimePct" sort={sort} onSort={toggleSort} align="right" />
                 <Th align="right">Open</Th>
               </tr>
@@ -596,7 +627,7 @@ export default function Dashboard() {
                   <tr key={r.key}>
                     <Td>
                       <span className="flex items-center gap-2.5 min-w-0">
-                        <StatusDot online={r.online} hasNet={r.hasNet} />
+                        <StatusDot online={r.online} hasNet={r.hasNet} source={r.onlineSource} sl={r.sl} />
                         <RecordCell
                           title={r.name}
                           subtitle={r.hostname}
@@ -611,20 +642,7 @@ export default function Dashboard() {
                     <Td align="right" strong className="tabular-nums">{fmtMoney(r.revenue)}</Td>
                     <Td align="right" className="tabular-nums">{fmtNum(r.sales)}</Td>
                     <Td align="right">
-                      <span className="flex items-center justify-end gap-2.5">
-                        <span className="tabular-nums whitespace-nowrap">
-                          {Math.round(r.usedQ / 1024)} / {Math.round(r.totalQ / 1024)} GB
-                        </span>
-                        <span
-                          className="hidden lg:block w-12 h-1.5 rounded-full bg-[var(--bg-surface)] overflow-hidden shrink-0"
-                          title={`${r.dataPct}% of allocation used`}
-                        >
-                          <span
-                            className="block h-full rounded-full"
-                            style={{ width: `${Math.min(r.dataPct, 100)}%`, background: usageColor(r.dataPct) }}
-                          />
-                        </span>
-                      </span>
+                      <StarlinkDataCell sl={r.sl} />
                     </Td>
                     <Td align="right">
                       {r.hasNet ? (
@@ -1146,12 +1164,106 @@ function SortTh({ label, sortKey, sort, onSort, align = "left" }) {
 }
 
 /** Village link health. Absent from the collector reads as unknown, not down. */
-function StatusDot({ online, hasNet }) {
-  const label = !hasNet ? "No collector data" : online === true ? "Online" : online === false ? "Offline" : "Unknown";
-  const bg =
-    online === true ? "var(--success-fg)" : online === false ? "var(--danger-fg)" : "var(--fg-subtle)";
+/**
+ * Starlink's own account of what the dish carried this cycle.
+ *
+ * This replaced a Ruijie voucher-quota figure that was wrong in two ways: its
+ * numerator read 0 on any village whose gateway does not report per-voucher
+ * used-flow, and its denominator was the summed allowance of every voucher ever
+ * printed — so the meter went DOWN when an operator generated more stock. The
+ * dish meters the actual backhaul and does not care how the gateway is set up.
+ *
+ * An allowance is only a number when Starlink publishes one. Where it does not,
+ * this states the usage alone rather than dividing by nothing or printing
+ * "0 GB", which would read as "this village has no data" — the opposite of
+ * what an absent cap means.
+ */
+function StarlinkDataCell({ sl }) {
+  if (!sl || !sl.configured) {
+    return <span className="text-[var(--fg-subtle)]" title="No Starlink kit linked to this village">—</span>;
+  }
+  if (sl.usedGb == null) {
+    return <span className="text-[var(--fg-subtle)]" title="Starlink has not reported usage for this cycle yet">—</span>;
+  }
+  const cap = sl.allowanceGb;
+  const pct = cap ? Math.round((sl.usedGb / cap) * 100) : null;
+  const over = cap != null && sl.usedGb > cap;
   return (
-    <span className="shrink-0 inline-flex items-center" title={label}>
+    <span className="flex items-center justify-end gap-2.5">
+      <span className="tabular-nums whitespace-nowrap">
+        {fmtGb(sl.usedGb)}
+        {cap ? <span className="text-[var(--fg-subtle)]"> / {fmtGb(cap)}</span> : null} GB
+      </span>
+      {pct == null ? (
+        // No published cap: there is nothing to fill a meter against, and a
+        // full-width or empty bar would both be a claim we cannot make.
+        <span
+          className="hidden lg:block w-12 text-[10.5px] text-[var(--fg-subtle)] shrink-0 text-left"
+          title="Starlink publishes no plan cap for this cycle"
+        >
+          no cap
+        </span>
+      ) : (
+        <span
+          className="hidden lg:block w-12 h-1.5 rounded-full bg-[var(--bg-surface)] overflow-hidden shrink-0"
+          title={
+            over
+              ? `${pct}% — ${fmtGb(sl.usedGb - cap)} GB past the ${fmtGb(cap)} GB allowance`
+              : `${pct}% of the ${fmtGb(cap)} GB allowance used`
+          }
+        >
+          {/* Clamped: usage can legitimately exceed the allowance, and an
+              unclamped bar would render past its own track. */}
+          <span
+            className="block h-full rounded-full"
+            style={{ width: `${Math.min(pct, 100)}%`, background: usageColor(pct) }}
+          />
+        </span>
+      )}
+    </span>
+  );
+}
+
+/**
+ * Tri-state, because the underlying question is now genuinely three-valued.
+ * Telemetry arriving means up; silence for half an hour means down; the band
+ * between is "we have not heard recently", which is not the same claim as "it
+ * is down" and must not be painted red.
+ *
+ * The tooltip names its source. A green dot vouched for by the Ruijie gateway
+ * because no Starlink kit is linked is a weaker statement than one vouched for
+ * by the dish, and an operator deserves to be able to tell them apart.
+ */
+function StatusDot({ online, hasNet, source, sl }) {
+  const label = !hasNet
+    ? "No collector data"
+    : online === true
+      ? "Online"
+      : online === false
+        ? "Offline"
+        : "Unknown — no recent telemetry";
+  const bg =
+    online === true
+      ? "var(--success-fg)"
+      : online === false
+        ? "var(--danger-fg)"
+        : online === null && source === "telemetry"
+          ? "var(--warning-fg)" // amber: heard from, but not lately
+          : "var(--fg-subtle)";
+
+  const detail = [
+    label,
+    source === "telemetry" ? "via Starlink telemetry" : source === "ruijie" ? "via the Ruijie gateway (no Starlink kit linked)" : null,
+    sl?.ageSeconds != null ? `last seen ${fmtAge(sl.ageSeconds)} ago` : null,
+    sl?.latencyMs != null ? `${Math.round(sl.latencyMs)} ms` : null,
+    sl?.dropRate != null ? `${(sl.dropRate * 100).toFixed(1)}% drop` : null,
+    sl?.obstructionPct != null ? `${sl.obstructionPct.toFixed(1)}% obstructed` : null,
+  ]
+    .filter(Boolean)
+    .join(" · ");
+
+  return (
+    <span className="shrink-0 inline-flex items-center" title={detail}>
       <span className="h-2 w-2 rounded-full" style={{ background: bg }} />
       <span className="sr-only">{label}</span>
     </span>

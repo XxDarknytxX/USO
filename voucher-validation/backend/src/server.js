@@ -21,6 +21,7 @@ import { makeMpaisaRouter } from "./routes/mpaisa.js";
 import { makeMaintenanceRouter } from "./routes/maintenance.js";
 import { collectOnceGuarded } from "./services/networkCollector.js";
 import { makeNetworkCollectScheduler } from "./services/networkCollectScheduler.js";
+import { makeTelemetryPoller } from "./services/starlinkTelemetry.js";
 import RuijieService from "./services/ruijieService.js";
 import { makeSyncScheduler } from "./services/syncScheduler.js";
 import { makeAttachScope } from "./middleware/auth.js";
@@ -168,4 +169,24 @@ if (_isSchedulerPrimary) {
     .catch((e) => console.error("Network collect scheduler failed to start:", e.message));
 } else {
   console.log(`[NetCollect] instance ${_instanceId} is not primary — scheduler not started`);
+}
+
+// Starlink native telemetry — what decides whether a village counts as online.
+//
+// Unlike the Ruijie collector this does NOT scale with the number of villages:
+// the stream is account-wide, so one continuous consumer covers the estate. It
+// does still need the primary-instance gate, for a different reason — several
+// consumers on one account would each take a share of the same message stream
+// and every one of them would end up with an incomplete picture.
+//
+// OFF by default (starlink_telemetry_enabled in app_settings). It opens a
+// standing session against Starlink, so it starts only when an admin asks.
+const telemetryPoller = makeTelemetryPoller({ pool });
+network.setTelemetryPoller(telemetryPoller);
+if (_isSchedulerPrimary) {
+  telemetryPoller
+    .start()
+    .catch((e) => console.error("Starlink telemetry poller failed to start:", e.message));
+} else {
+  console.log(`[Telemetry] instance ${_instanceId} is not primary — poller not started`);
 }

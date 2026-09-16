@@ -107,7 +107,23 @@ export default function SiteDashboard({ groupId, site }) {
   const vSold = Math.max(0, vTotal - vUnused);            // claimed (active+expired+inactive)
   const vDataUsedMb = sum((p) => p.total_used_quota_mb);  // voucher data consumed (DB, reliable)
   const health = data?.health;
-  const internetUp = health?.internet?.up ?? overviewSite?.internetUp ?? null;
+  // The village's OVERALL verdict, which is now Starlink-led and tri-state.
+  //
+  // This deliberately prefers `online` over the Ruijie `internet.up` reading it
+  // used to take. Reading internetUp here while the Dashboard, Overview and the
+  // sidebar all read `online` is how the same village ends up with a green dot
+  // in the switcher and a red "no internet" banner on its own page — they would
+  // be answering different questions and only one of them would say so.
+  //
+  // The Ruijie reading is still kept below, under its own name, because the
+  // network tab genuinely describes the local gateway link.
+  const internetUp =
+    overviewSite?.online !== undefined
+      ? overviewSite.online
+      : (health?.internet?.up ?? overviewSite?.internetUp ?? null);
+  const onlineSource = overviewSite?.onlineSource ?? null;
+  const gatewayWanUp = health?.internet?.up ?? overviewSite?.internetUp ?? null;
+  const starlink = overviewSite?.starlink ?? null;
   const clients = health?.summary?.clients ?? overviewSite?.clients ?? 0;
   const apOnline = health?.summary?.apOnline ?? overviewSite?.apsOnline ?? 0;
   const apTotal = health?.summary?.apTotal ?? overviewSite?.apsTotal ?? 0;
@@ -208,7 +224,25 @@ export default function SiteDashboard({ groupId, site }) {
           <span className="flex-1 min-w-0">
             <span className="block text-[13px] font-semibold font-display">This village has no internet</span>
             <span className="block text-[12px] opacity-80">
-              The last collector snapshot could not reach the gateway. Customers cannot connect.
+              {onlineSource === "telemetry"
+                ? `The Starlink dish has not reported${starlink?.ageSeconds ? ` for ${Math.round(starlink.ageSeconds / 3600)}h` : ""}. Customers cannot connect.`
+                : "The last collector snapshot could not reach the gateway. Customers cannot connect."}
+            </span>
+          </span>
+        </div>
+      )}
+
+      {/* The middle state. Silence for a while is not proof of an outage, and
+          saying so plainly is better than a red banner that might be wrong or
+          no banner at all, which would read as "fine". */}
+      {internetUp === null && onlineSource === "telemetry" && (
+        <div className="w-full flex items-center gap-3.5 px-4 py-3 rounded-xl border bg-[var(--warning-soft)] border-[var(--warning-border)] text-[var(--warning-fg)]">
+          <WifiOff size={17} className="shrink-0" />
+          <span className="flex-1 min-w-0">
+            <span className="block text-[13px] font-semibold font-display">No recent word from this village</span>
+            <span className="block text-[12px] opacity-80">
+              The dish last reported{starlink?.ageSeconds ? ` ${Math.round(starlink.ageSeconds / 60)} minutes ago` : " a while ago"}.
+              That may be a brief gap rather than an outage — check again shortly.
             </span>
           </span>
         </div>

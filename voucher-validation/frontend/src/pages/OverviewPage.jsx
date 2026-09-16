@@ -233,13 +233,19 @@ export default function OverviewPage() {
           <thead>
             <tr>
               <Th>Village</Th>
+              {/* Three different layers, which used to read as one. Status is
+                  the village's actual internet, from the Starlink dish. Local
+                  link is the Ruijie gateway's own view of its WAN, one layer
+                  down — it can disagree, and when it does that disagreement is
+                  the useful part. Gateway is whether we can reach the box. */}
               <Th>Status</Th>
-              <Th>Internet</Th>
+              <Th>Local link</Th>
               <Th>Gateway</Th>
+              <Th align="right">Starlink</Th>
+              <Th align="right">Link quality</Th>
               <Th align="right">APs</Th>
               <Th align="right">Clients</Th>
-              <Th align="right">Usage</Th>
-              <Th align="right">Uptime 24h</Th>
+              <Th align="right">Gateway uptime</Th>
             </tr>
           </thead>
           <tbody>
@@ -278,14 +284,15 @@ export default function OverviewPage() {
                       mono
                     />
                   </Td>
-                  <Td><State state={v.online} up="Online" down="Down" /></Td>
+                  <Td><OnlineState site={v} /></Td>
                   <Td><State state={v.internetUp} up="Up" down="Down" /></Td>
                   <Td><State state={v.gatewayOnline} up="Online" down="Offline" /></Td>
+                  <Td align="right" nowrap className="tabular-nums"><SlData sl={v.starlink} /></Td>
+                  <Td align="right" nowrap><LinkQuality sl={v.starlink} /></Td>
                   <Td align="right" nowrap className="tabular-nums">
                     {v.apsTotal ? `${v.apsOnline}/${v.apsTotal}` : "—"}
                   </Td>
                   <Td align="right" nowrap className="tabular-nums">{v.clients ?? 0}</Td>
-                  <Td align="right" nowrap className="tabular-nums">{fmtBytes(v.usageBytes)}</Td>
                   <Td align="right" nowrap><Uptime pct={v.uptimePct} /></Td>
                 </tr>
               ))
@@ -310,6 +317,92 @@ export default function OverviewPage() {
 function State({ state, up = "Up", down = "Down" }) {
   if (state == null) return <StatusPill tone="neutral">No data</StatusPill>;
   return <StatusPill tone={state ? "success" : "danger"}>{state ? up : down}</StatusPill>;
+}
+
+/**
+ * The village's overall verdict. Distinct from `State` because null here does
+ * NOT mean "no data" — when telemetry is the source it means we have data and
+ * it is merely stale, which is a different and more useful thing to say. Only a
+ * village we have genuinely never heard from gets "No data".
+ */
+function OnlineState({ site }) {
+  const { online, onlineSource, starlink } = site;
+  if (online === true) return <StatusPill tone="success">Online</StatusPill>;
+  if (online === false) return <StatusPill tone="danger">Down</StatusPill>;
+  if (onlineSource === "telemetry") {
+    const mins = starlink?.ageSeconds != null ? Math.round(starlink.ageSeconds / 60) : null;
+    return (
+      <StatusPill tone="warning" title={mins != null ? `Last reported ${mins} minutes ago` : undefined}>
+        {mins != null ? `Quiet ${mins}m` : "Quiet"}
+      </StatusPill>
+    );
+  }
+  return <StatusPill tone="neutral">No data</StatusPill>;
+}
+
+/**
+ * Starlink consumption for the current billing cycle. Replaced the old Ruijie
+ * byte counter in this slot: the dish meters the actual backhaul, so it is
+ * both the authoritative number and the one that still works on villages whose
+ * gateway does not report per-voucher flow.
+ *
+ * An allowance is printed only where Starlink publishes one — a cap of zero
+ * means "none published", and rendering that as "0 GB" would say the opposite.
+ */
+function SlData({ sl }) {
+  if (!sl?.configured) return <span className="text-[var(--fg-subtle)]" title="No Starlink kit linked">—</span>;
+  if (sl.usedGb == null) return <span className="text-[var(--fg-subtle)]" title="No usage reported this cycle yet">—</span>;
+  const g = (n) => (n >= 100 ? Math.round(n).toLocaleString() : n.toFixed(1));
+  return (
+    <span
+      title={
+        sl.allowanceGb
+          ? `${Math.round((sl.usedGb / sl.allowanceGb) * 100)}% of the ${g(sl.allowanceGb)} GB allowance`
+          : "Starlink publishes no plan cap for this cycle"
+      }
+    >
+      {g(sl.usedGb)}
+      {sl.allowanceGb ? <span className="text-[var(--fg-subtle)]"> / {g(sl.allowanceGb)}</span> : null} GB
+    </span>
+  );
+}
+
+/**
+ * How the link is actually behaving, which "Online" cannot express: a dish can
+ * be reporting steadily and still be unusable behind an obstruction or a 15%
+ * drop rate. Latency leads because it is the number a field engineer acts on;
+ * the rest sit in the tooltip so the column stays one line.
+ */
+function LinkQuality({ sl }) {
+  if (!sl?.configured || sl.latencyMs == null) {
+    return <span className="text-[var(--fg-subtle)]">—</span>;
+  }
+  const drop = sl.dropRate ?? 0;
+  const obstructed = sl.obstructionPct ?? 0;
+  // Thresholds are deliberately generous: satellite latency is ~40ms at best
+  // and a little loss is normal weather, not a fault worth paging anyone over.
+  const bad = sl.latencyMs > 150 || drop > 0.1 || obstructed > 3;
+  const warn = sl.latencyMs > 90 || drop > 0.03 || obstructed > 1;
+  const tone = bad ? "var(--danger-fg)" : warn ? "var(--warning-fg)" : "var(--fg-secondary)";
+  return (
+    <span
+      className="tabular-nums"
+      style={{ color: tone }}
+      title={[
+        `${Math.round(sl.latencyMs)} ms latency`,
+        `${(drop * 100).toFixed(1)}% packet loss`,
+        `${obstructed.toFixed(1)}% obstructed`,
+        sl.signalQuality != null ? `${Math.round(sl.signalQuality * 100)}% signal` : null,
+        sl.downlinkMbps != null ? `${sl.downlinkMbps.toFixed(1)} Mbps down` : null,
+        sl.uplinkMbps != null ? `${sl.uplinkMbps.toFixed(1)} Mbps up` : null,
+      ]
+        .filter(Boolean)
+        .join(" · ")}
+    >
+      {Math.round(sl.latencyMs)} ms
+      {bad || warn ? <span className="ml-1.5">{bad ? "▲" : "△"}</span> : null}
+    </span>
+  );
 }
 
 function Uptime({ pct }) {

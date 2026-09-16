@@ -110,7 +110,14 @@ async function starlinkFetch(doRequest) {
   }
 }
 
-/** OAuth2 client-credentials token, cached until shortly before it expires. */
+/**
+ * OAuth2 client-credentials token, cached until shortly before it expires.
+ *
+ * Exported as `getAccessToken` below so the telemetry poller shares THIS cache
+ * rather than running its own OAuth. One token for the process is the point: a
+ * second cache would double the token exchanges and, worse, would not be
+ * cleared by the 401/403 handling in starlinkFetch.
+ */
 async function getToken(cfg) {
   if (_token && Date.now() < _tokenExpiresAt) return _token;
   const body = new URLSearchParams({
@@ -369,6 +376,21 @@ export async function getServiceLine(cfg, serviceLineNumber) {
       productReferenceId: c?.productReferenceId || null,
     };
   });
+}
+
+/**
+ * The shared token and the shared request path, for the telemetry poller.
+ * Telemetry lives in its own module because it is a continuous stream with a
+ * different lifecycle from these request/response calls, but it must not open
+ * a second OAuth session against the same account.
+ */
+export async function getAccessToken(cfg) {
+  return getToken(cfg);
+}
+
+/** Runs one authenticated Starlink call, dropping the token on a 401/403. */
+export async function starlinkRequest(url, options) {
+  return starlinkFetch(() => fetchJson(url, options));
 }
 
 /** Small debug view, used only for diagnostics. */

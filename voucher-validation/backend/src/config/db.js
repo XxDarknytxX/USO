@@ -316,6 +316,43 @@ export async function getPool() {
     // single row like smtp_settings. Deliberately NOT in app_settings: that
     // table is returned wholesale by GET /api/settings, which would ship the
     // client secret to the browser.
+    // Native Starlink telemetry, keyed by the DeviceId the stream reports.
+    // One row per device per poll, already averaged over that poll's batch.
+    // Short retention on purpose: this answers "is the dish up" and "how has
+    // the link behaved lately", and at ~180k rows a day a long window would be
+    // millions of rows nobody reads.
+    `CREATE TABLE IF NOT EXISTS starlink_telemetry (
+      id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+      device_id VARCHAR(100) NOT NULL,
+      recorded_at DATETIME NOT NULL,
+      downlink_mbps DECIMAL(12,3) NULL,
+      uplink_mbps DECIMAL(12,3) NULL,
+      latency_ms DECIMAL(10,2) NULL,
+      drop_rate DECIMAL(8,5) NULL,
+      signal_quality DECIMAL(8,5) NULL,
+      obstruction_pct DECIMAL(8,4) NULL,
+      uptime_seconds BIGINT NULL,
+      sample_count INT NOT NULL DEFAULT 1,
+      INDEX idx_device_time (device_id, recorded_at),
+      INDEX idx_recorded (recorded_at)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
+
+    // Newest sample per device. Derived — rebuildable from the history at any
+    // time — and exists only so the dashboard can join one row per village
+    // instead of running a correlated MAX() over a multi-million-row table on
+    // every page load.
+    `CREATE TABLE IF NOT EXISTS starlink_device_latest (
+      device_id VARCHAR(100) NOT NULL PRIMARY KEY,
+      last_seen_at DATETIME NOT NULL,
+      downlink_mbps DECIMAL(12,3) NULL,
+      uplink_mbps DECIMAL(12,3) NULL,
+      latency_ms DECIMAL(10,2) NULL,
+      drop_rate DECIMAL(8,5) NULL,
+      signal_quality DECIMAL(8,5) NULL,
+      obstruction_pct DECIMAL(8,4) NULL,
+      uptime_seconds BIGINT NULL
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
+
     `CREATE TABLE IF NOT EXISTS starlink_settings (
       id INT NOT NULL PRIMARY KEY,
       enabled BOOLEAN NOT NULL DEFAULT 0,
@@ -395,6 +432,11 @@ export async function getPool() {
   const starlinkMigrations = [
     `ALTER TABLE network_projects ADD COLUMN starlink_service_line_number VARCHAR(64) NULL AFTER ruijie_tenant_id`,
     `ALTER TABLE network_projects ADD COLUMN starlink_device_id VARCHAR(100) NULL AFTER starlink_service_line_number`,
+    // What the admin actually types: the kit as it is labelled on the hardware
+    // and in the Starlink console. starlink_device_id is the telemetry
+    // DeviceId ("ut5030988e-…"), resolved from this in the background and
+    // never shown in the UI — an operator should not have to know it exists.
+    `ALTER TABLE network_projects ADD COLUMN starlink_kit_id VARCHAR(64) NULL AFTER starlink_device_id`,
   ];
   for (const sql of starlinkMigrations) {
     try { await pool.query(sql); console.log(`Migration OK: ${sql.slice(0, 60)}...`); }

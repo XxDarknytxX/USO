@@ -27,6 +27,13 @@ export function makeNetworkRouter(controller, attachScope) {
   // Scheduler state for the Settings page.
   router.get("/collect/status", requireAdmin, controller.collectStatus);
 
+  // Starlink native telemetry — the poller that decides whether a village is
+  // online. Status reports coverage as well as liveness, because a village with
+  // no resolved device id silently falls back to the Ruijie signal.
+  router.get("/telemetry/status", requireAdmin, controller.telemetryStatus);
+  router.post("/telemetry/poll", requireAdmin, controller.telemetryPollNow);
+  router.post("/telemetry/reload", requireAdmin, controller.telemetryReload);
+
   // Discover Ruijie network groups for the "add site" picker (admin)
   router.get("/discover", requireAdmin, controller.discoverGroups);
 

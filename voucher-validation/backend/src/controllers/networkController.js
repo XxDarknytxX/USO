@@ -7,6 +7,7 @@ import { fetchProjectHealth } from "../services/networkHealth.js";
 import { getHealthSnapshot, setHealthSnapshot } from "../services/networkHealthStore.js";
 import * as starlink from "../services/starlinkService.js";
 import { collectOnceGuarded, isCollecting } from "../services/networkCollector.js";
+import { resolveDeviceId } from "../services/starlinkTelemetry.js";
 
 const send = {
   ok: (res, data = {}) => res.json(data),
@@ -27,10 +28,80 @@ const mapProject = (r) => ({
   // projects inside their own scope.
   starlinkServiceLineNumber: r.starlink_service_line_number || null,
   starlinkDeviceId: r.starlink_device_id || null,
+  // What the admin typed. The device id above is resolved from this in the
+  // background and is not something an operator should have to know.
+  starlinkKitId: r.starlink_kit_id || null,
   isActive: !!r.is_active,
   sortOrder: r.sort_order,
   createdAt: r.created_at,
 });
+
+/* ------------------------------------------------- Starlink-derived online */
+
+// A dish reports every few seconds, so these windows are generous rather than
+// tight: 10 minutes is ~40 missed samples, which is a real outage and not a
+// hiccup. The middle band exists because "we have not heard from it in a
+// quarter of an hour" is genuinely not the same claim as "it is down", and
+// showing an amber unknown is honest where a red cross would not be.
+const ONLINE_WITHIN_MS = 10 * 60 * 1000;
+const UNKNOWN_WITHIN_MS = 30 * 60 * 1000;
+
+const round2 = (n) => Math.round(n * 100) / 100;
+const numOrNull = (v) => (v == null ? null : Number(v));
+
+async function isTelemetryEnabled(pool) {
+  try {
+    const [rows] = await pool.query(
+      "SELECT setting_value FROM app_settings WHERE setting_key = 'starlink_telemetry_enabled'"
+    );
+    const raw = rows[0]?.setting_value;
+    return raw != null && (String(raw).toLowerCase() === "true" || String(raw) === "1");
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Whether a village has internet, and on whose word.
+ *
+ * Falls back to the Ruijie gateway whenever Starlink cannot answer — telemetry
+ * switched off, or no device id resolved for this village. That fallback is
+ * reported in `source` rather than hidden, because an operator reading a green
+ * dot deserves to know which layer vouched for it.
+ */
+function deriveOnline({ telemetryEnabled, tel, ruijieUp, nowMs }) {
+  if (!telemetryEnabled || !tel || !tel.last_seen_at) {
+    return { online: ruijieUp, source: ruijieUp == null ? null : "ruijie" };
+  }
+  const age = nowMs - new Date(tel.last_seen_at).getTime();
+  if (age <= ONLINE_WITHIN_MS) return { online: true, source: "telemetry" };
+  if (age <= UNKNOWN_WITHIN_MS) return { online: null, source: "telemetry" };
+  return { online: false, source: "telemetry" };
+}
+
+/** The per-village Starlink block: live link quality, plus cycle consumption. */
+function buildStarlink({ project, tel, use, nowMs }) {
+  const allowance =
+    use && use.allowance_gb != null && Number(use.allowance_gb) > 0
+      ? Number(use.allowance_gb)
+      : null; // 0 means "Starlink published no cap", never "no data allowed"
+  return {
+    configured: !!project.starlink_device_id,
+    lastSeenAt: tel?.last_seen_at ? new Date(tel.last_seen_at).toISOString() : null,
+    ageSeconds: tel?.last_seen_at
+      ? Math.max(0, Math.round((nowMs - new Date(tel.last_seen_at).getTime()) / 1000))
+      : null,
+    downlinkMbps: numOrNull(tel?.downlink_mbps),
+    uplinkMbps: numOrNull(tel?.uplink_mbps),
+    latencyMs: numOrNull(tel?.latency_ms),
+    dropRate: numOrNull(tel?.drop_rate),
+    signalQuality: numOrNull(tel?.signal_quality),
+    obstructionPct: numOrNull(tel?.obstruction_pct),
+    uptimeSeconds: numOrNull(tel?.uptime_seconds),
+    usedGb: numOrNull(use?.total_used_gb),
+    allowanceGb: allowance,
+  };
+}
 
 // Live health is expensive (~6–7 Ruijie Cloud calls per project) and Ruijie
 // rate-limits hard. It is fetched ONLY on an explicit manual refresh
@@ -41,6 +112,7 @@ const _healthInflight = new Map();  // projectId -> Promise<payload>
 export function makeNetworkController(pool) {
   // Set from server.js once the scheduler exists (it needs this controller first).
   let collectScheduler = null;
+  let telemetryPoller = null;
   const ruijie = new RuijieService();
 
   return {
@@ -65,6 +137,62 @@ export function makeNetworkController(pool) {
     },
 
     setCollectScheduler: (s) => { collectScheduler = s; },
+    setTelemetryPoller: (p) => { telemetryPoller = p; },
+
+    // GET /api/network/telemetry/status  (admin)
+    // What the poller is doing, plus how much of the estate it can actually
+    // speak for — a village with no resolved device id falls back to the Ruijie
+    // signal, and an operator should be able to see that at a glance rather
+    // than wonder why a dot never turns green.
+    telemetryStatus: async (_req, res) => {
+      try {
+        const [[counts]] = await pool.query(
+          `SELECT COUNT(*) AS total,
+                  SUM(starlink_device_id IS NOT NULL) AS resolved,
+                  SUM(starlink_kit_id IS NOT NULL OR starlink_service_line_number IS NOT NULL) AS identified
+             FROM network_projects WHERE is_active = 1`
+        );
+        return send.ok(res, {
+          poller: telemetryPoller ? telemetryPoller.status() : { enabled: false, running: false },
+          coverage: {
+            villages: Number(counts.total || 0),
+            withDeviceId: Number(counts.resolved || 0),
+            withKitOrLine: Number(counts.identified || 0),
+          },
+        });
+      } catch (e) {
+        console.error(e);
+        return send.serverErr(res);
+      }
+    },
+
+    // POST /api/network/telemetry/poll  (admin)
+    // Resolve any outstanding kit ids, then read the stream once. Useful right
+    // after entering a kit, so the village does not sit blank until the next
+    // tick.
+    telemetryPollNow: async (_req, res) => {
+      try {
+        if (!telemetryPoller) return send.bad(res, "Telemetry poller is not running on this instance");
+        const r = await telemetryPoller.pollNow();
+        return send.ok(res, r);
+      } catch (e) {
+        console.error(e);
+        return send.serverErr(res, e.message);
+      }
+    },
+
+    // POST /api/network/telemetry/reload  (admin)
+    // Re-read the on/off setting without a restart, the same way the collect
+    // scheduler reloads.
+    telemetryReload: async (_req, res) => {
+      try {
+        if (!telemetryPoller) return send.bad(res, "Telemetry poller is not running on this instance");
+        return send.ok(res, await telemetryPoller.reload());
+      } catch (e) {
+        console.error(e);
+        return send.serverErr(res);
+      }
+    },
 
     // POST /api/network/collect  (admin)
     // Refresh EVERY village now. Deliberately not per-village: the Overview and
@@ -150,12 +278,17 @@ export function makeNetworkController(pool) {
           ruijie_tenant_id: "ruijieTenantId",
           starlink_service_line_number: "starlinkServiceLineNumber",
           starlink_device_id: "starlinkDeviceId",
+          starlink_kit_id: "starlinkKitId",
           is_active: "isActive",
           sort_order: "sortOrder",
         };
         // Columns where an empty string means "unset this", not "store ''" —
         // clearing a village's service line must actually disable its card.
-        const nullable = new Set(["starlink_service_line_number", "starlink_device_id"]);
+        const nullable = new Set([
+          "starlink_service_line_number",
+          "starlink_device_id",
+          "starlink_kit_id",
+        ]);
         const set = [];
         const vals = [];
         for (const [col, key] of Object.entries(fields)) {
@@ -168,10 +301,36 @@ export function makeNetworkController(pool) {
           }
         }
         if (set.length === 0) return send.ok(res, { success: true, message: "No changes" });
+
+        // Re-point the kit or the service line and the resolved device id is
+        // stale — it still names the OLD dish, so telemetry would keep
+        // reporting a terminal this village no longer has. Clear it unless the
+        // caller set one explicitly, and let the poller resolve it again.
+        const repointed =
+          (req.body.starlinkKitId !== undefined ||
+            req.body.starlinkServiceLineNumber !== undefined) &&
+          req.body.starlinkDeviceId === undefined;
+        if (repointed) set.push("starlink_device_id = NULL");
+
         vals.push(req.params.id);
         await pool.query(`UPDATE network_projects SET ${set.join(", ")} WHERE id = ?`, vals);
 
         const [rows] = await pool.query("SELECT * FROM network_projects WHERE id = ?", [req.params.id]);
+        // Best-effort: resolve the new kit straight away so the village is
+        // live without waiting for the next poll. A failure here is not an
+        // error — the poller retries on its own schedule.
+        if (repointed) {
+          resolveDeviceId(pool, rows[0])
+            .then((id) =>
+              id
+                ? pool.query("UPDATE network_projects SET starlink_device_id = ? WHERE id = ?", [
+                    id,
+                    req.params.id,
+                  ])
+                : null
+            )
+            .catch(() => {});
+        }
         return send.ok(res, { success: true, project: mapProject(rows[0]) });
       } catch (e) {
         console.error(e);
@@ -399,19 +558,51 @@ export function makeNetworkController(pool) {
         const upByProject = {};
         for (const u of uptimeRows) upByProject[u.project_id] = u;
 
+        // Starlink telemetry — the newest sample per device, which is what
+        // decides whether a village counts as online. One indexed read for the
+        // whole estate; no Starlink call is made here, the poller owns that.
+        const [telemetryRows] = await pool.query("SELECT * FROM starlink_device_latest");
+        const telemetryByDevice = {};
+        for (const t of telemetryRows) telemetryByDevice[t.device_id] = t;
+
+        // Current-cycle data usage, written by the usage collector. Separate
+        // from telemetry: telemetry says whether the dish is up, this says how
+        // much it has carried this month.
+        let usageByProject = {};
+        try {
+          const [usageRows] = await pool.query("SELECT * FROM starlink_status");
+          for (const u of usageRows) usageByProject[u.project_id] = u;
+        } catch {
+          // The usage collector may not have been deployed yet. Telemetry does
+          // not depend on it, so an absent table must not fail the overview.
+        }
+
+        const telemetryEnabled = await isTelemetryEnabled(pool);
+        const nowMs = Date.now();
+
         const sites = projects.map((p) => {
           const s = statusByProject[p.id] || {};
           const u = upByProject[p.id];
           const uptimePct =
             u && u.samples > 0 ? Math.round((u.up_samples / u.samples) * 1000) / 10 : null;
+          const ruijieUp = s.internet_up == null ? null : !!s.internet_up;
+          const tel = p.starlink_device_id ? telemetryByDevice[p.starlink_device_id] : null;
+          const use = usageByProject[p.id] || null;
+          const verdict = deriveOnline({ telemetryEnabled, tel, ruijieUp, nowMs });
+
           return {
             id: p.id,
             name: p.name,
             hostname: p.hostname,
             groupId: p.ruijie_group_id,
-            online: s.internet_up == null ? null : !!s.internet_up,
+            // Starlink-led. `internetUp` below stays the Ruijie gateway's own
+            // reading — a different question (the local link, one layer down),
+            // which the topology view still needs.
+            online: verdict.online,
+            onlineSource: verdict.source,
+            starlink: buildStarlink({ project: p, tel, use, nowMs }),
             gatewayOnline: s.gateway_online == null ? null : !!s.gateway_online,
-            internetUp: s.internet_up == null ? null : !!s.internet_up,
+            internetUp: ruijieUp,
             apsOnline: Number(s.aps_online ?? 0),
             apsTotal: Number(s.aps_total ?? 0),
             clients: Number(s.clients ?? 0),
@@ -433,6 +624,25 @@ export function makeNetworkController(pool) {
           apsTotal: sum((v) => v.apsTotal),
           clients: sum((v) => v.clients),
           usageBytes: sum((v) => v.usageBytes),
+          // Estate-wide Starlink consumption. The allowance total deliberately
+          // SKIPS villages Starlink publishes no cap for rather than adding a
+          // zero — summing zeros would quietly understate the denominator and
+          // make the estate look closer to its limit than it is. Null when no
+          // village in scope has a published cap, so the UI can say so instead
+          // of printing "0 GB".
+          starlinkUsedGb: sites.some((v) => v.starlink?.usedGb != null)
+            ? round2(sites.reduce((a, v) => a + (v.starlink?.usedGb || 0), 0))
+            : null,
+          starlinkAllowanceGb: sites.some((v) => v.starlink?.allowanceGb != null)
+            ? round2(
+                sites.reduce(
+                  (a, v) => a + (v.starlink?.allowanceGb != null ? v.starlink.allowanceGb : 0),
+                  0
+                )
+              )
+            : null,
+          telemetryEnabled,
+          villagesWithTelemetry: sites.filter((v) => v.starlink?.configured).length,
         };
         const lastCollected = sites.reduce(
           (m, v) => (v.checkedAt && (!m || v.checkedAt > m) ? v.checkedAt : m),
