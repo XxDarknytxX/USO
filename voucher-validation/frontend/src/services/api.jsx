@@ -234,6 +234,15 @@ export const inviteApi = {
     api("/invite/accept", { method: "POST", body: { token, password }, auth: false }),
 };
 
+// Monthly billing against the per-village target. Admin only.
+export const billingApi = {
+  get: (params = {}) => {
+    const qs = new URLSearchParams(params).toString();
+    return api(`/billing${qs ? `?${qs}` : ""}`);
+  },
+  setTarget: (target) => api("/billing/target", { method: "PUT", body: { target } }),
+};
+
 // Two-factor, for the current account and (policy) for the estate.
 export const twoFactorApi = {
   status: () => api("/2fa/status"),

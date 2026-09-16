@@ -29,6 +29,7 @@ import { makeSyncScheduler } from "./services/syncScheduler.js";
 import { makeAttachScope } from "./middleware/auth.js";
 import { reportEncryptionStatus } from "./services/secretBox.js";
 import { pruneTwoFactorEvents } from "./services/twoFactorLog.js";
+import { makeBillingRouter } from "./routes/billing.js";
 
 const app = express();
 
@@ -129,6 +130,7 @@ app.use("/api/network", makeNetworkRouter(network, attachScope));
 app.use("/api/system", makeSystemRouter(pool));
 app.use("/api/mpaisa", makeMpaisaRouter(mpaisa));
 app.use("/api/maintenance", makeMaintenanceRouter(maintenance, attachScope));
+app.use("/api/billing", makeBillingRouter(pool));
 
 // Health check (no secrets exposed)
 app.get("/health", (_req, res) =>
