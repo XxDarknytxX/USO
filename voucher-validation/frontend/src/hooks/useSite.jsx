@@ -16,15 +16,19 @@
 // Personal wins when it is set; otherwise the estate default applies; if
 // neither is set, every village shows.
 //
-// For a viewer or engineer the estate default is also what the SERVER answers
-// with, so their personal layer can only ever narrow what they already get —
-// ticking a village the default leaves out shows them an empty row, not
-// somebody else's data.
+// For a viewer, engineer or billing account the estate default is also what the
+// SERVER answers with, so their personal layer can only ever narrow what they
+// already get — ticking a village the default leaves out shows them an empty
+// row, not somebody else's data. The Billing page ignores the personal layer
+// altogether: a bill is the estate default for whoever opens it.
 //
 // activeSiteId and the personal filter are saved as PER-USER server
-// preferences (synced across the user's devices), with localStorage kept as an
-// instant cache/fallback. The estate default is an app setting, not a
-// preference, and is read-only here.
+// preferences (synced across the user's devices). localStorage is only a
+// fallback for when the preferences cannot be fetched — it is NEVER copied up
+// into an account's preferences. It used to be, as a one-time migration, and on
+// a shared browser that handed one person's village filter to whoever signed
+// in next. The estate default is an app setting, not a preference, and is
+// read-only here.
 
 import { createContext, useContext, useState, useEffect, useCallback, useRef } from "react";
 import { networkApi, userApi } from "../services/api";
@@ -55,6 +59,7 @@ export function SiteProvider({ children }) {
   const [activeSiteId, setActiveSiteIdState] = useState(readActive);
   const [visibleSiteIds, setVisibleState] = useState(readVisible); // null = follow the estate default
   const [globalVisibleSiteIds, setGlobalVisible] = useState(null);  // null = all
+  const [estateDefault, setEstateDefault] = useState(null);           // how the default came to be
   const [loading, setLoading] = useState(true);
 
   // Debounced server sync — batches rapid village toggles into one PUT. The
@@ -84,7 +89,12 @@ export function SiteProvider({ children }) {
       networkApi.projects().then((d) => ({ ok: true, d })).catch(() => ({ ok: false })),
       userApi
         .preferences()
-        .then((p) => ({ ok: true, prefs: p?.prefs || {}, global: p?.globalVisibleSiteIds ?? null }))
+        .then((p) => ({
+          ok: true,
+          prefs: p?.prefs || {},
+          global: p?.globalVisibleSiteIds ?? null,
+          estate: p?.estateDefault ?? null,
+        }))
         .catch(() => ({ ok: false })),
     ]);
     if (seq !== loadSeq.current) return; // a newer load superseded this one
@@ -110,6 +120,7 @@ export function SiteProvider({ children }) {
     // Pruned to villages that still exist, so a default naming a deleted
     // village does not quietly shrink what everyone sees.
     const rawGlobal = prefsRes.ok ? prefsRes.global : null;
+    setEstateDefault(prefsRes.ok ? prefsRes.estate : null);
     setGlobalVisible(
       Array.isArray(rawGlobal)
         ? rawGlobal.map(Number).filter((id) => list.some((x) => String(x.id) === String(id)))
@@ -128,23 +139,22 @@ export function SiteProvider({ children }) {
     const activePending = Object.prototype.hasOwnProperty.call(pending, "activeSiteId");
     const visiblePending = Object.prototype.hasOwnProperty.call(pending, "visibleSiteIds");
 
-    const migrate = {};
-
-    // Active scope: server pref wins (synced), else the local cache. Compare as
-    // strings so a number-vs-string id can never be silently dropped.
+    // The server is the record. The local cache is read ONLY when the
+    // preferences could not be fetched; when they were fetched and hold no such
+    // key, this account has made no choice, whatever this browser remembers
+    // from someone else. Compare as strings so a number-vs-string id can never
+    // be silently dropped.
     if (!activePending) {
-      const rawActive = hasServerActive ? serverPrefs.activeSiteId : readActive();
+      const rawActive = hasServerActive ? serverPrefs.activeSiteId : prefsOk ? null : readActive();
       const nextActive =
         rawActive != null && list.some((s) => String(s.id) === String(rawActive)) ? Number(rawActive) : null;
       setActiveSiteIdState(nextActive);
       localStorage.setItem(STORAGE_KEY, nextActive == null ? "all" : String(nextActive));
-      // Migrate local→server ONLY when we KNOW the server has no such pref.
-      if (prefsOk && !hasServerActive && nextActive != null) migrate.activeSiteId = nextActive;
     }
 
     // Visible filter: same precedence; prune to existing sites; empty/full → all.
     if (!visiblePending) {
-      const rawVisible = hasServerVisible ? serverPrefs.visibleSiteIds : readVisible();
+      const rawVisible = hasServerVisible ? serverPrefs.visibleSiteIds : prefsOk ? null : readVisible();
       let nextVisible = null;
       if (Array.isArray(rawVisible)) {
         const kept = rawVisible.map(Number).filter((id) => list.some((s) => String(s.id) === String(id)));
@@ -153,11 +163,7 @@ export function SiteProvider({ children }) {
       setVisibleState(nextVisible);
       if (nextVisible == null) localStorage.removeItem(VISIBLE_KEY);
       else localStorage.setItem(VISIBLE_KEY, JSON.stringify(nextVisible));
-      if (prefsOk && !hasServerVisible && nextVisible != null) migrate.visibleSiteIds = nextVisible;
     }
-
-    // One-time migration for existing users (server empty, localStorage set).
-    if (Object.keys(migrate).length) schedulePrefSave(migrate);
 
     setLoading(false);
   }, [schedulePrefSave]);
@@ -247,6 +253,10 @@ export function SiteProvider({ children }) {
         // actually in force and is what callers almost always want.
         visibleSiteIds,
         globalVisibleSiteIds,
+        // How the estate default came to be: { mode: unset|all|list|none|
+        // unreadable, updatedAt, updatedByName (admins only) }, or null if the
+        // preferences could not be fetched.
+        estateDefault,
         effectiveVisibleSiteIds,
         followingEstateDefault,
         followEstateDefault,

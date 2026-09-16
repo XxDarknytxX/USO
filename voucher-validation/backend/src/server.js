@@ -115,7 +115,8 @@ const syncScheduler = makeSyncScheduler({
 });
 voucher.setSyncScheduler(syncScheduler);
 
-// Per-request village scope for the read-only viewer role (admin = unrestricted).
+// Per-request village scope: the estate default for viewer, engineer and
+// billing accounts; unrestricted for admins; nothing for an unknown role.
 const attachScope = makeAttachScope(pool);
 
 // Routes
@@ -130,7 +131,7 @@ app.use("/api/network", makeNetworkRouter(network, attachScope));
 app.use("/api/system", makeSystemRouter(pool));
 app.use("/api/mpaisa", makeMpaisaRouter(mpaisa));
 app.use("/api/maintenance", makeMaintenanceRouter(maintenance, attachScope));
-app.use("/api/billing", makeBillingRouter(pool));
+app.use("/api/billing", makeBillingRouter(pool, attachScope));
 
 // Health check (no secrets exposed)
 app.get("/health", (_req, res) =>

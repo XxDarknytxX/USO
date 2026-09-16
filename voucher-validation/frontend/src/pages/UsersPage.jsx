@@ -18,7 +18,7 @@ import {
   Users, UserPlus, Trash2, Shield, Eye, EyeOff, Edit3, RefreshCw, KeyRound,
   ShieldOff, Send, Check, Wrench, Globe2, Mail, User as UserIcon,
   MailCheck, AlertTriangle, Copy, Clock,
-  LayoutDashboard, Gauge, Dices,
+  LayoutDashboard, Gauge, Dices, Receipt,
 } from "lucide-react";
 
 import { userApi } from "../services/api";
@@ -73,6 +73,19 @@ const ROLES = {
     opens: [{ label: "Maintenance", Icon: Wrench }],
     scoped: true,
   },
+  billing: {
+    label: "Billing",
+    icon: Receipt,
+    tone: "success",
+    tile: "green",
+    blurb: "Reads the monthly bill and the numbers behind it. Changes nothing, including the target.",
+    opens: [
+      { label: "Dashboard", Icon: LayoutDashboard },
+      { label: "Overview", Icon: Gauge },
+      { label: "Billing", Icon: Receipt },
+    ],
+    scoped: true,
+  },
   admin: {
     label: "Administrator",
     icon: Shield,
@@ -85,7 +98,7 @@ const ROLES = {
 };
 
 // Least privilege first, so the picker reads as a ladder rather than a menu.
-const ROLE_ORDER = ["viewer", "engineer", "admin"];
+const ROLE_ORDER = ["viewer", "engineer", "billing", "admin"];
 
 function roleOf(role) {
   return (
@@ -318,7 +331,7 @@ export default function UsersPage() {
   }
 
   const counts = useMemo(() => {
-    const c = { all: users.length, admin: 0, viewer: 0, engineer: 0 };
+    const c = { all: users.length, admin: 0, viewer: 0, engineer: 0, billing: 0 };
     for (const u of users) if (c[u.role] != null) c[u.role] += 1;
     return c;
   }, [users]);
@@ -369,6 +382,7 @@ export default function UsersPage() {
             { value: "admin", label: "Admins", count: counts.admin },
             { value: "viewer", label: "Viewers", count: counts.viewer },
             { value: "engineer", label: "Engineers", count: counts.engineer },
+            { value: "billing", label: "Billing", count: counts.billing },
           ]}
           value={roleFilter}
           onChange={setRoleFilter}
@@ -916,7 +930,7 @@ function UserFormModal({ mode, user, onClose, onSaved }) {
           >
             Settings → Estate default
           </button>
-          , and every viewer and engineer follows it — so taking a test village out is one change, not
+          , and every viewer, engineer and billing account follows it — so taking a test village out is one change, not
           one per account. Enforced on the server.
         </p>
       </div>

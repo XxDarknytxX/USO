@@ -563,7 +563,7 @@ export default function Dashboard() {
           icon={<DollarSign size={18} />}
           color="accent"
           sub={`${fmtNum(mb.totals.transactions)} sale${mb.totals.transactions === 1 ? "" : "s"} · ${mb.label || "this month"}`}
-          onClick={() => navigate("/portal-flows")}
+          onClick={isAdmin ? () => navigate("/portal-flows") : undefined}
         />
         <StatCard
           label="Vouchers sold"
@@ -571,11 +571,15 @@ export default function Dashboard() {
           icon={<TrendingUp size={18} />}
           color="violet"
           sub={`${fmtNum(mb.totals.customers)} customers · ${mb.label || "month"}`}
-          onClick={() => {
-            // The window's real start date — `mb.month` is "all"/"week" for a
-            // moving range, which would build a nonsense "all-01".
-            if (mb.fromDate) navigate(`/portal-flows?startDate=${mb.fromDate}`);
-          }}
+          onClick={
+            isAdmin
+              ? () => {
+                  // The window's real start date — `mb.month` is "all"/"week" for a
+                  // moving range, which would build a nonsense "all-01".
+                  if (mb.fromDate) navigate(`/portal-flows?startDate=${mb.fromDate}`);
+                }
+              : undefined
+          }
         />
         <StatCard
           label="Live users"
@@ -909,7 +913,7 @@ export default function Dashboard() {
                 icon={<Database size={18} />}
                 color="indigo"
                 sub={`${fmtNum(scopedMetrics.unused)} left · ${allVisible ? "all villages" : `${scopedPerSite.length} of ${sites.length}`}`}
-                onClick={() => navigate("/vouchers")}
+                onClick={isAdmin ? () => navigate("/vouchers") : undefined}
               />
               <StatCard
                 label="Vouchers sold"
@@ -921,7 +925,7 @@ export default function Dashboard() {
                     ? `${Math.round((scopedMetrics.sold / scopedMetrics.totalVouchers) * 100)}% of pool`
                     : "—"
                 }
-                onClick={() => navigate("/vouchers?status=sold")}
+                onClick={isAdmin ? () => navigate("/vouchers?status=sold") : undefined}
               />
               <StatCard
                 label="Data consumed"
@@ -929,7 +933,7 @@ export default function Dashboard() {
                 icon={<HardDrive size={18} />}
                 color="teal"
                 sub={`of ${formatQuota(scopedMetrics.totalQuota)} allocated`}
-                onClick={() => navigate("/vouchers?status=sold")}
+                onClick={isAdmin ? () => navigate("/vouchers?status=sold") : undefined}
               />
               <StatCard
                 label="Active vouchers"
@@ -937,7 +941,7 @@ export default function Dashboard() {
                 icon={<Zap size={18} />}
                 color="emerald"
                 sub={`${scopedMetrics.activeRate}% active rate`}
-                onClick={() => navigate("/vouchers?status=2")}
+                onClick={isAdmin ? () => navigate("/vouchers?status=2") : undefined}
               />
             </KpiGrid>
 

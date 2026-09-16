@@ -34,6 +34,7 @@ import {
   RecordCell,
 } from "../components/ui";
 import { useSite } from "../hooks/useSite";
+import { useAuth } from "../hooks/useAuth";
 
 const timeAgo = (ts) => {
   if (!ts) return "never";
@@ -51,6 +52,7 @@ export default function OverviewPage() {
   const [status, setStatus] = useState("all");
   const navigate = useNavigate();
   const { isInScope, setActiveSiteId } = useSite();
+  const { isAdmin } = useAuth();
 
   // Selecting the scope and routing to /dashboard are one action from the
   // user's point of view, so they are one function here. The scope has to be
@@ -191,11 +193,13 @@ export default function OverviewPage() {
           <Button
             variant="secondary"
             size="md"
-            onClick={collectAndReload}
-            disabled={collecting}
+            // Collecting from Ruijie is admin-only on the server. Anyone else
+            // gets the freshest STORED values instead of a button that errors.
+            onClick={isAdmin ? collectAndReload : () => load(true)}
+            disabled={collecting || (!isAdmin && refreshing)}
             iconLeft={<RefreshCw size={14} className={collecting || refreshing ? "animate-spin" : ""} />}
           >
-            {collecting ? "Collecting…" : "Refresh all"}
+            {collecting ? "Collecting…" : isAdmin ? "Refresh all" : "Reload"}
           </Button>
         }
       />

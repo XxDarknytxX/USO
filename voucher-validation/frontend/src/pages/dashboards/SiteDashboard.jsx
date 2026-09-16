@@ -20,6 +20,7 @@ import {
   HardDrive, PackageOpen, Database,
 } from "lucide-react";
 import { useSite } from "../../hooks/useSite";
+import { useAuth } from "../../hooks/useAuth";
 import { voucherApi, networkApi, portalConfigApi } from "../../services/api";
 import PlanBreakdown from "../../components/PlanBreakdown";
 import StarlinkPanel from "../../components/StarlinkPanel";
@@ -64,6 +65,8 @@ const DEVICE_TONE = { gateway: "indigo", ap: "teal", switch: "violet", other: "s
 
 export default function SiteDashboard({ groupId, site }) {
   const { setActiveSiteId } = useSite();
+  // The voucher list is an admin page; for anyone else these are not links.
+  const { isAdmin } = useAuth();
   const navigate = useNavigate();
   // One window drives every historical figure on this page.
   const mb = useMonthlyBreakdown(groupId);
@@ -92,7 +95,7 @@ export default function SiteDashboard({ groupId, site }) {
     },
     [navigate, mb.fromDate, mb.toDate]
   );
-  const openPlanVouchers = openVouchers;
+  const openPlanVouchers = isAdmin ? openVouchers : undefined;
 
   const load = useCallback(
     async (isRefresh = false) => {
@@ -338,7 +341,7 @@ export default function SiteDashboard({ groupId, site }) {
               ? `${fmtNum(purchased.sales)} sale${purchased.sales === 1 ? "" : "s"} · ${mb.label || "this month"}`
               : `nothing sold · ${mb.label || "this month"}`
           }
-          onClick={() => openVouchers(null)}
+          onClick={isAdmin ? () => openVouchers(null) : undefined}
         />
       </KpiGrid>
 

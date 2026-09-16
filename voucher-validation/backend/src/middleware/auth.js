@@ -1,5 +1,6 @@
 // src/middleware/auth.js
 import jwt from "jsonwebtoken";
+import { readEstateDefault } from "../services/estateScope.js";
 
 export function requireAuth(req, res, next) {
   const header = req.headers.authorization || "";
@@ -54,11 +55,11 @@ export function requireAdmin(req, res, next) {
   next();
 }
 
-// Blocks the read-only "viewer" role from an endpoint entirely (403). Used for
-// endpoints a viewer must never reach and that aren't village-scopeable
-// (sync-logs, audit logs, transaction flows, manual assistance, voucher CRUD data,
-// settings). With only admin/viewer roles this is effectively "admin only" today,
-// but the name states the intent for read endpoints that were previously any-authed.
+// ADMIN ONLY, whatever the name suggests. It dates from when "viewer" was the
+// only other role; every role since (engineer, billing) is refused here too,
+// because it is an allow-list of one. Used for endpoints that are not
+// village-scopeable: sync-logs, audit logs, transaction flows, manual
+// assistance, voucher CRUD data, settings.
 export function requireNotViewer(req, res, next) {
   // Engineers are denied here too. They are not viewers, so without this every
   // endpoint guarded by requireNotViewer — settings, audit logs, transaction
@@ -102,7 +103,7 @@ export function requireMaintenanceAccess(req, res, next) {
 
 /**
  * The monitoring data behind the Dashboard and Overview — revenue, vouchers,
- * network health, Starlink usage and telemetry. Admins and viewers.
+ * network health, Starlink usage and telemetry. Admins, viewers and billing.
  *
  * NOT engineers. A field engineer's console is Maintenance and nothing else:
  * they are contractors sent to a site, and the estate's revenue and voucher
@@ -112,7 +113,7 @@ export function requireMaintenanceAccess(req, res, next) {
  * An allow-list, applied at ROUTER level on the routers that serve that data,
  * so an endpoint added to one of them later is closed to engineers by default.
  */
-const DASHBOARD_ROLES = new Set(["admin", "viewer"]);
+const DASHBOARD_ROLES = new Set(["admin", "viewer", "billing"]);
 
 export function requireDashboardAccess(req, res, next) {
   if (!DASHBOARD_ROLES.has(req.user?.role)) {
@@ -121,16 +122,39 @@ export function requireDashboardAccess(req, res, next) {
   next();
 }
 
+/**
+ * The monthly bill. Admins and billing accounts READ it; only admins change
+ * the target it is measured against, because that one number moves every
+ * village's figure for everyone who reads the bill.
+ *
+ * Keyed on the method like maintenance, so a write route added later is
+ * admin-only unless someone deliberately opens it.
+ */
+const BILLING_READERS = new Set(["admin", "billing"]);
+const BILLING_WRITERS = new Set(["admin"]);
+
+export function requireBillingAccess(req, res, next) {
+  const role = req.user?.role;
+  const reading = req.method === "GET" || req.method === "HEAD";
+  const allowed = reading ? BILLING_READERS : BILLING_WRITERS;
+  if (!allowed.has(role)) {
+    return res.status(403).json({
+      error: reading ? "Billing access required" : "Only an administrator can change the billing target",
+    });
+  }
+  next();
+}
+
 // Which roles are LIMITED to a subset of the estate. Admins are unrestricted
 // and are handled before this is consulted; anything NOT listed here is
 // restricted to nothing, so a role added later cannot default to seeing
 // everything by omission.
-const SCOPED_ROLES = new Set(["viewer", "engineer"]);
+const SCOPED_ROLES = new Set(["viewer", "engineer", "billing"]);
 
 /**
  * Attaches req.scope describing which villages the caller may see:
  *   admin             -> { isViewer:false, projectIds:null, groupIds:null }  (null = unrestricted)
- *   viewer | engineer -> the ESTATE DEFAULT, resolved to network_projects.id
+ *   viewer | engineer | billing -> the ESTATE DEFAULT, resolved to network_projects.id
  *                        + ruijie_group_id
  *   anything else     -> nothing
  *
@@ -163,19 +187,12 @@ export function makeAttachScope(pool) {
       return next();
     }
     try {
-      const [[setting]] = await pool.query(
-        "SELECT setting_value FROM app_settings WHERE setting_key = 'global_visible_villages'"
-      );
-      let ids = null; // null = no restriction
-      if (setting?.setting_value) {
-        try {
-          const parsed = JSON.parse(setting.setting_value);
-          if (Array.isArray(parsed)) ids = parsed.map(Number).filter(Number.isFinite);
-        } catch {
-          /* unreadable default = no restriction; a corrupt setting should widen
-             the view, not take the console away from everyone at once */
-        }
-      }
+      // Shared with the preferences endpoint and billing, so the villages a
+      // scoped account is shown and the villages the bill covers are decided by
+      // the same code. null = no restriction (unset, every village, or an
+      // unreadable value — see services/estateScope.js). A read failure throws
+      // and lands in the catch below, which fails closed.
+      const { ids } = await readEstateDefault(pool);
 
       let rows;
       if (ids && ids.length === 0) {
@@ -204,7 +221,10 @@ export function makeAttachScope(pool) {
       };
     } catch (e) {
       console.error("attachScope failed (failing closed):", e.message);
-      req.scope = { isViewer: true, projectIds: [], groupIds: [] };
+      // `unresolved` tells this apart from a role that legitimately sees no
+      // village. Most readers show nothing either way; the bill must not — an
+      // empty bill looks exactly like a month in which nothing was earned.
+      req.scope = { isViewer: true, projectIds: [], groupIds: [], unresolved: true };
     }
     return next();
   };

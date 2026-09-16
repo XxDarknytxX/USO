@@ -15,6 +15,7 @@ import {
 import { makeAttemptLimiter, clientIp, pause } from "../services/attemptLimiter.js";
 import { logTwoFactorEvent, readTwoFactorEvents } from "../services/twoFactorLog.js";
 import { passwordProblem } from "../services/passwordPolicy.js";
+import { readEstateDefault } from "../services/estateScope.js";
 import { validationResult } from "express-validator";
 
 /** Local response helpers */
@@ -85,7 +86,7 @@ async function findUserByEmail(pool, email) {
 
 // The only roles that may ever be written. Anything else falls back to the
 // least-privileged one, so an unrecognised value can never grant access.
-const ROLES = new Set(["admin", "viewer", "engineer"]);
+const ROLES = new Set(["admin", "viewer", "engineer", "billing"]);
 export function safeRoleOf(role) {
   return ROLES.has(role) ? role : "viewer";
 }
@@ -93,8 +94,8 @@ export function safeRoleOf(role) {
 // Roles limited to a subset of the estate. WHICH villages is not a per-account
 // question: it is the estate default under Settings, read by attachScope. Must
 // agree with SCOPED_ROLES in middleware/auth.js.
-const SCOPED_ROLES = new Set(["viewer", "engineer"]);
-const ROLE_LABELS = { admin: "administrator", viewer: "viewer", engineer: "field engineer" };
+const SCOPED_ROLES = new Set(["viewer", "engineer", "billing"]);
+const ROLE_LABELS = { admin: "administrator", viewer: "viewer", engineer: "field engineer", billing: "billing user" };
 
 
 async function insertUser(pool, { email, passwordHash, name, role }) {
@@ -814,8 +815,8 @@ export function makeAdminController(pool) {
       }
     },
 
-    // GET /api/me — current user + (for viewers) their assigned villages, so the
-    // SPA can seed its scope and drive the viewer-only UI.
+    // GET /api/me — current user + (for a scoped role: viewer, engineer, billing)
+    // the villages the estate default gives them, so the SPA can seed its scope.
     me: async (req, res) => {
       try {
         const [rows] = await pool.query(
@@ -885,21 +886,24 @@ export function makeAdminController(pool) {
         // than throwing: a corrupt setting should widen the view, not break the
         // console for everyone at once.
         let globalVisibleSiteIds = null;
+        // How the default came to be what it is: never saved, saved as every
+        // village, a list, or cleared. Settings and Billing say so, because
+        // "every village" because nobody chose and "every village" because
+        // somebody did are different facts. Who saved it is for admins only.
+        let estateDefault = { mode: "unknown", updatedAt: null, updatedByName: null };
         try {
-          const [[row]] = await pool.query(
-            "SELECT setting_value FROM app_settings WHERE setting_key = 'global_visible_villages'"
-          );
-          if (row?.setting_value) {
-            const parsed = JSON.parse(row.setting_value);
-            if (Array.isArray(parsed)) {
-              globalVisibleSiteIds = parsed.map(Number).filter(Number.isFinite);
-            }
-          }
+          const d = await readEstateDefault(pool);
+          globalVisibleSiteIds = d.ids;
+          estateDefault = {
+            mode: d.mode,
+            updatedAt: d.updatedAt,
+            updatedByName: req.user?.role === "admin" ? d.updatedByName : null,
+          };
         } catch (e) {
           console.error("[prefs] global village default unreadable:", e.message);
         }
 
-        return send.ok(res, { prefs, globalVisibleSiteIds });
+        return send.ok(res, { prefs, globalVisibleSiteIds, estateDefault });
       } catch (e) {
         console.error(e);
         return send.serverErr(res);

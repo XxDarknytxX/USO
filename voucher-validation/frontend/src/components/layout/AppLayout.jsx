@@ -33,26 +33,27 @@ const navSections = [
   {
     title: "Monitoring",
     items: [
-      // Two flags, read as "this role may see this item". Dashboard and
-      // Overview are open to viewers — the SERVER narrows both to the estate
-      // default, so the page is the same and the answer is not. Field
-      // engineers are maintenance-only, and the API refuses them the data
-      // behind these two. Network stays admin-only: it is where villages are
-      // added and edited, not where they are read.
-      { to: "/dashboard", label: "Dashboard", Icon: LayoutDashboard, end: true, viewerOk: true },
-      { to: "/overview", label: "Overview", Icon: Gauge, viewerOk: true },
+      // `roles` lists the NON-admin roles that may see an item; admins see
+      // everything. Dashboard and Overview are open to viewers and billing —
+      // the SERVER narrows both to the estate default, so the page is the same
+      // and the answer is not. Field engineers are maintenance-only, and the
+      // API refuses them the data behind these two. Network stays admin-only:
+      // it is where villages are added and edited, not where they are read.
+      { to: "/dashboard", label: "Dashboard", Icon: LayoutDashboard, end: true, roles: ["viewer", "billing"] },
+      { to: "/overview", label: "Overview", Icon: Gauge, roles: ["viewer", "billing"] },
       { to: "/network", label: "Network", Icon: Network },
-      // Every role: viewers read the maintenance record, engineers and admins
-      // also file it.
-      { to: "/maintenance", label: "Maintenance", Icon: Wrench, viewerOk: true, engineerOk: true },
+      // Viewers read the maintenance record; engineers and admins also file it.
+      // Not billing accounts.
+      { to: "/maintenance", label: "Maintenance", Icon: Wrench, roles: ["viewer", "engineer"] },
     ],
   },
   {
     title: "Vouchers",
     items: [
       { to: "/vouchers", label: "Vouchers", Icon: Ticket },
-      // Admin only: no viewerOk / engineerOk, so the role filter drops it.
-      { to: "/billing", label: "Billing", Icon: Receipt },
+      // Admins and billing accounts.
+      { to: "/billing", label: "Billing", Icon: Receipt, roles: ["billing"] },
+      // Admin only: no `roles`, so the role filter drops it for everyone else.
       { to: "/activity", label: "Activity", Icon: History },
     ],
   },
@@ -90,7 +91,7 @@ export default function AppLayout() {
 function Shell() {
   const navigate = useNavigate();
   const location = useLocation();
-  const { email, name, role, isAdmin, isViewer, isEngineer, logout } = useAuth();
+  const { email, name, role, isAdmin, isEngineer, isBilling, logout } = useAuth();
   const { loading: siteLoading } = useSite();
   const { theme, toggle: toggleTheme } = useTheme();
 
@@ -108,20 +109,21 @@ function Shell() {
   const displayName = name?.trim() || (email ? email.split("@")[0] : "User");
   const initial = displayName[0].toUpperCase();
   const roleLabel = role ? role.charAt(0).toUpperCase() + role.slice(1) : "User";
+  const RoleIcon = isAdmin ? Shield : isEngineer ? Wrench : isBilling ? Receipt : Eye;
 
   // Section-level admin gate, then a per-item role gate, then drop any section
   // left empty.
   //
   // Written as an ALLOW-list keyed on the role rather than as a chain of "not a
   // viewer" tests: the old form passed every non-adminOnly item for any role it
-  // did not recognise, so a fourth role added later would have arrived with a
-  // full sidebar of links that all bounce.
+  // did not recognise, so a new role would have arrived with a full sidebar of
+  // links that all bounce. An unknown role matches no item's `roles`.
   const sections = navSections
     .filter((s) => !s.adminOnly || isAdmin)
     .map((s) => ({
       ...s,
       items: s.items.filter((it) =>
-        isAdmin ? true : isEngineer ? it.engineerOk : isViewer ? it.viewerOk : false
+        isAdmin ? true : Array.isArray(it.roles) && it.roles.includes(role)
       ),
     }))
     .filter((s) => s.items.length > 0);
@@ -285,7 +287,7 @@ function Shell() {
                 <div className="min-w-0 flex-1 ml-3">
                   <p className="text-sm font-semibold text-[var(--fg-primary)] truncate leading-snug">{displayName}</p>
                   <p className="flex items-center gap-1 text-[11px] text-[var(--fg-muted)] truncate mt-0.5">
-                    {isAdmin ? <Shield size={10} /> : isEngineer ? <Wrench size={10} /> : <Eye size={10} />} {roleLabel}
+                    <RoleIcon size={10} /> {roleLabel}
                   </p>
                 </div>
                 <span className="shrink-0 pr-1 text-[var(--fg-muted)]">
@@ -349,7 +351,7 @@ function Shell() {
                       <p className="text-sm font-semibold text-[var(--fg-primary)] truncate">{displayName}</p>
                       {email && <p className="text-xs text-[var(--fg-muted)] truncate mt-0.5">{email}</p>}
                       <span className="inline-flex items-center gap-1 mt-2 px-2 py-0.5 rounded-full text-[10px] font-medium bg-[var(--accent)]/10 text-[var(--accent)]">
-                        {isAdmin ? <Shield size={10} /> : isEngineer ? <Wrench size={10} /> : <Eye size={10} />} {roleLabel}
+                        <RoleIcon size={10} /> {roleLabel}
                       </span>
                     </div>
                     <div className="py-1">

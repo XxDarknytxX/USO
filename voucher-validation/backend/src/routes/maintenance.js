@@ -5,11 +5,10 @@ import { requireAuth, requireAdmin, requireMaintenanceAccess } from "../middlewa
 export function makeMaintenanceRouter(controller, attachScope) {
   const router = Router();
 
-  // Admins and engineers, and viewers read-only.
+  // Admins and engineers, and viewers read-only. Billing accounts not at all.
   //
-  // Engineers are no longer maintenance-only: they also read the dashboard and
-  // the all-villages overview, limited to the villages an admin assigned them
-  // (see SCOPED_ROLES in middleware/auth.js). What they still cannot reach is
+  // Field engineers are maintenance-only: the dashboard data routers refuse
+  // them (requireDashboardAccess), and like every non-admin they cannot reach
   // anything behind requireAdmin or requireNotViewer — vouchers, settings,
   // audit logs, transaction flows, user management.
   //
@@ -17,8 +16,7 @@ export function makeMaintenanceRouter(controller, attachScope) {
   // The estate carries test villages that an admin adds and removes, and a
   // contractor has no business seeing one — still less filing a report against
   // it, which would put that account in the evidence trail for a site nobody
-  // sent them to. An engineer who needs a village they do not have is one edit
-  // away from having it.
+  // sent them to. The villages are the estate default under Settings.
   //
   // Admins are unrestricted, so the admin-only routes below (reopen, document
   // removal) are unaffected by this.

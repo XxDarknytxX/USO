@@ -13,7 +13,7 @@ import { useEffect, useState , useCallback} from "react";
 import {
   Settings, Server, Eye, EyeOff, MapPin, Check, Globe2, RefreshCw, Mail,
   Satellite, Send, Receipt, KeyRound, ShieldCheck, ShieldOff, Shield,
-  AlertTriangle, History,
+  AlertTriangle, History, Info,
 } from "lucide-react";
 import toast from "react-hot-toast";
 
@@ -129,17 +129,19 @@ function PanelFooter({ note, children }) {
 /* ============================================================================
    Village display scope — the estate default and this account's own view.
 
-   The estate default is the real boundary for a viewer or engineer: the server
-   answers their dashboard, overview and maintenance with exactly these
-   villages. "Your view" is a display filter on top and can only ever narrow
+   The estate default is the real boundary for a viewer, engineer or billing
+   account: the server answers their dashboard, overview and maintenance with
+   exactly these villages. It is also exactly the set the monthly bill covers,
+   for everyone. "Your view" is a display filter on top and can only ever narrow
    what you already get — for an admin, who is unrestricted, that is how a test
-   village gets looked at without being put in front of the team.
+   village gets looked at without being put in front of the team. It does NOT
+   change the bill, and the panel says so when it differs.
    ========================================================================= */
 function VillageScopePanels() {
   const {
     sites, isSiteVisible, toggleVisibleSite, setVisibleSiteIds,
     globalVisibleSiteIds, followingEstateDefault, followEstateDefault,
-    visibleSites, allVisible, reload,
+    visibleSites, allVisible, reload, estateDefault,
   } = useSite();
   const { isAdmin } = useAuth();
 
@@ -153,6 +155,38 @@ function VillageScopePanels() {
   const editing = draft !== null;
   const shown = editing ? draft : globalSet;
   const globalCount = globalSet == null ? sites.length : globalSet.length;
+
+  // An unsaved draft changes the console for everyone once saved, and until
+  // then exists only in this tab. Leaving the page loses it, so say so.
+  const dirty =
+    editing &&
+    JSON.stringify([...draft].sort((a, b) => a - b)) !==
+      JSON.stringify(globalSet == null ? sites.map((s) => s.id).sort((a, b) => a - b) : [...globalSet].sort((a, b) => a - b));
+  useEffect(() => {
+    if (!dirty) return undefined;
+    const warn = (e) => {
+      e.preventDefault();
+      e.returnValue = "";
+    };
+    window.addEventListener("beforeunload", warn);
+    return () => window.removeEventListener("beforeunload", warn);
+  }, [dirty]);
+
+  // Whether "every village" is a choice somebody saved or the absence of one.
+  // null (the preferences did not load) or "unknown" (the server could not read
+  // the setting) is neither: the real default may be a list that leaves test
+  // villages out, and starting an edit from "every village" and saving would
+  // quietly put them back for everyone — and onto the bill.
+  const mode = estateDefault?.mode;
+  const defaultUnknown = !estateDefault || mode === "unknown";
+  const savedNote = estateDefault?.updatedAt
+    ? ` Saved ${new Date(estateDefault.updatedAt).toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" })}${estateDefault.updatedByName ? ` by ${estateDefault.updatedByName}` : ""}.`
+    : "";
+  // This account's own view differs from the default in force for everyone else.
+  const personalDiffers =
+    !followingEstateDefault &&
+    JSON.stringify([...visibleSites.map((s) => s.id)].sort((a, b) => a - b)) !==
+      JSON.stringify((globalSet == null ? sites.map((s) => s.id) : sites.filter((s) => globalSet.includes(s.id)).map((s) => s.id)).sort((a, b) => a - b));
 
   function toggleDraft(id) {
     setDraft((prev) => {
@@ -184,7 +218,7 @@ function VillageScopePanels() {
       {/* ── Estate default ─────────────────────────────────────────────── */}
       <Panel
         title="Estate default"
-        subtitle="Which villages count as “All Villages” for everyone who has not set their own view. Take a test village out here and it leaves the console for the whole team."
+        subtitle="Which villages count as “All Villages” for everyone who has not set their own view, and which villages the monthly bill covers. Take a test village out here and it leaves the console — and the bill — for the whole team."
         icon={<Globe2 size={15} />}
         tone="navy"
         padding={false}
@@ -205,7 +239,13 @@ function VillageScopePanels() {
               </Button>
             </div>
           ) : (
-            <Button variant="secondary" size="xs" onClick={() => setDraft(globalSet == null ? sites.map((s) => s.id) : globalSet)}>
+            <Button
+              variant="secondary"
+              size="xs"
+              onClick={() => setDraft(globalSet == null ? sites.map((s) => s.id) : globalSet)}
+              disabled={defaultUnknown}
+              title={defaultUnknown ? "The estate default could not be loaded — reload the page before editing it" : undefined}
+            >
               Edit
             </Button>
           )
@@ -233,9 +273,17 @@ function VillageScopePanels() {
           <PanelFooter
             note={
               <span>
-                {globalSet == null
-                  ? `Every village (${sites.length}) by default.`
-                  : `${globalCount} of ${sites.length} villages by default.`}
+                {defaultUnknown
+                  ? "The estate default could not be loaded. Reload the page before relying on it or editing it."
+                  : mode === "unset"
+                  ? `Never saved — every village (${sites.length}) is in, including any added later.`
+                  : mode === "unreadable"
+                    ? `The saved value could not be read, so every village (${sites.length}) is in. Save it again.`
+                    : globalSet == null
+                      ? `Every village (${sites.length}), including any added later.`
+                      : `${globalCount} of ${sites.length} villages.`}
+                {savedNote}
+                {dirty && " Unsaved changes — nothing applies until you save."}
                 {!isAdmin && " Set by an administrator."}
               </span>
             }
@@ -246,7 +294,7 @@ function VillageScopePanels() {
       {/* ── This account's own view ────────────────────────────────────── */}
       <Panel
         title="Your view"
-        subtitle="Only affects you. Use it to look at a village the estate default leaves out — a test site, say — without putting it in front of anybody else."
+        subtitle="Only affects what you see on the Dashboard, Overview and village switcher. Use it to look at a village the estate default leaves out — a test site, say — without putting it in front of anybody else. It never changes the bill."
         icon={<Eye size={15} />}
         tone="violet"
         padding={false}
@@ -267,6 +315,15 @@ function VillageScopePanels() {
           </div>
         }
       >
+        {personalDiffers && (
+          <div className="flex items-start gap-2 border-b border-[var(--border-subtle)] bg-[var(--info-soft)] px-5 sm:px-6 py-2.5 text-[12px] text-[var(--info-fg)]">
+            <Info size={13} className="mt-0.5 shrink-0" />
+            <span>
+              You are not following the estate default, so your Dashboard can show different villages from everyone
+              else — and from the Billing page, which always uses the estate default.
+            </span>
+          </div>
+        )}
         <div className="flex flex-col divide-y divide-[var(--border-subtle)] max-h-[320px] overflow-y-auto scrollbar-none">
           {sites.length === 0 ? (
             <div className="px-5 sm:px-6 py-4 text-[12.5px] text-[var(--fg-muted)]">

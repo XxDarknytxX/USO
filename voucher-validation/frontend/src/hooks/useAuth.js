@@ -28,10 +28,14 @@ export function useAuth() {
       isViewer: role === "viewer",
       // Field contractor: maintenance only, nothing else in the app.
       isEngineer: role === "engineer",
+      // The monthly bill, and the dashboard and overview behind it.
+      isBilling: role === "billing",
       canSeeDashboard: canSeeDashboard(role),
+      canSeeBilling: canSeeBilling(role),
       logout: () => {
         localStorage.removeItem("token");
         localStorage.removeItem("role");
+        clearSiteCache();
         navigate("/login");
       },
     };
@@ -42,16 +46,43 @@ export function useAuth() {
 // numbers behind them. Mirrors DASHBOARD_ROLES in the backend's auth middleware,
 // which is the real boundary — this copy only keeps the SPA from sending someone
 // to a page whose every request would be refused.
-const DASHBOARD_ROLES = new Set(["admin", "viewer"]);
+const DASHBOARD_ROLES = new Set(["admin", "viewer", "billing"]);
 
 export function canSeeDashboard(role) {
   return DASHBOARD_ROLES.has(role);
 }
 
+// Who may open the Billing page. Mirrors BILLING_READERS in the backend; only
+// admins may change the target.
+const BILLING_ROLES = new Set(["admin", "billing"]);
+
+export function canSeeBilling(role) {
+  return BILLING_ROLES.has(role);
+}
+
 // Where an account lands: after sign-in, at "/", and whenever it is bounced
 // from a page it may not open. A field engineer has one page, so that is home.
+//
+// TOTAL on purpose. Any role not named here lands on /profile, which every
+// signed-in account may open. Sending an unrecognised role to /maintenance
+// bounced it straight back here — an endless redirect with no way to sign out.
 export function homePathFor(role) {
-  return canSeeDashboard(role) ? "/dashboard" : "/maintenance";
+  if (canSeeDashboard(role)) return "/dashboard";
+  if (role === "engineer") return "/maintenance";
+  return "/profile";
+}
+
+// The village scope cache (hooks/useSite.jsx) is one account's choice. Cleared
+// whenever the signed-in account ends or changes, so the next person on this
+// browser never opens on — or saves into their own preferences — someone
+// else's villages when their preferences are slow to load.
+export function clearSiteCache() {
+  try {
+    localStorage.removeItem("vv:activeSiteId");
+    localStorage.removeItem("vv:visibleSiteIds");
+  } catch {
+    /* storage unavailable: nothing cached to leak */
+  }
 }
 
 // Standalone helper (no hooks) for use outside React components

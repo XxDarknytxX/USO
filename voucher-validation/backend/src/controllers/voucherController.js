@@ -7,6 +7,7 @@ import * as starlinkService from "../services/starlinkService.js";
 import RuijieService from "../services/ruijieService.js";
 import { parseVoucherExcelBuffer } from "../services/excelVoucherParser.js";
 import { effectiveGroupIds } from "../middleware/auth.js";
+import { canonicalEstateValue, ESTATE_DEFAULT_KEY } from "../services/estateScope.js";
 
 const send = {
   ok: (res, data = {}) => res.json(data),
@@ -1298,10 +1299,27 @@ export function makeVoucherController(pool) {
         // key/value/type arrive in the BODY (matches the PUT /api/settings route +
         // frontend settingsApi.update). setting_type is persisted so the value can
         // be parsed back correctly. Values are stored as strings.
-        const { key, value, type } = req.body;
-        if (!key) return send.bad(res, 'Setting key is required');
+        let { key, value, type } = req.body;
+        // A string, or nothing. An array key is formatted by mysql2 as the
+        // string inside it, so ['global_visible_villages'] would write the real
+        // row while slipping past the validation below.
+        if (typeof key !== 'string' || !key.trim()) return send.bad(res, 'Setting key is required');
         const settingType = ['string', 'number', 'boolean', 'json'].includes(type) ? type : 'string';
-        const strValue = value === null || value === undefined ? null : String(value);
+        let strValue = value === null || value === undefined ? null : String(value);
+        // The estate default decides which villages every scoped account sees
+        // and which the bill covers. An unparseable value reads as "every
+        // village", so it is refused here rather than accepted and widened later.
+        // Compared normalised: the unique index is case-insensitive and ignores
+        // trailing spaces, so "Global_Visible_Villages " is the same row.
+        if (key.trim().toLowerCase() === ESTATE_DEFAULT_KEY) {
+          key = ESTATE_DEFAULT_KEY;
+          try {
+            strValue = canonicalEstateValue(value);
+          } catch (err) {
+            if (err.code === 'BAD_ESTATE_DEFAULT') return send.bad(res, err.message);
+            throw err;
+          }
+        }
         await pool.query(
           `INSERT INTO app_settings (setting_key, setting_value, setting_type, updated_by) VALUES (?, ?, ?, ?)
            ON DUPLICATE KEY UPDATE setting_value = VALUES(setting_value), setting_type = VALUES(setting_type), updated_by = VALUES(updated_by)`,

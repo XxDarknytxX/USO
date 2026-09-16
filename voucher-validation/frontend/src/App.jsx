@@ -2,7 +2,7 @@
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { lazy, Suspense } from "react";
 import AppLayout from "./components/layout/AppLayout";
-import { getAuthRole, canSeeDashboard, homePathFor } from "./hooks/useAuth";
+import { getAuthRole, canSeeDashboard, canSeeBilling, homePathFor } from "./hooks/useAuth";
 
 const Login = lazy(() => import("./pages/Login"));
 const SetPassword = lazy(() => import("./pages/SetPassword"));
@@ -41,20 +41,26 @@ function AdminRoute({ children }) {
   return getAuthRole() === "admin" ? children : <Home />;
 }
 
-// Every role reaches Maintenance: admins and engineers to work in it, viewers to
-// read it. What each may DO is enforced on the server by HTTP method.
+// Admins and engineers work in Maintenance, viewers read it; billing accounts
+// do not reach it. What each may DO is enforced on the server by HTTP method.
 function MaintenanceRoute({ children }) {
   const role = getAuthRole();
   return ["admin", "engineer", "viewer"].includes(role) ? children : <Home />;
 }
 
-// The monitoring pages — Dashboard and Overview. Admins and viewers; the SERVER
-// decides which villages are in the answer, so a viewer and an admin opening
-// the same page get different data from the same call. Field engineers are
-// maintenance-only and are sent there; the API refuses them the data anyway
+// The monitoring pages — Dashboard and Overview. Admins, viewers and billing;
+// the SERVER decides which villages are in the answer, so a viewer and an admin
+// opening the same page get different data from the same call. Field engineers
+// are maintenance-only and are sent there; the API refuses them the data anyway
 // (requireDashboardAccess), this only spares them a page of errors.
 function DashboardRoute({ children }) {
   return canSeeDashboard(getAuthRole()) ? children : <Home />;
+}
+
+// Admins and billing accounts. The server enforces the same pair, and keeps
+// changing the target to admins.
+function BillingRoute({ children }) {
+  return canSeeBilling(getAuthRole()) ? children : <Home />;
 }
 
 function PageLoader() {
@@ -81,18 +87,18 @@ export default function App() {
               </ProtectedRoute>
             }
           >
-            {/* Admins and viewers. Engineers are sent to Maintenance. */}
+            {/* Admins, viewers and billing. Engineers are sent to Maintenance. */}
             <Route path="/dashboard" element={<DashboardRoute><DashboardRouter /></DashboardRoute>} />
             {/* Profile: every signed-in user (incl. viewers) — not admin-gated. */}
             <Route path="/profile" element={<ProfilePage />} />
             <Route path="/mpaisa" element={<AdminRoute><MpaisaMappingPage /></AdminRoute>} />
-            <Route path="/billing" element={<AdminRoute><BillingPage /></AdminRoute>} />
+            <Route path="/billing" element={<BillingRoute><BillingPage /></BillingRoute>} />
             {/* Every role: admins and engineers file, viewers read. The server
                 enforces the same split by HTTP method. */}
             <Route path="/maintenance" element={<MaintenanceRoute><MaintenancePage /></MaintenanceRoute>} />
             <Route path="/maintenance/village/:projectId" element={<MaintenanceRoute><VillageProfilePage /></MaintenanceRoute>} />
-            {/* Viewers see the same page as an admin, narrowed to the estate
-                default by attachScope on the server. */}
+            {/* Viewers and billing accounts see the same page as an admin,
+                narrowed to the estate default by attachScope on the server. */}
             <Route path="/overview" element={<DashboardRoute><OverviewPage /></DashboardRoute>} />
             <Route path="/vouchers" element={<AdminRoute><VouchersPage /></AdminRoute>} />
             <Route path="/vouchers/:uuid" element={<AdminRoute><VouchersPage /></AdminRoute>} />

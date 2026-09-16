@@ -20,7 +20,7 @@ import { Mail, Lock, ArrowRight, Eye, EyeOff, ShieldCheck, Wifi, Ticket, Wrench,
 import toast from "react-hot-toast";
 
 import { api } from "../services/api";
-import { homePathFor } from "../hooks/useAuth";
+import { homePathFor, clearSiteCache } from "../hooks/useAuth";
 import { Button } from "../components/ui";
 import VodafoneLogo from "../components/ui/VodafoneLogo";
 import { TwoFactorEnrolModal } from "../components/TwoFactorEnrol";
@@ -97,6 +97,8 @@ export default function Login() {
    * without its role leaves the SPA guessing what the account may see.
    */
   function completeLogin(token, mustChangePassword) {
+    // A new session starts from its own preferences, not the last account's.
+    clearSiteCache();
     localStorage.setItem("token", token);
     let role = null;
     try {

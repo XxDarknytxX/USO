@@ -33,8 +33,14 @@ export async function getPool() {
     `ALTER TABLE users ADD COLUMN name VARCHAR(255) NULL AFTER email`,
     `ALTER TABLE users ADD COLUMN role ENUM('admin','viewer') NOT NULL DEFAULT 'viewer' AFTER password_hash`,
     // 'engineer' = field contractor: files maintenance reports, nothing else.
+    // 'billing'  = the monthly bill, plus the dashboard and overview behind it.
     // MODIFY (not ADD) so it also widens an enum created by the line above.
-    `ALTER TABLE users MODIFY COLUMN role ENUM('admin','viewer','engineer') NOT NULL DEFAULT 'viewer'`,
+    //
+    // WIDEN THIS LINE — never add a second MODIFY after it. Migrations run on
+    // every start, in order: an older, narrower MODIFY left above a newer one
+    // would try to drop a role that accounts already hold, which fails the
+    // start under strict SQL mode and silently blanks those roles without it.
+    `ALTER TABLE users MODIFY COLUMN role ENUM('admin','viewer','engineer','billing') NOT NULL DEFAULT 'viewer'`,
 
     // TWO-FACTOR AUTHENTICATION.
     // The secret is stored the moment setup begins but 2FA is NOT enabled until

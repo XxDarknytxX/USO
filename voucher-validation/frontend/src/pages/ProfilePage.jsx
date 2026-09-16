@@ -10,7 +10,7 @@
 // an afterthought.
 
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { UserCircle, Shield, Eye, Moon, Sun, Check, LogOut, Wrench, Mail, IdCard } from "lucide-react";
+import { UserCircle, Shield, Eye, Moon, Sun, Check, LogOut, Wrench, Mail, IdCard, Receipt } from "lucide-react";
 
 import { useAuth } from "../hooks/useAuth";
 import { useTheme } from "../hooks/useTheme";
@@ -108,18 +108,20 @@ export default function ProfilePage() {
   // does not reopen a dialog for something already done.
   const [params, setParams] = useSearchParams();
   const forcePasswordChange = params.get("changePassword") === "1";
-  const { email, name, role, isAdmin, isEngineer, logout } = useAuth();
+  const { email, name, role, isAdmin, isEngineer, isBilling, logout } = useAuth();
   const { theme, setTheme } = useTheme();
 
   const displayName = name?.trim() || (email ? email.split("@")[0] : "User");
   const initial = displayName[0].toUpperCase();
   const roleLabel = role ? role.charAt(0).toUpperCase() + role.slice(1) : "User";
-  const RoleIcon = isAdmin ? Shield : isEngineer ? Wrench : Eye;
+  const RoleIcon = isAdmin ? Shield : isEngineer ? Wrench : isBilling ? Receipt : Eye;
   // Scope is the estate default, not a per-person assignment.
   const roleBlurb = isAdmin
     ? "Full administrative access to every village, setting and account."
     : isEngineer
       ? "Maintenance for the estate's villages: you can view the record and file reports with photos from site."
+      : isBilling
+        ? "Read-only access to the dashboard, overview and monthly billing for the estate's villages."
       : "Read-only access to the dashboard, overview and maintenance record for the estate's villages.";
 
   return (
@@ -159,9 +161,9 @@ export default function ProfilePage() {
             <DetailRow icon={<Mail size={13} />} tone="blue" label="Email">
               <span className="block truncate">{email || "—"}</span>
             </DetailRow>
-            <DetailRow icon={<RoleIcon size={13} />} tone={isAdmin ? "violet" : isEngineer ? "orange" : "teal"} label="Role">
+            <DetailRow icon={<RoleIcon size={13} />} tone={isAdmin ? "violet" : isEngineer ? "orange" : isBilling ? "green" : "teal"} label="Role">
               <span className="flex flex-col gap-1.5">
-                <StatusPill tone={isAdmin ? "brand" : isEngineer ? "warning" : "info"} dot={false} className="self-start">
+                <StatusPill tone={isAdmin ? "brand" : isEngineer ? "warning" : isBilling ? "success" : "info"} dot={false} className="self-start">
                   <RoleIcon size={11} />
                   {roleLabel}
                 </StatusPill>
