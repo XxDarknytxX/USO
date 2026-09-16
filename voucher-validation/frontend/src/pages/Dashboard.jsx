@@ -339,6 +339,13 @@ export default function Dashboard() {
         // rather than as zero, so "nothing reported" never outranks a village
         // that genuinely used very little.
         slUsed: net?.starlink?.usedGb ?? -1,
+        // Data PURCHASED by customers, and how much of it they actually used.
+        // Sold-only on the server: the old figure summed every voucher ever
+        // printed, so it grew when stock was generated and measured nothing a
+        // customer had bought.
+        sold: Number(s.total || 0) - Number(s.unused || 0),
+        soldQ: Number(s.sold_quota_mb || 0),
+        soldUsedQ: Number(s.sold_used_quota_mb || 0),
       };
     });
   }, [scopedPerSite, sites, netByGroup, revWindowByGroup]);
@@ -662,9 +669,9 @@ export default function Dashboard() {
                 <SortTh label="Live" sortKey="live" sort={sort} onSort={toggleSort} align="right" />
                 <SortTh label="Revenue" sortKey="revenue" sort={sort} onSort={toggleSort} align="right" />
                 <SortTh label="Sales" sortKey="sales" sort={sort} onSort={toggleSort} align="right" />
-                <SortTh label="Starlink data" sortKey="slUsed" sort={sort} onSort={toggleSort} align="right" />
+                <SortTh label="Starlink GB" sortKey="slUsed" sort={sort} onSort={toggleSort} align="right" />
+                <SortTh label="Purchased GB" sortKey="soldQ" sort={sort} onSort={toggleSort} align="right" />
                 <SortTh label="Uptime" sortKey="uptimePct" sort={sort} onSort={toggleSort} align="right" />
-                <Th align="right">Open</Th>
               </tr>
             </thead>
             <tbody>
@@ -676,16 +683,19 @@ export default function Dashboard() {
                 </TableMessage>
               ) : (
                 visibleVillages.map((r) => (
-                  <tr key={r.key}>
+                  <tr
+                    key={r.key}
+                    onClick={r.siteId ? () => openVillage(r.siteId) : undefined}
+                    className={r.siteId ? "cursor-pointer" : undefined}
+                    title={r.siteId ? `Open ${r.name}` : undefined}
+                  >
                     <Td>
                       <span className="flex items-center gap-2.5 min-w-0">
                         <StatusDot online={r.online} hasNet={r.hasNet} source={r.onlineSource} sl={r.sl} />
-                        <RecordCell
-                          title={r.name}
-                          subtitle={r.hostname}
-                          mono
-                          onClick={r.siteId ? () => openVillage(r.siteId) : undefined}
-                        />
+                        {/* No onClick of its own: the row carries it now, and a
+                            nested handler would fire, then bubble, opening the
+                            village twice. */}
+                        <RecordCell title={r.name} subtitle={r.hostname} mono />
                       </span>
                     </Td>
                     <Td align="right" className="tabular-nums">{fmtNum(r.vouchers)}</Td>
@@ -695,6 +705,9 @@ export default function Dashboard() {
                     <Td align="right" className="tabular-nums">{fmtNum(r.sales)}</Td>
                     <Td align="right">
                       <StarlinkDataCell sl={r.sl} />
+                    </Td>
+                    <Td align="right">
+                      <VoucherDataCell soldQ={r.soldQ} usedQ={r.soldUsedQ} sold={r.sold} />
                     </Td>
                     <Td align="right">
                       {r.hasNet ? (
@@ -708,21 +721,6 @@ export default function Dashboard() {
                         </span>
                       ) : (
                         <span className="text-[var(--fg-muted)]">—</span>
-                      )}
-                    </Td>
-                    <Td align="right">
-                      {r.siteId ? (
-                        <Button
-                          variant="ghost"
-                          size="xs"
-                          onClick={() => openVillage(r.siteId)}
-                          iconRight={<ChevronRight size={14} />}
-                          title={`Open ${r.name}`}
-                        >
-                          Open
-                        </Button>
-                      ) : (
-                        <span className="text-[var(--fg-subtle)] text-[12px]">—</span>
                       )}
                     </Td>
                   </tr>
@@ -1244,7 +1242,7 @@ function StarlinkDataCell({ sl }) {
     <span className="flex items-center justify-end gap-2.5">
       <span className="tabular-nums whitespace-nowrap">
         {fmtGb(sl.usedGb)}
-        {cap ? <span className="text-[var(--fg-subtle)]"> / {fmtGb(cap)}</span> : null} GB
+        {cap ? <span className="text-[var(--fg-subtle)]"> / {fmtGb(cap)}</span> : null}
       </span>
       {pct == null ? (
         // No published cap: there is nothing to fill a meter against, and a
@@ -1266,6 +1264,68 @@ function StarlinkDataCell({ sl }) {
         >
           {/* Clamped: usage can legitimately exceed the allowance, and an
               unclamped bar would render past its own track. */}
+          <span
+            className="block h-full rounded-full"
+            style={{ width: `${Math.min(pct, 100)}%`, background: usageColor(pct) }}
+          />
+        </span>
+      )}
+    </span>
+  );
+}
+
+/**
+ * Data customers actually BOUGHT, and how much of it they used.
+ *
+ * "Five daily passes at 2 GB" is 10 GB purchased — the sum of the plan quota on
+ * every voucher that has been claimed. Deliberately not the old figure, which
+ * summed the quota of every voucher ever generated including unsold stock, and
+ * so went UP when an operator printed more and measured nothing anyone had
+ * paid for.
+ *
+ * Sits beside the Starlink column on purpose: that one is what the dish
+ * carried, this one is what was sold. They answer different questions and the
+ * gap between them is itself worth seeing — a village selling far more than its
+ * dish moved is overselling its backhaul.
+ */
+function VoucherDataCell({ soldQ, usedQ, sold }) {
+  if (!soldQ) {
+    return (
+      <span className="text-[var(--fg-subtle)]" title="No vouchers sold in this village yet">
+        —
+      </span>
+    );
+  }
+  const purchasedGb = soldQ / 1024;
+  const usedGb = (usedQ || 0) / 1024;
+  const pct = Math.round((usedGb / purchasedGb) * 100);
+  // A used figure of exactly zero across a village whose vouchers have sold is
+  // almost never true consumption — it is the gateway not reporting per-voucher
+  // flow, which several villages do. Saying "not reported" is honest where a
+  // confident 0% would send someone looking for customers who never connected.
+  const unreported = !usedQ;
+  return (
+    <span className="flex items-center justify-end gap-2.5">
+      <span className="tabular-nums whitespace-nowrap">
+        {unreported ? (
+          <span className="text-[var(--fg-subtle)]">—</span>
+        ) : (
+          fmtGb(usedGb)
+        )}
+        <span className="text-[var(--fg-subtle)]"> / {fmtGb(purchasedGb)}</span>
+      </span>
+      {unreported ? (
+        <span
+          className="hidden lg:block w-12 text-[10.5px] text-[var(--fg-subtle)] shrink-0 text-left"
+          title={`${fmtNum(sold)} voucher${sold === 1 ? "" : "s"} sold carrying ${fmtGb(purchasedGb)} GB. This village's gateway does not report per-voucher usage, so how much was consumed is unknown.`}
+        >
+          no report
+        </span>
+      ) : (
+        <span
+          className="hidden lg:block w-12 h-1.5 rounded-full bg-[var(--bg-surface)] overflow-hidden shrink-0"
+          title={`${pct}% of the ${fmtGb(purchasedGb)} GB sold across ${fmtNum(sold)} voucher${sold === 1 ? "" : "s"} has been used`}
+        >
           <span
             className="block h-full rounded-full"
             style={{ width: `${Math.min(pct, 100)}%`, background: usageColor(pct) }}

@@ -75,6 +75,13 @@ async function getStatsPerSite(pool, groupIds) {
       SUM(CASE WHEN status = '0' THEN 1 ELSE 0 END) AS inactive,
       SUM(quota) AS total_quota_mb,
       SUM(used_quota) AS total_used_quota_mb,
+      -- PURCHASED data, as distinct from printed. SUM(quota) above counts every
+      -- voucher ever generated including unsold stock, so it grows when an
+      -- operator prints more and is not a measure of anything a customer bought.
+      -- Status '1' is unused; anything else has been claimed. Five daily passes
+      -- at 2 GB sold is 10 GB purchased, which is the question being asked.
+      SUM(CASE WHEN status <> '1' THEN quota ELSE 0 END) AS sold_quota_mb,
+      SUM(CASE WHEN status <> '1' THEN used_quota ELSE 0 END) AS sold_used_quota_mb,
       SUM(current_clients) AS currently_in_use
     FROM vouchers
     ${where}
