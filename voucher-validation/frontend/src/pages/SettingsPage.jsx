@@ -130,12 +130,11 @@ function PanelFooter({ note, children }) {
    Village display scope — the estate default and this account's own view.
 
    The estate default is the real boundary for a viewer, engineer or billing
-   account: the server answers their dashboard, overview and maintenance with
-   exactly these villages. It is also exactly the set the monthly bill covers,
-   for everyone. "Your view" is a display filter on top and can only ever narrow
-   what you already get — for an admin, who is unrestricted, that is how a test
-   village gets looked at without being put in front of the team. It does NOT
-   change the bill, and the panel says so when it differs.
+   account: the server answers their dashboard, overview, maintenance and bill
+   with exactly these villages. "Your view" is a filter on top — Dashboard,
+   Overview and Billing all follow it, the same way — and can only ever narrow
+   what a non-admin already gets. For an admin, who is unrestricted, it is how a
+   test village gets looked at without being put in front of the team.
    ========================================================================= */
 function VillageScopePanels() {
   const {
@@ -218,7 +217,7 @@ function VillageScopePanels() {
       {/* ── Estate default ─────────────────────────────────────────────── */}
       <Panel
         title="Estate default"
-        subtitle="Which villages count as “All Villages” for everyone who has not set their own view, and which villages the monthly bill covers. Take a test village out here and it leaves the console — and the bill — for the whole team."
+        subtitle="Which villages count as “All Villages” — on the dashboards and the bill — for everyone who has not set their own view. Take a test village out here and it leaves the console for the whole team."
         icon={<Globe2 size={15} />}
         tone="navy"
         padding={false}
@@ -294,7 +293,7 @@ function VillageScopePanels() {
       {/* ── This account's own view ────────────────────────────────────── */}
       <Panel
         title="Your view"
-        subtitle="Only affects what you see on the Dashboard, Overview and village switcher. Use it to look at a village the estate default leaves out — a test site, say — without putting it in front of anybody else. It never changes the bill."
+        subtitle="Only affects you: your Dashboard, Overview, village switcher and Billing follow it. Use it to look at a village the estate default leaves out — a test site, say — without putting it in front of anybody else."
         icon={<Eye size={15} />}
         tone="violet"
         padding={false}
@@ -319,8 +318,8 @@ function VillageScopePanels() {
           <div className="flex items-start gap-2 border-b border-[var(--border-subtle)] bg-[var(--info-soft)] px-5 sm:px-6 py-2.5 text-[12px] text-[var(--info-fg)]">
             <Info size={13} className="mt-0.5 shrink-0" />
             <span>
-              You are not following the estate default, so your Dashboard can show different villages from everyone
-              else — and from the Billing page, which always uses the estate default.
+              You are not following the estate default, so your Dashboard and Billing can show different villages
+              from everyone else's.
             </span>
           </div>
         )}

@@ -21,17 +21,19 @@
 // cent because 0.1 + 0.2 is not 0.3.
 //
 // ── Which villages ───────────────────────────────────────────────────────
-// Active villages in the ESTATE DEFAULT (app_settings.global_visible_villages,
-// read through services/estateScope.js — the same reader attachScope uses), so
-// the bill covers exactly the villages every viewer and billing account sees.
-// That is where test villages are excluded, and billing a test village for a
-// deficit would be wrong.
+// The same villages the reader's DASHBOARD shows. Billing follows the console's
+// scope exactly as the dashboards do:
+//   • a village picked in the switcher      -> that village
+//   • else the reader's own "Your view"      -> those villages
+//   • else the ESTATE DEFAULT                -> app_settings.global_visible_villages,
+//                                               read through services/estateScope.js
+// The page resolves the first two (it holds them, as the dashboards do) and
+// passes them as `selection`. With no selection the server bills the estate
+// default itself, so the default case never depends on a copy in the browser.
 //
-// It is the estate default and NOT anybody's personal "Your view": a bill must
-// not change because the person looking at it ticked a box for themselves, and
-// an administrator and a billing account must export the same CSV. The response
-// carries a `scope` block naming what was billed and why every other village
-// was not, so a difference from someone's own view is visible, not guessed at.
+// A selection never widens what a non-administrator may see: it is clamped to
+// req.scope (their estate default). An administrator is unrestricted, which is
+// the point of an admin's view — looking at a test village for an afternoon.
 //
 // If the estate default cannot be READ, the bill is refused (the error is
 // thrown). Falling back to "every village" would put test villages on a bill
@@ -39,7 +41,8 @@
 //
 // Every village lands in exactly one place — billed, or excluded for a reason:
 //   inactive               switched off under Network
-//   not_in_estate_default  left out of the estate default (test villages)
+//   not_in_estate_default  left out of the estate default (no selection)
+//   not_in_view            left out of the reader's selection
 //   no_ruijie_group        no group, so no sale can be attributed; its revenue
 //                          would read as zero and its deficit as the full
 //                          target — a figure that looks exact and is not
@@ -49,15 +52,18 @@
 //                          village's revenue as another's. Both are left out and
 //                          the group's revenue is reported, not guessed.
 //
-// Revenue that resolves to no village, to one outside the estate default, or to
-// a shared group is reported too, so the billed totals reconcile with the
+// Revenue that resolves to no village, to a village not on this bill, or to a
+// shared group is reported too, so the billed totals reconcile with the
 // dashboard's instead of quietly disagreeing.
 //
+// Shared groups are detected among the villages being BILLED. A village left
+// out (a test village given the main site's group by the boot backfill, say)
+// does not knock a real village off the bill.
+//
 // ── Who sees what ────────────────────────────────────────────────────────
-// Administrators get the full picture. A billing account gets the same bill —
-// the same villages and figures — but not the names of villages outside the
-// estate default, nor revenue from them: those are villages it cannot see
-// anywhere else in the console either.
+// Administrators get the full picture. A billing account gets the same figures
+// for the same villages, but is never told about villages outside its own scope
+// (names or revenue): it cannot see those anywhere else in the console either.
 
 import { readEstateDefault } from "./estateScope.js";
 
@@ -138,15 +144,17 @@ export function recentMonths(count = 12, now = new Date()) {
  * @param {object}  opts
  * @param {string}  [opts.month]   YYYY-MM; default the last complete month
  * @param {Date}    [opts.now]
- * @param {object}  [opts.scope]   req.scope for a non-admin. Belt and braces:
- *   it is resolved from the same estate default, so it names the same villages.
- *   If they disagree (the setting changed between the two reads) the bill is
- *   refused with code SCOPE_CHANGED rather than returned with villages silently
- *   missing.
- * @param {boolean} [opts.detail]  true for an administrator: names excluded
- *   villages outside the estate default and reports revenue from them.
+ * @param {object}  [opts.scope]   req.scope for a non-admin. With no selection
+ *   it is resolved from the same estate default the bill reads, so it names the
+ *   same villages; if they disagree (the setting changed between the two reads)
+ *   the bill is refused with code SCOPE_CHANGED rather than returned with
+ *   villages silently missing. With a selection, the selection is clamped to it.
+ * @param {number[]|null} [opts.selection]  the reader's view (switcher village
+ *   or "Your view"), or null for the estate default.
+ * @param {boolean} [opts.detail]  true for an administrator: names every
+ *   excluded village and reports revenue from villages not on the bill.
  */
-export async function computeBilling(pool, { month, now = new Date(), scope = null, detail = false } = {}) {
+export async function computeBilling(pool, { month, now = new Date(), scope = null, selection = null, detail = false } = {}) {
   const period = resolveMonth(month, now);
   const target = await readTarget(pool);
   const targetCents = cents(target);
@@ -160,6 +168,7 @@ export async function computeBilling(pool, { month, now = new Date(), scope = nu
       ORDER BY sort_order, name`
   );
   const restrictTo = scope?.isViewer ? new Set((scope.projectIds || []).map(Number)) : null;
+  const selected = Array.isArray(selection) ? new Set(selection.map(Number)) : null;
   const groupOf = (p) => (p.ruijie_group_id == null ? "" : String(p.ruijie_group_id).trim());
 
   // Classify every village exactly once.
@@ -169,6 +178,15 @@ export async function computeBilling(pool, { month, now = new Date(), scope = nu
     const id = Number(p.id);
     const base = { projectId: p.id, name: p.name, hostname: p.hostname };
     if (Number(p.is_active) !== 1) excluded.push({ ...base, reason: "inactive" });
+    else if (selected) {
+      // The reader's own view. Outside a non-admin's scope comes first, so a
+      // village they may not see is never named to them — not even as "not in
+      // your view".
+      if (restrictTo && !restrictTo.has(id)) excluded.push({ ...base, reason: "outside_your_scope" });
+      else if (!selected.has(id)) excluded.push({ ...base, reason: "not_in_view" });
+      else if (!groupOf(p)) excluded.push({ ...base, reason: "no_ruijie_group" });
+      else candidates.push(p);
+    }
     else if (estate.ids != null && !estate.ids.includes(id)) excluded.push({ ...base, reason: "not_in_estate_default" });
     else if (restrictTo && !restrictTo.has(id)) {
       // The request's scope and the estate default are read from the same
@@ -282,9 +300,9 @@ export async function computeBilling(pool, { month, now = new Date(), scope = nu
   const strip = ({ _delta, ...r }) => r;
 
   // What a non-administrator is told about villages that were not billed: only
-  // the ones it can see anyway. A village outside the estate default is not
-  // named to it, and inactive villages are not part of its console at all.
-  const visibleReasons = new Set(["no_ruijie_group", "shared_group"]);
+  // the ones it can see anyway. A village outside its scope is not named to it,
+  // and inactive villages are not part of its console at all.
+  const visibleReasons = new Set(["no_ruijie_group", "shared_group", "not_in_view"]);
   const shownExcluded = detail ? excluded : excluded.filter((x) => visibleReasons.has(x.reason));
   const noGroup = shownExcluded
     .filter((x) => x.reason === "no_ruijie_group")
@@ -303,10 +321,14 @@ export async function computeBilling(pool, { month, now = new Date(), scope = nu
     over: over.map(strip),
     noGroup,
     scope: {
-      source: "estate_default",
+      // "selection" when the reader's view was billed, "estate_default" when not.
+      source: selected ? "selection" : "estate_default",
+      // The estate default is reported either way, so the page can say what
+      // everyone else's bill follows.
       mode: estate.mode,
       setAt: estate.updatedAt,
       setBy: detail ? estate.updatedByName : null,
+      estateCount: estate.ids == null ? null : estate.ids.length,
       billedCount: billed.length,
       billedIds: billed.map((p) => p.id),
       // Every village in exactly one of billedIds / excluded — for an admin.
@@ -325,7 +347,9 @@ export async function computeBilling(pool, { month, now = new Date(), scope = nu
       targetTotal: dollars(targetCents * rows.length),
       // Estate-wide leftovers: revenue that is on no bill. Administrators only.
       unattributed: detail ? { revenue: dollars(unattributedCents), transactions: unattributedTxns } : null,
-      outsideEstate: detail ? { revenue: dollars(outsideCents), transactions: outsideTxns } : null,
+      // Revenue from villages that are real but not on THIS bill (outside the
+      // view or the estate default, inactive, or without a village of their own).
+      outsideBill: detail ? { revenue: dollars(outsideCents), transactions: outsideTxns } : null,
       sharedGroup: detail || sharedGroups.size
         ? { revenue: dollars(sharedCents), transactions: sharedTxns }
         : null,

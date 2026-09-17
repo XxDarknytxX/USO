@@ -10,14 +10,14 @@
 // last COMPLETE month, because a month still in progress reads almost every
 // village as short.
 //
-// WHICH villages: the estate default (Settings → Estate default), for everyone
-// who opens this page — never the reader's own "Your view". The page says so in
-// a scope strip, names what was left out and why, and tells an administrator
-// when their own view differs from what was billed. It used to say nothing, so
-// a personal filter on the Dashboard read as the bill "ignoring" the estate
-// default when the default had simply never been saved.
+// WHICH villages: the same ones the reader's dashboards show — the village
+// picked in the switcher, else their own "Your view", else the estate default
+// (Settings → Estate default). The page resolves the first two from useSite, as
+// the dashboards do, and sends them as ?villages=; with neither set it sends
+// nothing and the server bills the estate default itself. A scope strip says
+// which of the three was used and names what was left out and why.
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import toast from "react-hot-toast";
 import {
@@ -43,6 +43,7 @@ const fmtDate = (d) =>
 // Why a village is not on the bill, in words. The server sends the reason.
 const REASONS = {
   not_in_estate_default: "not in the estate default",
+  not_in_view: "not in this view",
   inactive: "switched off under Network",
   no_ruijie_group: "no Ruijie group",
   shared_group: "shares a Ruijie group",
@@ -52,60 +53,86 @@ const joinNames = (names, max = 6) =>
   names.length <= max ? names.join(", ") : `${names.slice(0, max).join(", ")} and ${names.length - max} more`;
 
 /**
- * What this bill covers, stated rather than implied. One line in the normal
- * case; a callout when the estate default was never saved or cannot be read,
- * because then "every village" is not a decision anybody made.
+ * Which villages this bill covers, stated rather than implied — and where that
+ * came from, because the bill follows the reader's view the way the dashboards
+ * do: the switcher's village, else "Your view", else the estate default.
  */
-function ScopeStrip({ data, isAdmin }) {
+function ScopeStrip({ data, isAdmin, view }) {
   const navigate = useNavigate();
-  const { sites, visibleSiteIds, followEstateDefault } = useSite();
+  const { setActiveSiteId, followEstateDefault } = useSite();
   const [open, setOpen] = useState(false);
   const scope = data.scope;
   if (!scope) return null;
 
-  const billed = new Set(scope.billedIds.map(Number));
   const excluded = scope.excluded || [];
   const count = scope.billedCount;
-  // Villages the estate default takes in, whether or not they could be billed.
-  // "Every active village (N)" must count the villages, not the billable ones:
-  // a village with no group, or sharing one, is still in the estate.
-  const inEstate = count + excluded.filter((x) => x.reason === "no_ruijie_group" || x.reason === "shared_group").length;
-  const unbillable = inEstate - count;
+  // Villages in the view, whether or not they could be billed. "N villages"
+  // must count the villages, not the billable ones: a village with no group,
+  // or sharing one, is still in the view.
+  const inView = count + excluded.filter((x) => x.reason === "no_ruijie_group" || x.reason === "shared_group").length;
+  const unbillable = inView - count;
   const billedNote = unbillable > 0 ? `, ${count} of them billable` : "";
-  const nameOf = (id) => sites.find((s) => Number(s.id) === Number(id))?.name || `#${id}`;
+  const plural = (n) => `${n} village${n === 1 ? "" : "s"}`;
   const saved = scope.setAt ? ` · saved ${fmtDate(scope.setAt)}${scope.setBy ? ` by ${scope.setBy}` : ""}` : "";
-
-  // The reader's OWN view, when they have one. The bill does not follow it;
-  // this only makes the difference impossible to miss.
-  const personal = Array.isArray(visibleSiteIds) ? new Set(visibleSiteIds.map(Number)) : null;
-  const hiddenButBilled = personal ? [...billed].filter((id) => !personal.has(id)) : [];
-  const shownNotBilled = personal
-    ? excluded.filter((x) => x.reason === "not_in_estate_default" && personal.has(Number(x.projectId)))
-    : [];
+  const estateText =
+    scope.mode === "list" ? plural(scope.estateCount ?? 0)
+    : scope.mode === "none" ? "no villages"
+    : "every village";
 
   const byReason = excluded.reduce((m, x) => ((m[x.reason] ||= []).push(x), m), {});
 
+  let icon = <Globe2 size={14} className="mt-0.5 shrink-0 text-[var(--fg-muted)]" />;
   let headline;
+  let sub = null;
   let tone = "neutral";
-  if (scope.mode === "unset") {
+  const actions = [];
+
+  if (view.kind === "village") {
+    icon = <MapPin size={14} className="mt-0.5 shrink-0 text-[var(--fg-muted)]" />;
+    headline = `${view.name || "One village"} only — the village selected in the switcher${billedNote}`;
+    actions.push(
+      <Button key="all" variant="ghost" size="xs" onClick={() => setActiveSiteId(null)}>
+        Show all my villages
+      </Button>
+    );
+  } else if (view.kind === "personal") {
+    icon = <Eye size={14} className="mt-0.5 shrink-0 text-[var(--info-fg)]" />;
+    headline = `Your view · ${plural(inView)}${billedNote}`;
+    sub = `Accounts following the estate default see ${estateText}${saved}.`;
+    if (isAdmin) {
+      actions.push(
+        <Button key="edit" variant="ghost" size="xs" onClick={() => navigate("/settings")}>
+          Edit your view
+        </Button>,
+        <Button key="follow" variant="ghost" size="xs" onClick={followEstateDefault}>
+          Use the estate default
+        </Button>
+      );
+    }
+  } else if (scope.mode === "unset") {
     tone = isAdmin ? "warning" : "neutral";
     headline = isAdmin
-      ? `No estate default has been saved, so this covers every active village (${inEstate}${billedNote}) — test villages included, and any village added later.`
-      : `Every active village (${inEstate}${billedNote}).`;
+      ? `No estate default has been saved, so this covers every active village (${inView}${billedNote}) — test villages included, and any village added later.`
+      : `Every active village (${inView}${billedNote}).`;
+    if (isAdmin) actions.push(<Button key="set" variant="secondary" size="xs" onClick={() => navigate("/settings")}>Set the estate default</Button>);
   } else if (scope.mode === "unreadable") {
     tone = isAdmin ? "danger" : "neutral";
     headline = isAdmin
-      ? `The saved estate default could not be read, so this covers every active village (${inEstate}${billedNote}). Save it again under Settings.`
-      : `Every active village (${inEstate}${billedNote}).`;
+      ? `The saved estate default could not be read, so this covers every active village (${inView}${billedNote}). Save it again under Settings.`
+      : `Every active village (${inView}${billedNote}).`;
+    if (isAdmin) actions.push(<Button key="set" variant="secondary" size="xs" onClick={() => navigate("/settings")}>Estate default settings</Button>);
   } else if (scope.mode === "none") {
     tone = "warning";
     headline = "The estate default has no villages in it, so nothing is billed.";
-  } else if (scope.mode === "all") {
-    headline = `Estate default · every active village (${inEstate}${billedNote}), including any added later${saved}`;
   } else {
-    headline = `Estate default · ${inEstate} village${inEstate === 1 ? "" : "s"}${billedNote}${saved}`;
+    headline =
+      scope.mode === "all"
+        ? `Estate default · every active village (${inView}${billedNote}), including any added later${saved}`
+        : `Estate default · ${plural(inView)}${billedNote}${saved}`;
+    if (isAdmin) actions.push(<Button key="set" variant="ghost" size="xs" onClick={() => navigate("/settings")}>Estate default settings</Button>);
   }
 
+  if (tone !== "neutral") icon = <AlertTriangle size={14} className="mt-0.5 shrink-0" />;
   const toneClass = {
     neutral: "border-[var(--border-default)] bg-[var(--bg-surface)] text-[var(--fg-secondary)]",
     warning: "border-[var(--warning-border)] bg-[var(--warning-soft)] text-[var(--warning-fg)]",
@@ -116,12 +143,11 @@ function ScopeStrip({ data, isAdmin }) {
     <div className={`flex flex-col gap-2 rounded-xl border px-4 py-3 text-[12.5px] ${toneClass}`}>
       <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
         <span className="flex min-w-0 flex-1 items-start gap-2">
-          {tone === "neutral" ? (
-            <Globe2 size={14} className="mt-0.5 shrink-0 text-[var(--fg-muted)]" />
-          ) : (
-            <AlertTriangle size={14} className="mt-0.5 shrink-0" />
-          )}
-          <span className={tone === "neutral" ? "text-[var(--fg-primary)]" : "font-medium"}>{headline}</span>
+          {icon}
+          <span className="flex min-w-0 flex-col gap-0.5">
+            <span className={tone === "neutral" ? "text-[var(--fg-primary)]" : "font-medium"}>{headline}</span>
+            {sub && <span className="text-[12px] text-[var(--fg-muted)]">{sub}</span>}
+          </span>
         </span>
         <span className="flex flex-wrap items-center gap-1.5">
           {excluded.length > 0 && (
@@ -134,11 +160,7 @@ function ScopeStrip({ data, isAdmin }) {
               {excluded.length} not billed
             </Button>
           )}
-          {isAdmin && (
-            <Button variant={tone === "neutral" ? "ghost" : "secondary"} size="xs" onClick={() => navigate("/settings")}>
-              {scope.mode === "unset" ? "Set the estate default" : "Estate default settings"}
-            </Button>
-          )}
+          {actions}
         </span>
       </div>
 
@@ -151,32 +173,6 @@ function ScopeStrip({ data, isAdmin }) {
             </li>
           ))}
         </ul>
-      )}
-
-      {(hiddenButBilled.length > 0 || shownNotBilled.length > 0) && (
-        <div className="flex flex-wrap items-start gap-2 border-t border-[var(--border-subtle)] pt-2 text-[12px] text-[var(--fg-secondary)]">
-          <Eye size={13} className="mt-0.5 shrink-0 text-[var(--info-fg)]" />
-          <span className="min-w-0 flex-1">
-            Your own view differs from this bill, which always uses the estate default.
-            {hiddenButBilled.length > 0 && (
-              <>
-                {" "}It hides{" "}
-                <span className="font-medium text-[var(--fg-primary)]">{joinNames(hiddenButBilled.map(nameOf))}</span>
-                {hiddenButBilled.length === 1 ? ", which is" : ", which are"} billed here.
-              </>
-            )}
-            {shownNotBilled.length > 0 && (
-              <>
-                {" "}It shows{" "}
-                <span className="font-medium text-[var(--fg-primary)]">{joinNames(shownNotBilled.map((x) => x.name))}</span>
-                {shownNotBilled.length === 1 ? ", which is" : ", which are"} not in the estate default and not billed.
-              </>
-            )}
-          </span>
-          <Button variant="ghost" size="xs" onClick={followEstateDefault}>
-            Follow the estate default
-          </Button>
-        </div>
       )}
     </div>
   );
@@ -262,22 +258,41 @@ function TargetControl({ target, onSaved, canEdit }) {
 
 export default function BillingPage() {
   const { isAdmin } = useAuth();
+  const { activeSiteId, activeSite, visibleSiteIds, loading: sitesLoading } = useSite();
   const [month, setMonth] = useState(""); // "" = let the server choose the last complete month
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
+  const seq = useRef(0);
+
+  // The dashboards' precedence, resolved once: switcher village, then "Your
+  // view", then the estate default (sent as nothing, so the server decides).
+  const view = useMemo(() => {
+    if (activeSiteId != null) return { kind: "village", ids: [Number(activeSiteId)], name: activeSite?.name };
+    if (Array.isArray(visibleSiteIds)) return { kind: "personal", ids: visibleSiteIds.map(Number) };
+    return { kind: "estate", ids: null };
+  }, [activeSiteId, activeSite?.name, visibleSiteIds]);
+  const viewKey = view.ids ? [...view.ids].sort((a, b) => a - b).join(",") : "estate";
 
   const load = useCallback(async () => {
+    // Wait for the view: billing the estate default for a moment and then
+    // swapping to the reader's own villages would flash the wrong bill.
+    if (sitesLoading) return;
+    const mine = ++seq.current;
     setLoading(true);
     try {
-      const r = await billingApi.get(month ? { month } : {});
+      const params = {};
+      if (month) params.month = month;
+      if (viewKey !== "estate") params.villages = viewKey;
+      const r = await billingApi.get(params);
+      if (mine !== seq.current) return; // a newer view or month superseded this
       setData(r);
       if (!month) setMonth(r.month);
     } catch (e) {
-      toast.error("Could not load billing: " + e.message);
+      if (mine === seq.current) toast.error("Could not load billing: " + e.message);
     } finally {
-      setLoading(false);
+      if (mine === seq.current) setLoading(false);
     }
-  }, [month]);
+  }, [month, viewKey, sitesLoading]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -300,13 +315,18 @@ export default function BillingPage() {
     // should say which villages it is a bill for.
     const s = data.scope;
     if (s) {
-      const modeText = {
-        unset: "Estate default never saved: every active village",
-        all: "Estate default: every active village",
-        list: "Estate default",
-        none: "Estate default: no villages",
-        unreadable: "Estate default unreadable: every active village",
-      }[s.mode] || "Estate default";
+      const modeText =
+        view.kind === "village"
+          ? `One village: ${view.name || ""}`
+          : view.kind === "personal"
+            ? "Your view"
+            : {
+                unset: "Estate default never saved: every active village",
+                all: "Estate default: every active village",
+                list: "Estate default",
+                none: "Estate default: no villages",
+                unreadable: "Estate default unreadable: every active village",
+              }[s.mode] || "Estate default";
       rows.push([]);
       rows.push(["Scope", modeText, `${s.billedCount} villages billed`, s.setAt ? `saved ${fmtDate(s.setAt)}${s.setBy ? ` by ${s.setBy}` : ""}` : ""]);
       for (const x of s.excluded || []) rows.push(["Not billed", x.name, x.hostname || "", REASONS[x.reason] || x.reason]);
@@ -368,7 +388,7 @@ export default function BillingPage() {
         </div>
       )}
 
-      {data && <ScopeStrip data={data} isAdmin={isAdmin} />}
+      {data && <ScopeStrip data={data} isAdmin={isAdmin} view={view} />}
 
       {loading && !data ? (
         <>
@@ -520,7 +540,7 @@ export default function BillingPage() {
 
           {/* Everything the two lists do NOT include, so the figures above can be
               reconciled against the dashboard instead of just trusted. */}
-          {(data.noGroup.length > 0 || shared.length > 0 || t.unattributed?.revenue > 0 || t.outsideEstate?.revenue > 0) && (
+          {(data.noGroup.length > 0 || shared.length > 0 || t.unattributed?.revenue > 0 || t.outsideBill?.revenue > 0) && (
             <Panel title="Not in these figures" subtitle="So the totals above reconcile with the dashboard." icon={<Info size={15} />} tone="slate">
               <ul className="flex flex-col gap-2.5 text-[12.5px] text-[var(--fg-secondary)]">
                 {data.noGroup.length > 0 && (
@@ -563,12 +583,12 @@ export default function BillingPage() {
                     </span>
                   </li>
                 )}
-                {t.outsideEstate?.revenue > 0 && (
+                {t.outsideBill?.revenue > 0 && (
                   <li className="flex items-start gap-2">
                     <Info size={13} className="mt-0.5 shrink-0 text-[var(--fg-muted)]" />
                     <span>
-                      <span className="font-medium tabular-nums text-[var(--fg-primary)]">{money(t.outsideEstate.revenue)}</span>{" "}
-                      came from villages outside the estate default (test villages, for example), which are not billed.
+                      <span className="font-medium tabular-nums text-[var(--fg-primary)]">{money(t.outsideBill.revenue)}</span>{" "}
+                      came from villages that are not on this bill — outside this view, or switched off.
                     </span>
                   </li>
                 )}

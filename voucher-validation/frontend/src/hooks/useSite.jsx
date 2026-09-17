@@ -19,8 +19,8 @@
 // For a viewer, engineer or billing account the estate default is also what the
 // SERVER answers with, so their personal layer can only ever narrow what they
 // already get — ticking a village the default leaves out shows them an empty
-// row, not somebody else's data. The Billing page ignores the personal layer
-// altogether: a bill is the estate default for whoever opens it.
+// row, not somebody else's data. The Billing page follows the same precedence
+// as the dashboards (switcher village, then personal, then estate default).
 //
 // activeSiteId and the personal filter are saved as PER-USER server
 // preferences (synced across the user's devices). localStorage is only a
