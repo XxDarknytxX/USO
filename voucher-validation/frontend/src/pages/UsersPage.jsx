@@ -178,7 +178,7 @@ function LinkMark({ at }) {
   );
 }
 
-function StatusCell({ user }) {
+function StatusCell({ user, compact = false }) {
   // A link that lives for hours needs its time shown, not its date.
   const pending = {
     invited:          { label: "Invited",        tone: "info",    Icon: Mail,          live: true },
@@ -216,6 +216,18 @@ function StatusCell({ user }) {
       </StatusPill>
     );
     line = new Date(user.lastLoginAt).toLocaleDateString("en-AU", { day: "numeric", month: "short", year: "numeric" });
+  }
+
+  // On a phone card the status rides a single meta line, so the pill goes in
+  // with its note beside it rather than stacked under it.
+  if (compact) {
+    return (
+      <span className="inline-flex items-center gap-1.5 min-w-0">
+        {pill}
+        {!pending && user.linkLive && <LinkMark at={user.inviteExpiresAt} />}
+        {line && <span className="truncate text-[11.5px] text-[var(--fg-muted)]">{line}</span>}
+      </span>
+    );
   }
 
   return (
@@ -463,16 +475,35 @@ export default function UsersPage() {
                   const awaiting = u.status !== "active";
                   return (
                     <tr key={u.id}>
-                      <Td>
-                        <RecordCell
-                          tone={r.tile}
-                          icon={<span className="text-[12px] font-bold uppercase">{(u.name || u.email || "?").charAt(0)}</span>}
-                          title={u.name || u.email}
-                          subtitle={u.name ? u.email : undefined}
-                        />
+                      {/* A phone reads an account as a card: who they are, what
+                          they are, and one line for where they see and how they
+                          stand. The three columns behind it stand down — four
+                          label/value lines per person made a ten-account list
+                          into a scroll. */}
+                      {/* The stacked-table CSS lays a cell's children out in a
+                          row; the card's title block wants them stacked. */}
+                      <Td className="max-sm:flex-col! max-sm:items-stretch! max-sm:gap-0!">
+                        <div className="flex items-start gap-2 min-w-0 max-sm:w-full">
+                          <RecordCell
+                            tone={r.tile}
+                            icon={<span className="text-[12px] font-bold uppercase">{(u.name || u.email || "?").charAt(0)}</span>}
+                            title={u.name || u.email}
+                            subtitle={u.name ? u.email : undefined}
+                          />
+                          <span className="sm:hidden ml-auto shrink-0 pl-2">
+                            <RolePill role={u.role} />
+                          </span>
+                        </div>
+                        <div className="sm:hidden mt-2 flex flex-wrap items-center gap-x-2 gap-y-1.5 text-[11.5px] text-[var(--fg-muted)]">
+                          <span className="inline-flex items-center gap-1">
+                            <Globe2 size={11} className="shrink-0" />
+                            {r.scoped ? "Estate default" : "Every village"}
+                          </span>
+                          <StatusCell user={u} compact />
+                        </div>
                       </Td>
-                      <Td><RolePill role={u.role} /></Td>
-                      <Td muted nowrap>
+                      <Td className="max-sm:hidden!"><RolePill role={u.role} /></Td>
+                      <Td muted nowrap className="max-sm:hidden!">
                         <span className="inline-flex items-center gap-1.5">
                           {!r.scoped ? (
                             <>
@@ -490,12 +521,12 @@ export default function UsersPage() {
                           )}
                         </span>
                       </Td>
-                      <Td><StatusCell user={u} /></Td>
-                      <Td align="right">
+                      <Td className="max-sm:hidden!"><StatusCell user={u} /></Td>
+                      <Td align="right" className="max-sm:before:hidden! max-sm:pt-1!">
                         {locked ? (
                           <span className="px-2 text-[11.5px] italic text-[var(--fg-subtle)]">managed by a superadmin</span>
                         ) : (
-                        <div className="flex items-center justify-end gap-1">
+                        <div className="flex items-center justify-end gap-1 max-sm:w-full! max-sm:justify-start max-sm:gap-2 max-sm:border-t max-sm:border-[var(--border-subtle)] max-sm:pt-2.5">
                           <IconButton onClick={() => setEditTarget(u)} size="sm" title="Edit user" aria-label={`Edit ${u.email}`}>
                             <Edit3 size={14} />
                           </IconButton>

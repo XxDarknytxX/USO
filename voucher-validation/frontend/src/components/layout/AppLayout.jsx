@@ -5,6 +5,7 @@
 // accent active-bar, and a header user menu. Wired to the admin's auth / theme /
 // site-scope + the site switcher.
 
+import { createPortal } from "react-dom";
 import { NavLink, Outlet, useNavigate, useLocation } from "react-router-dom";
 import { useState, useEffect, useRef } from "react";
 import { Toaster } from "react-hot-toast";
@@ -382,8 +383,52 @@ function Shell() {
                   <ChevronDown size={14} className="text-[var(--fg-muted)] hidden md:block" />
                 </button>
 
+                {/* On a phone the account menu is a sheet from the bottom of the
+                    screen: a 224px dropdown hanging off the top-right corner is
+                    a desktop habit, and its rows are too small for a thumb. */}
+                {/* Through a portal: the header is its own stacking context, and
+                    a sheet rendered inside it would sit under the phone bar. */}
+                {showUserMenu && createPortal(
+                  <div className="sm:hidden">
+                    <div
+                      className="fixed inset-0 z-40 bg-black/50 animate-fade-in"
+                      onClick={() => setShowUserMenu(false)}
+                      aria-hidden="true"
+                    />
+                    <div className="fixed inset-x-0 bottom-0 z-50 rounded-t-2xl border-t border-[var(--border-default)] bg-[var(--bg-elevated)] pb-[env(safe-area-inset-bottom)] shadow-[var(--shadow-elevated)] animate-slide-up">
+                      <span aria-hidden="true" className="mx-auto mt-2 mb-1 block h-1 w-10 rounded-full bg-[var(--border-strong)]" />
+                      <div className="px-5 py-3 border-b border-[var(--border-default)]">
+                        <p className="text-[15px] font-semibold text-[var(--fg-primary)] truncate">{displayName}</p>
+                        {email && <p className="text-[12.5px] text-[var(--fg-muted)] truncate mt-0.5">{email}</p>}
+                        <span className="inline-flex items-center gap-1 mt-2 px-2 py-0.5 rounded-full text-[10px] font-medium bg-[var(--accent)]/10 text-[var(--accent)]">
+                          <RoleIcon size={10} /> {roleLabel}
+                        </span>
+                      </div>
+                      <button
+                        onClick={() => { setShowUserMenu(false); navigate("/profile"); }}
+                        className="w-full flex items-center gap-3 px-5 h-13 min-h-12 text-[14px] font-medium text-[var(--fg-secondary)] active:bg-[var(--bg-surface)]"
+                      >
+                        <UserCircle size={18} /> Profile
+                      </button>
+                      <button
+                        onClick={() => { setShowUserMenu(false); toggleTheme(); }}
+                        className="w-full flex items-center gap-3 px-5 h-13 min-h-12 text-[14px] font-medium text-[var(--fg-secondary)] active:bg-[var(--bg-surface)]"
+                      >
+                        {theme === "dark" ? <Sun size={18} /> : <Moon size={18} />}
+                        {theme === "dark" ? "Light theme" : "Dark theme"}
+                      </button>
+                      <button
+                        onClick={() => { logout(); navigate("/login"); }}
+                        className="w-full flex items-center gap-3 px-5 h-13 min-h-12 text-[14px] font-medium text-[var(--danger-fg)] active:bg-[var(--danger-soft)] border-t border-[var(--border-default)]"
+                      >
+                        <LogOut size={18} /> Sign out
+                      </button>
+                    </div>
+                  </div>,
+                  document.body
+                )}
                 {showUserMenu && (
-                  <div className="absolute right-0 mt-[18px] w-56 bg-[var(--bg-elevated)] rounded-xl overflow-hidden border border-[var(--border-default)] shadow-[var(--shadow-elevated)] animate-slide-down">
+                  <div className="hidden sm:block absolute right-0 mt-[18px] w-56 bg-[var(--bg-elevated)] rounded-xl overflow-hidden border border-[var(--border-default)] shadow-[var(--shadow-elevated)] animate-slide-down">
                     <div className="px-4 py-3 border-b border-[var(--border-default)]">
                       <p className="text-sm font-semibold text-[var(--fg-primary)] truncate">{displayName}</p>
                       {email && <p className="text-xs text-[var(--fg-muted)] truncate mt-0.5">{email}</p>}

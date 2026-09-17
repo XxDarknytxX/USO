@@ -136,6 +136,34 @@ function PanelFooter({ note, children }) {
    what a non-admin already gets. For an admin, who is unrestricted, it is how a
    test village gets looked at without being put in front of the team.
    ========================================================================= */
+/**
+ * A long list on a phone: the first few rows, then the rest on request. Ten
+ * villages twice over (the estate default and your own view) is most of a
+ * screen each, and both are usually read rather than edited.
+ */
+function PhoneCapped({ items, cap = 4, label, render }) {
+  const [all, setAll] = useState(false);
+  const hidden = Math.max(0, items.length - cap);
+  return (
+    <>
+      {items.map((item, i) => (
+        <div key={item.id ?? i} className={!all && i >= cap ? "max-sm:hidden" : undefined}>
+          {render(item)}
+        </div>
+      ))}
+      {hidden > 0 && (
+        <button
+          type="button"
+          onClick={() => setAll((v) => !v)}
+          className="sm:hidden w-full px-5 py-3 text-left text-[12.5px] font-semibold text-[var(--brand-fg-on-soft)] active:bg-[var(--bg-surface)]"
+        >
+          {all ? "Show fewer" : `Show all ${items.length} ${label}`}
+        </button>
+      )}
+    </>
+  );
+}
+
 function VillageScopePanels() {
   const {
     sites, isSiteVisible, toggleVisibleSite, setVisibleSiteIds,
@@ -252,13 +280,16 @@ function VillageScopePanels() {
           )
         }
       >
-        <div className="flex flex-col divide-y divide-[var(--border-subtle)] max-h-[320px] overflow-y-auto scrollbar-none">
+        <div className="flex flex-col divide-y divide-[var(--border-subtle)] max-h-[320px] overflow-y-auto scrollbar-none max-sm:max-h-none max-sm:overflow-visible">
           {sites.length === 0 ? (
             <div className="px-5 sm:px-6 py-4 text-[12.5px] text-[var(--fg-muted)]">
               No villages yet — add them under Network.
             </div>
           ) : (
-            sites.map((s) => (
+            <PhoneCapped
+              items={sites}
+              label="villages"
+              render={(s) => (
               <CheckRow
                 key={s.id}
                 checked={shown == null || shown.includes(s.id)}
@@ -267,7 +298,8 @@ function VillageScopePanels() {
                 subtitle={s.hostname}
                 onClick={() => toggleDraft(s.id)}
               />
-            ))
+              )}
+            />
           )}
         </div>
         {sites.length > 0 && (
@@ -325,13 +357,16 @@ function VillageScopePanels() {
             </span>
           </div>
         )}
-        <div className="flex flex-col divide-y divide-[var(--border-subtle)] max-h-[320px] overflow-y-auto scrollbar-none">
+        <div className="flex flex-col divide-y divide-[var(--border-subtle)] max-h-[320px] overflow-y-auto scrollbar-none max-sm:max-h-none max-sm:overflow-visible">
           {sites.length === 0 ? (
             <div className="px-5 sm:px-6 py-4 text-[12.5px] text-[var(--fg-muted)]">
               No villages yet — add them under Network.
             </div>
           ) : (
-            sites.map((s) => (
+            <PhoneCapped
+              items={sites}
+              label="villages"
+              render={(s) => (
               <CheckRow
                 key={s.id}
                 checked={isSiteVisible(s.id)}
@@ -344,7 +379,8 @@ function VillageScopePanels() {
                 }
                 onClick={() => toggleVisibleSite(s.id)}
               />
-            ))
+              )}
+            />
           )}
         </div>
         {sites.length > 0 && (
@@ -1192,7 +1228,7 @@ export default function SettingsPage() {
                   description="Only the selected villages send receipts. A village that is not ticked records a “not selected” note against the purchase instead of emailing."
                   wide
                 >
-                  <div className="rounded-xl border border-[var(--border-default)] divide-y divide-[var(--border-subtle)] max-h-[260px] overflow-y-auto scrollbar-none">
+                  <div className="rounded-xl border border-[var(--border-default)] divide-y divide-[var(--border-subtle)] max-h-[260px] overflow-y-auto scrollbar-none max-sm:max-h-none max-sm:overflow-visible">
                     {sites.length === 0 ? (
                       <div className="px-4 py-3 text-[12.5px] text-[var(--fg-muted)]">
                         No villages yet — add them under Network.
@@ -1383,7 +1419,7 @@ export default function SettingsPage() {
               tone="navy"
               padding={false}
             >
-              <div className="divide-y divide-[var(--border-subtle)] max-h-[520px] overflow-y-auto scrollbar-none">
+              <div className="divide-y divide-[var(--border-subtle)] max-h-[520px] overflow-y-auto scrollbar-none max-sm:max-h-none max-sm:overflow-visible">
                 {sites.length === 0 ? (
                   <div className="px-5 sm:px-6 py-4 text-[12.5px] text-[var(--fg-muted)]">
                     No villages yet — add them under Network.
@@ -1531,7 +1567,7 @@ function TwoFactorLog() {
           {events?.length ? "Nothing but ordinary activity." : "No two-factor activity recorded yet."}
         </div>
       ) : (
-        <div className="max-h-[420px] divide-y divide-[var(--border-subtle)] overflow-y-auto">
+        <div className="max-h-[420px] divide-y divide-[var(--border-subtle)] overflow-y-auto max-sm:max-h-none max-sm:overflow-visible">
           {shown.map((e) => {
             const c = EVENT_COPY[e.event] || { label: e.event, tone: "neutral", Icon: History };
             return (
