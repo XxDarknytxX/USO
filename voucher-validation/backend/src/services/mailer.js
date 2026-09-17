@@ -698,7 +698,19 @@ export const EMAIL_TEMPLATES = [
   { id: "connection", name: "Connection test" },
   { id: "receipt", name: "Purchase receipt" },
   { id: "manual_assist", name: "Manual assistance - voucher code" },
+  { id: "invite", name: "Console onboarding (set password)" },
+  { id: "password_reset", name: "Console password reset" },
+  { id: "twofactor_reset", name: "Console two-factor reset" },
 ];
+
+// Sample account for the console emails. The link goes nowhere real: a test
+// send must never carry a usable password link.
+const SAMPLE_ACCOUNT = {
+  name: "Sample User",
+  email: "sample.user@vodafone.com.fj",
+  url: "https://admin.vodafonefiji.cloud",
+  link: "https://admin.vodafonefiji.cloud/set-password#token=SAMPLE-LINK-DOES-NOT-WORK",
+};
 
 // Realistic sample data so a test receipt looks like the real thing.
 const SAMPLE_RECEIPT = {
@@ -723,6 +735,12 @@ export function renderTemplate(id) {
     // test proves the whole path — including that the copy goes out.
     case "manual_assist":
       return buildManualAssist(SAMPLE_RECEIPT);
+    case "invite":
+      return buildInvite({ ...SAMPLE_ACCOUNT, roleLabel: "viewer", expiresHours: 8 });
+    case "password_reset":
+      return buildPasswordResetLink({ ...SAMPLE_ACCOUNT, expiresHours: 2 });
+    case "twofactor_reset":
+      return buildTwoFactorReset(SAMPLE_ACCOUNT);
     case "connection":
     default:
       return buildConnectionTest();
@@ -731,63 +749,57 @@ export function renderTemplate(id) {
 
 
 /* ══════════════════════════ Account emails ══════════════════════════
- * Onboarding, password reset and 2FA reset. All three hand someone a way into
- * the console, so all three say plainly what to do with it and that it must be
- * changed — a temporary credential nobody is told to replace is a permanent
- * one.
+ * Onboarding, password reset and 2FA reset for console staff. They use the SAME
+ * Outlook-safe shell, logo and building blocks as the customer receipts, so every
+ * email the service sends looks like one family and none of them looks like the
+ * kind of lookalike message people are trained to distrust.
  *
- * Deliberately plain: an operations console mail that looks like marketing is
- * the kind people learn to ignore, and these are the ones they must not.
+ * All three hand someone a way into the console, so each says plainly what to
+ * do, how long the link lasts, and what to do if it was not expected. Every
+ * value from the account (name, email, links) is escaped: names are typed by an
+ * administrator, and an email body is not a place to trust input.
+ *
+ * Each returns { subject, text, html, attachments } like the receipts, so the
+ * sender attaches the logo the masthead refers to.
  */
 
-function accountShell(title, lead, blocks, footer) {
-  const rows = blocks
-    .map(
-      (b) => `<tr><td style="padding:10px 0;border-bottom:1px solid #eceff1;">
-        <div style="font-size:12px;color:#6b7580;text-transform:uppercase;letter-spacing:.06em;">${b.label}</div>
-        <div style="font-size:${b.mono ? "18px" : "15px"};color:#11161b;font-weight:600;${b.mono ? "font-family:ui-monospace,SFMono-Regular,Menlo,monospace;letter-spacing:.04em;" : ""}margin-top:4px;">${b.value}</div>
-      </td></tr>`
-    )
-    .join("");
-  return `<!doctype html><html><body style="margin:0;background:#f4f6f8;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;">
-  <table width="100%" cellpadding="0" cellspacing="0"><tr><td align="center" style="padding:28px 16px;">
-    <table width="100%" style="max-width:520px;background:#ffffff;border-radius:14px;overflow:hidden;border:1px solid #e3e7ea;">
-      <tr><td style="background:#e60000;padding:18px 24px;">
-        <div style="color:#fff;font-size:16px;font-weight:700;">Vodafone Fiji</div>
-        <div style="color:#ffd9d9;font-size:12px;margin-top:2px;">Universal Service Obligation \u00b7 Operations console</div>
-      </td></tr>
-      <tr><td style="padding:24px;">
-        <h1 style="margin:0 0 8px;font-size:19px;color:#11161b;">${title}</h1>
-        <p style="margin:0 0 18px;font-size:14px;line-height:1.55;color:#4a5560;">${lead}</p>
-        <table width="100%" cellpadding="0" cellspacing="0">${rows}</table>
-        <p style="margin:18px 0 0;font-size:13px;line-height:1.55;color:#4a5560;">${footer}</p>
-      </td></tr>
-      <tr><td style="padding:14px 24px;background:#fafbfc;color:#8a929b;font-size:11px;">
-        This is an automated message from the USO operations console. If you were not expecting it, tell your administrator.
-      </td></tr>
-    </table>
-  </td></tr></table></body></html>`;
-}
-
-/**
- * The invite. Carries a link, never a password — so there is nothing in this
- * mail that is still worth stealing a week after it was sent, and nothing that
- * works twice.
- *
- * The role is stated because it is the one thing the recipient cannot find out
- * any other way before signing in, and "you have been given an account" without
- * "to do what" is a mail people ignore.
- */
-/** "8 hours", "1 hour" — the only unit these links are measured in now. */
+/** "8 hours", "1 hour" — the only unit these links are measured in. */
 const hoursText = (h) => `${h} hour${Number(h) === 1 ? "" : "s"}`;
 
-/** The button and the pasteable fallback, identical in both link emails. */
-function linkBlock(link, label, footer) {
-  return `<a href="${link}" style="display:inline-block;background:#e60000;color:#ffffff;text-decoration:none;font-size:14px;font-weight:600;padding:11px 22px;border-radius:8px;">${label}</a>
-       <br><br><span style="font-size:12px;color:#6b7580;">Or paste this into your browser:</span>
-       <br><span style="font-size:12px;color:#4a5560;word-break:break-all;">${link}</span>
-       <br><br>${footer}`;
+const P = (html, { color = "#333333", size = 16, line = 24, margin = "0 0 20px 0" } = {}) =>
+  `<p style="color:${color};font-family:${FONT};font-size:${size}px;line-height:${line}px;mso-line-height-rule:exactly;margin:${margin};">${html}</p>`;
+
+/** Label / value rows, the same look as the plan and amount rows on a receipt. */
+function detailRows(rows) {
+  const shown = rows.filter((r) => r && r.value);
+  if (!shown.length) return "";
+  return `<table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="border-collapse:collapse;mso-table-lspace:0pt;mso-table-rspace:0pt;margin:0 0 8px 0;">
+                ${shown
+                  .map(
+                    (r, i) => `<tr>
+                  <td style="padding:9px 0;font-family:${FONT};font-size:14px;color:#888888;${i < shown.length - 1 ? "border-bottom:1px solid #f0f2f5;" : ""}">${esc(r.label)}</td>
+                  <td align="right" style="padding:9px 0 9px 12px;font-family:${FONT};font-size:14px;color:#333333;font-weight:bold;word-break:break-all;${i < shown.length - 1 ? "border-bottom:1px solid #f0f2f5;" : ""}">${esc(r.value)}</td>
+                </tr>`
+                  )
+                  .join("")}
+              </table>`;
 }
+
+/** The small grey sign-off block every account email ends with. */
+function accountHelp(html) {
+  return `<table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="border-collapse:collapse;mso-table-lspace:0pt;mso-table-rspace:0pt;margin:32px 0 0 0;">
+                <tr>
+                  <td align="left" style="padding-top:22px;border-top:1px solid #eeeeee;font-family:${FONT};">
+                    <p style="color:#999999;font-family:${FONT};font-size:12px;line-height:19px;mso-line-height-rule:exactly;margin:0;">${html}</p>
+                  </td>
+                </tr>
+              </table>`;
+}
+
+const ACCOUNT_FOOTER = `Vodafone Fiji | Universal Service Obligation (USO) operations console<br>
+                This is an automated message, please do not reply to this email.`;
+
+const textFooter = ["", "Vodafone Fiji | Universal Service Obligation (USO) operations console", "This is an automated message, please do not reply to this email."];
 
 /**
  * Onboarding. Carries a link, never a password — so there is nothing in this
@@ -799,28 +811,64 @@ function linkBlock(link, label, footer) {
  * "to do what" is a mail people ignore.
  */
 export function buildInvite({ name, email, url, link, roleLabel, expiresHours = 8 }) {
-  const what = roleLabel ? ` as ${/^[aeiou]/i.test(roleLabel) ? "an" : "a"} ${roleLabel}` : "";
-  const footer =
-    `This link works once and stops working after ${hoursText(expiresHours)}. ` +
-    "If it has expired by the time you open it, ask your administrator to send another. " +
-    "If two-factor authentication is switched on, you will be walked through setting it up when you first sign in.";
+  const article = roleLabel ? (/^[aeiou]/i.test(roleLabel) ? "an" : "a") : "";
+  const role = roleLabel ? `${article} ${roleLabel}` : null;
+  const greeting = name ? `Bula ${name},` : "Bula,";
+
+  const text = [
+    "WELCOME TO THE USO CONSOLE",
+    "",
+    greeting,
+    `An account has been created for you${role ? ` as ${role}` : ""} on the Vodafone Fiji USO operations console.`,
+    "",
+    "Choose your password here:",
+    link,
+    "",
+    `Email: ${email}`,
+    roleLabel ? `Role: ${roleLabel}` : null,
+    `Console: ${url}`,
+    "",
+    "PLEASE NOTE",
+    `This link works once and stops working after ${hoursText(expiresHours)}. If it has expired, ask your administrator to send another.`,
+    "If two-factor authentication is switched on, you will be walked through setting it up when you first sign in.",
+    "",
+    "Not expecting this email? Tell your administrator.",
+    ...textFooter,
+  ]
+    .filter((l) => l !== null)
+    .join("\n");
+
+  const body = `${P(esc(greeting), { margin: "0 0 12px 0" })}
+              ${P(`An account has been created for you${role ? ` as <strong>${esc(role)}</strong>` : ""} on the Vodafone Fiji USO operations console. Choose your own password to finish setting it up — nobody else has seen it, and nobody can.`)}
+
+              ${detailRows([
+                { label: "Email", value: email },
+                { label: "Role", value: roleLabel ? roleLabel.charAt(0).toUpperCase() + roleLabel.slice(1) : null },
+                { label: "Console", value: url },
+              ])}
+
+              ${button({ href: link, label: "Choose your password" })}
+              ${linkFallback(link)}
+
+              ${callout({
+                heading: "Please note",
+                html: `${P(`This link works <strong>once</strong> and stops working after <strong>${esc(hoursText(expiresHours))}</strong>. If it has expired by the time you open it, ask your administrator to send another.`, { color: "#666666", size: 14, line: 22, margin: "0 0 10px 0" })}
+                    ${P("If two-factor authentication is switched on, you will be walked through setting it up with your authenticator app when you first sign in.", { color: "#666666", size: 14, line: 22, margin: "0" })}`,
+              })}
+
+              ${accountHelp("<strong>Not expecting this email?</strong><br>Do not use the link — tell your administrator, who can remove the account.")}`;
+
   return {
     subject: "Set up your Vodafone Fiji USO console account",
-    text:
-      `An account has been created for you${what} on the Vodafone Fiji USO operations console.\n\n` +
-      `Choose your password here:\n${link}\n\n` +
-      `Email: ${email}\n` +
-      `Console: ${url}\n\n` +
-      `This link works once and expires in ${hoursText(expiresHours)}. If you were not expecting this, tell your administrator.`,
-    html: accountShell(
-      `Welcome${name ? `, ${name}` : ""}`,
-      `An account has been created for you${what} on the USO operations console. Choose your own password to finish setting it up — nobody else has seen it, and nobody can.`,
-      [
-        { label: "Email", value: email },
-        { label: "Console", value: url },
-      ],
-      linkBlock(link, "Choose your password", footer)
-    ),
+    text,
+    html: shell({
+      preheader: `Choose your password — the link expires in ${hoursText(expiresHours)}`,
+      title: "Welcome to the USO console",
+      subtitle: "Choose your password to finish setting up your account",
+      body,
+      footerHtml: ACCOUNT_FOOTER,
+    }),
+    attachments: [logoAttachment()].filter(Boolean),
   };
 }
 
@@ -834,44 +882,114 @@ export function buildInvite({ name, email, url, link, roleLabel, expiresHours = 
  * reset is how a person finds out somebody else is working on their account.
  */
 export function buildPasswordResetLink({ name, email, url, link, expiresHours = 2 }) {
-  const footer =
-    `This link works once and stops working after ${hoursText(expiresHours)}. ` +
-    "If it has expired, ask your administrator to send another. " +
-    "<strong>If you did not ask for this reset, contact your administrator now</strong> \u2014 someone else may have requested it.";
+  const greeting = name ? `Bula ${name},` : "Bula,";
+  const text = [
+    "RESET YOUR PASSWORD",
+    "",
+    greeting,
+    "An administrator reset the password on your Vodafone Fiji USO console account.",
+    "Your previous password no longer works.",
+    "",
+    "Choose a new password here:",
+    link,
+    "",
+    `Email: ${email}`,
+    `Console: ${url}`,
+    "",
+    "PLEASE NOTE",
+    `This link works once and stops working after ${hoursText(expiresHours)}. If it has expired, ask your administrator to send another.`,
+    "",
+    "DID NOT ASK FOR THIS?",
+    "Contact your administrator now - someone else may have requested it.",
+    ...textFooter,
+  ].join("\n");
+
+  const body = `${P(esc(greeting), { margin: "0 0 12px 0" })}
+              ${P("An administrator reset the password on your USO console account. <strong>Your previous password no longer works</strong> — choose a new one with the button below.")}
+
+              ${detailRows([
+                { label: "Email", value: email },
+                { label: "Console", value: url },
+              ])}
+
+              ${button({ href: link, label: "Choose a new password" })}
+              ${linkFallback(link)}
+
+              ${callout({
+                heading: "Please note",
+                html: P(`This link works <strong>once</strong> and stops working after <strong>${esc(hoursText(expiresHours))}</strong>. If it has expired, ask your administrator to send another.`, { color: "#666666", size: 14, line: 22, margin: "0" }),
+              })}
+
+              ${callout({
+                heading: "Did not ask for this?",
+                bg: "#fff5f5",
+                html: P("Do not use the link. <strong>Contact your administrator now</strong> — someone else may have requested this reset.", { color: "#666666", size: 14, line: 22, margin: "0" }),
+              })}`;
+
   return {
     subject: "Reset your USO console password",
-    text:
-      `An administrator reset the password on your Vodafone Fiji USO console account${name ? ` (${name})` : ""}.\n` +
-      `Your previous password no longer works.\n\n` +
-      `Choose a new password here:\n${link}\n\n` +
-      `Email: ${email}\n` +
-      `Console: ${url}\n\n` +
-      `This link works once and expires in ${hoursText(expiresHours)}. ` +
-      `If you did not ask for this, contact your administrator now.`,
-    html: accountShell(
-      "Choose a new password",
-      `An administrator reset the password on this account${name ? ` for ${name}` : ""}. Your previous password no longer works — choose a new one with the link below.`,
-      [
-        { label: "Email", value: email },
-        { label: "Console", value: url },
-      ],
-      linkBlock(link, "Choose a new password", footer)
-    ),
+    text,
+    html: shell({
+      preheader: `Your previous password no longer works — the link expires in ${hoursText(expiresHours)}`,
+      title: "Reset your password",
+      subtitle: "Choose a new password for your USO console account",
+      body,
+      footerHtml: ACCOUNT_FOOTER,
+    }),
+    attachments: [logoAttachment()].filter(Boolean),
   };
 }
 
+/**
+ * Two-factor reset. No link and no code in this one: the only action is to sign
+ * in as usual, and the app walks the person through enrolling again. It exists
+ * so that a reset nobody asked for is noticed.
+ */
 export function buildTwoFactorReset({ name, email, url }) {
+  const greeting = name ? `Bula ${name},` : "Bula,";
+  const text = [
+    "TWO-FACTOR AUTHENTICATION RESET",
+    "",
+    greeting,
+    "An administrator reset two-factor authentication on your Vodafone Fiji USO console account.",
+    "Your previous authenticator entry and backup codes no longer work.",
+    "",
+    `The next time you sign in at ${url} you will be asked to set it up again with your authenticator app.`,
+    "",
+    `Email: ${email}`,
+    "",
+    "DID NOT ASK FOR THIS?",
+    "Contact your administrator now.",
+    ...textFooter,
+  ].join("\n");
+
+  const body = `${P(esc(greeting), { margin: "0 0 12px 0" })}
+              ${P("An administrator reset two-factor authentication on your USO console account. <strong>Your previous authenticator entry and backup codes no longer work.</strong>")}
+              ${P("The next time you sign in, you will be asked to set it up again with your authenticator app. Delete the old USO entry from the app once the new one is working.", { color: "#666666", size: 15, line: 24 })}
+
+              ${detailRows([
+                { label: "Email", value: email },
+                { label: "Console", value: url },
+              ])}
+
+              ${button({ href: url, label: "Sign in to the console" })}
+
+              ${callout({
+                heading: "Did not ask for this?",
+                bg: "#fff5f5",
+                html: P("<strong>Contact your administrator now</strong> — someone else may be working on your account.", { color: "#666666", size: 14, line: 22, margin: "0" }),
+              })}`;
+
   return {
     subject: "Two-factor authentication was reset on your USO console account",
-    text: `Two-factor authentication has been reset on your Vodafone Fiji USO console account.\n\nThe next time you sign in at ${url} you will be asked to set it up again with your authenticator app. Your old codes and backup codes no longer work.\n\nIf you did not ask for this, contact your administrator now.`,
-    html: accountShell(
-      "Two-factor authentication was reset",
-      `An administrator reset two-factor authentication on this account${name ? ` for ${name}` : ""}. Your previous authenticator entry and backup codes no longer work.`,
-      [
-        { label: "Sign in at", value: url },
-        { label: "Email", value: email },
-      ],
-      "You will be asked to set up your authenticator app again the next time you sign in. <strong>If you did not ask for this, contact your administrator now.</strong>"
-    ),
+    text,
+    html: shell({
+      preheader: "Set up your authenticator app again the next time you sign in",
+      title: "Two-factor authentication reset",
+      subtitle: "Set it up again the next time you sign in",
+      body,
+      footerHtml: ACCOUNT_FOOTER,
+    }),
+    attachments: [logoAttachment()].filter(Boolean),
   };
 }

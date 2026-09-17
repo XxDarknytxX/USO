@@ -12,9 +12,15 @@
 //
 // The inbox row above the frame is the part people forget to check: the subject
 // and preheader are what decide whether the email is opened at all.
+//
+// "Full page" opens the same render over the whole window, the way the email
+// fills a mail client, so a long email can be read top to bottom without
+// scrolling inside a 600-pixel box. Still the sandboxed iframe — never a new tab
+// or a blob URL, which would run the email's HTML with the console's own origin.
 
 import { useEffect, useRef, useState } from "react";
-import { Eye, Loader2, Monitor, Smartphone, AlignLeft, RefreshCw, AlertTriangle } from "lucide-react";
+import { createPortal } from "react-dom";
+import { Eye, Loader2, Monitor, Smartphone, AlignLeft, RefreshCw, AlertTriangle, Maximize2, X } from "lucide-react";
 import { campaignApi } from "../../services/api";
 import { Panel, Segmented, Button, Skeleton } from "../ui";
 import { Callout } from "./campaignUi";
@@ -66,6 +72,97 @@ function senderName(from) {
   return (m && m[1]) || from;
 }
 
+/**
+ * The email over the whole window. Esc or the close button returns to the
+ * editor; the page underneath does not scroll while it is open.
+ */
+function FullPagePreview({ data, preheader, from, initialDevice, onClose }) {
+  const [device, setDevice] = useState(initialDevice === "text" ? "text" : initialDevice || "desktop");
+  const closeRef = useRef(null);
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
+  const snippet = preheader?.trim() || (data?.text || "").replace(/\s+/g, " ").trim().slice(0, 160);
+
+  // Once per opening. The preview re-renders while it is open (a debounced
+  // re-render landing), and re-running this would steal focus each time.
+  useEffect(() => {
+    const previousFocus = document.activeElement;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    closeRef.current?.focus();
+    const onKey = (e) => {
+      if (e.key === "Escape") {
+        e.stopPropagation();
+        onCloseRef.current();
+      }
+    };
+    window.addEventListener("keydown", onKey, true);
+    return () => {
+      window.removeEventListener("keydown", onKey, true);
+      document.body.style.overflow = previousOverflow;
+      previousFocus?.focus?.();
+    };
+  }, []);
+
+  return createPortal(
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-label="Full page email preview"
+      className="fixed inset-0 z-[1000] flex flex-col bg-[var(--surface-sunken)]"
+    >
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-2 border-b border-[var(--border-default)] bg-[var(--surface)] px-4 py-3 sm:px-6">
+        <span
+          aria-hidden="true"
+          className="hidden h-9 w-9 shrink-0 place-items-center rounded-full bg-[var(--brand)] text-[13px] font-bold text-[var(--text-on-brand)] font-display sm:grid"
+        >
+          {senderName(from).trim().charAt(0).toUpperCase() || "V"}
+        </span>
+        {/* A floor on its width, so on a phone the subject takes its own row
+            instead of being squeezed to a letter beside the controls. */}
+        <div className="min-w-[220px] flex-1">
+          <p className="truncate text-[11.5px] text-[var(--fg-muted)]">
+            <span className="font-semibold text-[var(--fg-secondary)]">{senderName(from)}</span> · full page preview
+          </p>
+          <p className="truncate text-[14px] font-semibold text-[var(--fg-primary)]">
+            {data?.subject || <span className="italic font-normal text-[var(--fg-muted)]">No subject yet</span>}
+          </p>
+          {snippet && <p className="hidden truncate text-[12px] text-[var(--fg-muted)] md:block">{snippet}</p>}
+        </div>
+        <Segmented size="sm" options={DEVICES} value={device} onChange={setDevice} />
+        <button
+          ref={closeRef}
+          type="button"
+          onClick={onClose}
+          className="inline-flex h-9 items-center gap-1.5 rounded-full border border-[var(--border-default)] bg-[var(--surface)] px-3.5 text-[12.5px] font-semibold text-[var(--fg-primary)] transition-colors hover:bg-[var(--surface-hover)] focus-ring"
+          aria-label="Close full page preview"
+        >
+          <X size={14} /> Close <kbd className="ml-1 hidden rounded border border-[var(--border-default)] px-1 font-mono text-[10px] text-[var(--fg-muted)] sm:inline">Esc</kbd>
+        </button>
+      </div>
+
+      <div className="min-h-0 flex-1 overflow-hidden p-0 sm:p-4">
+        {device === "text" ? (
+          <pre className="mx-auto h-full w-full max-w-[760px] overflow-auto whitespace-pre-wrap break-words bg-[var(--surface)] p-6 font-mono text-[13px] leading-6 text-[var(--fg-secondary)] sm:rounded-xl sm:border sm:border-[var(--border-default)]">
+            {data?.text || "(empty)"}
+          </pre>
+        ) : (
+          <div
+            className={cn(
+              "mx-auto h-full overflow-hidden bg-white shadow-[var(--shadow-elevated)] transition-[width] duration-300",
+              device === "mobile" ? "sm:rounded-[28px] sm:border-[6px] sm:border-[var(--border-strong)]" : "sm:rounded-xl sm:border sm:border-[var(--border-default)]"
+            )}
+            style={{ width: device === "mobile" ? 390 : "100%", maxWidth: "100%" }}
+          >
+            <iframe title="Full page email preview" sandbox="" srcDoc={data?.html || ""} className="block h-full w-full bg-white" />
+          </div>
+        )}
+      </div>
+    </div>,
+    document.body
+  );
+}
+
 const DEVICES = [
   { value: "desktop", label: <span className="inline-flex items-center gap-1.5"><Monitor size={13} />Desktop</span> },
   { value: "mobile", label: <span className="inline-flex items-center gap-1.5"><Smartphone size={13} />Mobile</span> },
@@ -82,6 +179,7 @@ export default function EmailPreview({
   className,
 }) {
   const [device, setDevice] = useState("desktop");
+  const [fullPage, setFullPage] = useState(false);
   const { data, loading, error, retry } = preview;
   const warnings = data?.warnings || [];
   const snippet = preheader?.trim() || (data?.text || "").replace(/\s+/g, " ").trim().slice(0, 140);
@@ -95,11 +193,32 @@ export default function EmailPreview({
       padding={false}
       className={className}
       actions={
-        <span className="hidden sm:inline-flex">
-          <Segmented size="sm" options={DEVICES} value={device} onChange={setDevice} />
+        <span className="inline-flex items-center gap-2">
+          <span className="hidden sm:inline-flex">
+            <Segmented size="sm" options={DEVICES} value={device} onChange={setDevice} />
+          </span>
+          <Button
+            size="xs"
+            variant="secondary"
+            onClick={() => setFullPage(true)}
+            disabled={!data}
+            iconLeft={<Maximize2 size={12} />}
+            title="Open the email over the whole window"
+          >
+            Full page
+          </Button>
         </span>
       }
     >
+      {fullPage && data && (
+        <FullPagePreview
+          data={data}
+          preheader={preheader}
+          from={from}
+          initialDevice={device}
+          onClose={() => setFullPage(false)}
+        />
+      )}
       {/* Narrow screens: the switch moves under the title so the header never
           has to squeeze three pills beside a subtitle. */}
       <div className="flex justify-center border-b border-[var(--border-subtle)] px-4 py-2.5 sm:hidden">

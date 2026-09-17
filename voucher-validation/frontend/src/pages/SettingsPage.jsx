@@ -1120,6 +1120,9 @@ export default function SettingsPage() {
                     <option value="connection">Connection test</option>
                     <option value="receipt">Purchase receipt</option>
                     <option value="manual_assist">Manual assistance - voucher code</option>
+                    <option value="invite">Console onboarding (set password)</option>
+                    <option value="password_reset">Console password reset</option>
+                    <option value="twofactor_reset">Console two-factor reset</option>
                   </Select>
                 </Field>
                 <Field label="Recipient" className="flex-1" htmlFor="test-email">

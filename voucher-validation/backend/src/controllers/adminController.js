@@ -147,6 +147,8 @@ async function sendAccountMail(pool, user, kind, { linkToken } = {}) {
     await smtp.transport.sendMail({
       from: smtp.from, to: user.email,
       subject: mail.subject, text: mail.text, html: mail.html,
+      // The Vodafone logo the masthead shows, embedded like the receipts'.
+      attachments: mail.attachments,
     });
     return { sent: true, error: null };
   } catch (e) {
