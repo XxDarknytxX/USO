@@ -12,7 +12,7 @@ import {
   LayoutDashboard, Gauge, Network, Ticket, Receipt, History, RefreshCw, Globe,
   FileText, GitBranch, Users, Settings, Menu, X, ChevronLeft, ChevronRight,
   ChevronDown, LogOut, Shield, Eye, LifeBuoy, UserCircle, Wallet,
-  Wrench, Sun, Moon, Server,
+  Wrench, Sun, Moon, Server, Megaphone,
 } from "lucide-react";
 
 import { useAuth } from "../../hooks/useAuth";
@@ -67,6 +67,8 @@ const navSections = [
       { to: "/portal-flows", label: "Txn Flows", Icon: GitBranch },
       { to: "/manual-assistance", label: "Manual Assistance", Icon: LifeBuoy },
       { to: "/mpaisa", label: "M-PAiSA Mapping", Icon: Wallet },
+      // Emails the inboxes in the mapping above. Admin only: no `roles`.
+      { to: "/email-campaigns", label: "Email Campaigns", Icon: Megaphone },
     ],
   },
   {

@@ -4,6 +4,8 @@
 // `number` — re-uploading updates existing rows and inserts new ones, never
 // duplicating. Also lists the current mapping for the admin table.
 
+import { invalidateContacts } from "../services/campaignAudience.js";
+
 /** "2026-06-11 16:43:59.857" → "2026-06-11 16:43:59" (MySQL DATETIME), or null. */
 function parseLogtime(s) {
   const m = String(s || "").trim().match(/^(\d{4}-\d{2}-\d{2})[ T](\d{2}:\d{2}:\d{2})/);
@@ -127,6 +129,7 @@ export function makeMpaisaController(pool) {
         throw e;
       }
 
+      invalidateContacts(); // email campaigns read this table
       const [rows] = await pool.query("SELECT * FROM mpaisa_mappings WHERE number = ?", [number]);
       res.status(201).json({ ok: true, row: rows[0] || null });
     } catch (e) {
@@ -173,6 +176,7 @@ export function makeMpaisaController(pool) {
         throw e;
       }
 
+      invalidateContacts(); // email campaigns read this table
       const [rows] = await pool.query("SELECT * FROM mpaisa_mappings WHERE number = ?", [number]);
       res.json({ ok: true, row: rows[0] || null });
     } catch (e) {
@@ -222,6 +226,7 @@ export function makeMpaisaController(pool) {
            updated_at = CURRENT_TIMESTAMP`,
         [values]
       );
+      invalidateContacts(); // email campaigns read this table
 
       const inserted = rows.filter((r) => !existingSet.has(r.number)).length;
       const updated = rows.length - inserted;

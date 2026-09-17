@@ -187,7 +187,7 @@ export async function loadSmtpTransport(dbPool) {
   return _cachedSmtp;
 }
 
-function esc(s) {
+export function esc(s) {
   return String(s ?? "").replace(/[&<>"]/g, (ch) =>
     ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[ch])
   );
@@ -281,7 +281,7 @@ function linkFallback(url) {
  * The card's width is pinned three ways: the width attribute (what Outlook
  * obeys), max-width (lets other clients shrink), and align=center.
  */
-function shell({ preheader, title, subtitle, body }) {
+export function shell({ preheader, title, subtitle, body, footerHtml }) {
   // alt="" on purpose: the cell immediately to the right carries live
   // "Vodafone Fiji" text, so the mark is decorative. Screen readers skip the
   // duplicate, and a blocked image leaves a clean 44px gap instead of a red
@@ -370,8 +370,8 @@ function shell({ preheader, title, subtitle, body }) {
           <tr>
             <td align="center" valign="top" bgcolor="#f8f9fa" style="background-color:#f8f9fa;border-radius:0 0 ${CARD_RADIUS} ${CARD_RADIUS};padding:24px 30px;text-align:center;border-top:1px solid #eeeeee;font-family:${FONT};">
               <p style="color:#666666;font-family:${FONT};font-size:12px;line-height:19px;mso-line-height-rule:exactly;margin:0;">
-                Vodafone Fiji | Universal Service Obligation (USO)<br>
-                This is an automated message, please do not reply to this email.
+                ${footerHtml ?? `Vodafone Fiji | Universal Service Obligation (USO)<br>
+                This is an automated message, please do not reply to this email.`}
               </p>
             </td>
           </tr>

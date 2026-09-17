@@ -488,6 +488,89 @@ export async function getPool() {
       updated_by INT NULL,
       updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
+
+    // ── EMAIL CAMPAIGNS ─────────────────────────────────────────────────────
+    // Admin-written emails sent to the customers in mpaisa_mappings. A campaign
+    // is edited as a DRAFT and its content is frozen from the moment it is sent:
+    // nothing about a campaign that is going out, or has gone out, can change,
+    // so the record of what customers received stays true. Changing it means
+    // duplicating it into a new draft.
+    //
+    // The HTML is stored because, unlike receipts, a campaign cannot be
+    // re-rendered from other data. MEDIUMTEXT: pasted email HTML passes TEXT's
+    // 64 KB easily.
+    `CREATE TABLE IF NOT EXISTS email_campaigns (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      name VARCHAR(200) NOT NULL,
+      subject VARCHAR(255) NOT NULL DEFAULT '',
+      preheader VARCHAR(255) NOT NULL DEFAULT '',
+      heading VARCHAR(255) NOT NULL DEFAULT '',
+      subheading VARCHAR(255) NOT NULL DEFAULT '',
+      layout ENUM('branded','raw') NOT NULL DEFAULT 'branded',
+      body_html MEDIUMTEXT NULL,
+      body_text MEDIUMTEXT NULL,
+      -- { mode: 'all'|'selected', purchasersOnly, groupIds[], selected[] (emails) }
+      audience JSON NULL,
+      status ENUM('draft','sending','paused','sent','cancelled') NOT NULL DEFAULT 'draft',
+      last_error VARCHAR(512) NULL,
+      last_test_at DATETIME NULL,
+      last_test_to VARCHAR(512) NULL,
+      created_by INT NULL,
+      created_by_email VARCHAR(255) NULL,
+      started_by INT NULL,
+      started_by_email VARCHAR(255) NULL,
+      started_at DATETIME NULL,
+      completed_at DATETIME NULL,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      INDEX idx_status (status),
+      INDEX idx_updated (updated_at)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
+
+    // One row per inbox per campaign, written when the campaign is SENT: the
+    // audience is frozen then, so an M-PAiSA re-import mid-send cannot add,
+    // drop or double anybody. UNIQUE(campaign_id, email_norm) makes one inbox
+    // one email however many numbers share it. The sender claims rows one at a
+    // time, so a restart resumes where it stopped instead of starting over.
+    // Contact details are copied in: the mapping row may change later.
+    //
+    // email_norm is compared BYTE FOR BYTE (utf8mb4_bin). The key is built in
+    // JavaScript by lower-casing; under the table's accent-insensitive default
+    // collation "jose@" and "josé@" would collide in the unique key and one of
+    // two confirmed recipients would be silently dropped.
+    `CREATE TABLE IF NOT EXISTS email_campaign_recipients (
+      id BIGINT AUTO_INCREMENT PRIMARY KEY,
+      campaign_id INT NOT NULL,
+      email VARCHAR(255) NOT NULL,
+      email_norm VARCHAR(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL,
+      phone VARCHAR(32) NULL,
+      village VARCHAR(255) NULL,
+      status ENUM('queued','sending','sent','failed','skipped') NOT NULL DEFAULT 'queued',
+      attempts TINYINT UNSIGNED NOT NULL DEFAULT 0,
+      next_attempt_at DATETIME NULL,
+      error VARCHAR(512) NULL,
+      message_id VARCHAR(255) NULL,
+      sent_at DATETIME NULL,
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      UNIQUE KEY uniq_campaign_email (campaign_id, email_norm),
+      INDEX idx_campaign_status (campaign_id, status),
+      INDEX idx_status_next (status, next_attempt_at)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
+
+    // Addresses an admin has excluded from every campaign (someone who asked
+    // not to be emailed, a staff inbox, a known-bad address). Keyed on the
+    // lower-cased email — an inbox, not a number — and kept apart from
+    // mpaisa_mappings so a later report import cannot bring an excluded address
+    // back. Checked when the audience is frozen AND again immediately before
+    // each send.
+    `CREATE TABLE IF NOT EXISTS email_suppressions (
+      email_norm VARCHAR(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL PRIMARY KEY,
+      email VARCHAR(255) NOT NULL,
+      note VARCHAR(255) NULL,
+      created_by INT NULL,
+      created_by_email VARCHAR(255) NULL,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
   ];
 
   for (const sql of tableCreations) {

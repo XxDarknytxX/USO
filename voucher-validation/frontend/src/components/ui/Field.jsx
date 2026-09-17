@@ -169,26 +169,40 @@ export function Toggle({ checked, onChange, label, hint, disabled, id }) {
 }
 
 /* ------------ Tag input (chip list) -------------------------------------- */
+// Opt-in extras, all off by default so existing callers behave as before:
+//   commitOnBlur — text still in the box when focus leaves becomes a chip, so
+//                  "typed an address, clicked Send" does not silently drop it.
+//   splitOnComma — "a@x.fj, b@y.fj" (typed or pasted) becomes two chips, and a
+//                  typed comma commits like Enter.
+//   inputLabel   — accessible name for the text box.
 export function TagInput({
   value = [],
   onChange,
   placeholder = "Type and press Enter…",
   className = "",
+  commitOnBlur = false,
+  splitOnComma = false,
+  inputLabel,
 }) {
   const [draft, setDraft] = useState("");
   const ref = useRef(null);
 
-  function add() {
-    const tag = draft.trim();
-    if (tag && !value.includes(tag)) onChange?.([...value, tag]);
+  function add({ refocus = true } = {}) {
+    const parts = splitOnComma ? draft.split(/[,;\s]+/) : [draft];
+    const next = [...value];
+    for (const part of parts) {
+      const tag = part.trim();
+      if (tag && !next.includes(tag)) next.push(tag);
+    }
+    if (next.length !== value.length) onChange?.(next);
     setDraft("");
-    ref.current?.focus();
+    if (refocus) ref.current?.focus();
   }
   function remove(tag) {
     onChange?.(value.filter((t) => t !== tag));
   }
   function onKey(e) {
-    if (e.key === "Enter") {
+    if (e.key === "Enter" || (splitOnComma && e.key === ",")) {
       e.preventDefault();
       add();
     } else if (e.key === "Backspace" && !draft && value.length) {
@@ -236,6 +250,8 @@ export function TagInput({
         value={draft}
         onChange={(e) => setDraft(e.target.value)}
         onKeyDown={onKey}
+        onBlur={commitOnBlur ? () => { if (draft.trim()) add({ refocus: false }); } : undefined}
+        aria-label={inputLabel}
         placeholder={value.length === 0 ? placeholder : ""}
         className="flex-1 min-w-[120px] bg-transparent text-[13px] outline-none placeholder:text-[var(--text-quaternary)] py-0.5 text-[var(--text-primary)]"
       />

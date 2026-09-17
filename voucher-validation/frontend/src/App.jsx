@@ -24,6 +24,8 @@ const MpaisaMappingPage = lazy(() => import("./pages/MpaisaMappingPage"));
 const MaintenancePage = lazy(() => import("./pages/MaintenancePage"));
 const BillingPage = lazy(() => import("./pages/BillingPage"));
 const VillageProfilePage = lazy(() => import("./pages/VillageProfilePage"));
+const EmailCampaignsPage = lazy(() => import("./pages/EmailCampaignsPage"));
+const EmailCampaignEditor = lazy(() => import("./pages/EmailCampaignEditor"));
 
 function ProtectedRoute({ children }) {
   const token = localStorage.getItem("token");
@@ -92,6 +94,10 @@ export default function App() {
             {/* Profile: every signed-in user (incl. viewers) — not admin-gated. */}
             <Route path="/profile" element={<ProfilePage />} />
             <Route path="/mpaisa" element={<AdminRoute><MpaisaMappingPage /></AdminRoute>} />
+            {/* Email campaigns to the customers in the M-PAiSA mapping. Admin
+                only, like the mapping it reads from; the server enforces it. */}
+            <Route path="/email-campaigns" element={<AdminRoute><EmailCampaignsPage /></AdminRoute>} />
+            <Route path="/email-campaigns/:id" element={<AdminRoute><EmailCampaignEditor /></AdminRoute>} />
             <Route path="/billing" element={<BillingRoute><BillingPage /></BillingRoute>} />
             {/* Every role: admins and engineers file, viewers read. The server
                 enforces the same split by HTTP method. */}

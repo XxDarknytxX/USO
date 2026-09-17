@@ -36,6 +36,11 @@ export async function api(path, { method = "GET", body, auth = true, headers } =
     // was the network that failed.
     const err = new Error(data.error || `HTTP ${res.status}`);
     err.status = res.status;
+    // The parsed body rides along too, for the few endpoints whose error says
+    // more than a sentence — a campaign send refused with 409 carries the
+    // audience's NEW size, which the confirmation has to show before asking
+    // again. `{}` when the response had no JSON body.
+    err.data = data;
     throw err;
   }
   return data;
@@ -280,6 +285,64 @@ export const mpaisaApi = {
   // (the number is the primary key and is itself editable).
   update: (original, row) =>
     api(`/mpaisa/${encodeURIComponent(original)}`, { method: "PUT", body: row }),
+};
+
+// Email campaigns. Admin only; the recipients are the inboxes in the M-PAiSA
+// mapping, deduplicated by address. Blank filters are dropped from the query
+// string so "any" is never sent as an empty `search=` the server has to guess
+// about.
+function campaignQuery(params = {}) {
+  const clean = Object.fromEntries(
+    Object.entries(params)
+      .map(([k, v]) => [k, Array.isArray(v) ? v.join(",") : v])
+      .filter(([, v]) => v !== undefined && v !== null && v !== "")
+  );
+  const qs = new URLSearchParams(clean).toString();
+  return qs ? `?${qs}` : "";
+}
+
+const campaignPath = (id, tail = "") => `/campaigns/${encodeURIComponent(id)}${tail}`;
+
+export const campaignApi = {
+  // params: { status: 'all'|'draft'|'active'|'done', search }
+  list: (params = {}) => api(`/campaigns${campaignQuery(params)}`),
+  // { contacts, purchasers, suppressed, sendPerMinute, smtp: { configured, enabled, from } }
+  stats: () => api("/campaigns/stats"),
+  create: (body = {}) => api("/campaigns", { method: "POST", body }),
+  get: (id) => api(campaignPath(id)),
+  // Drafts only — anything else is refused with 409.
+  update: (id, body) => api(campaignPath(id), { method: "PUT", body }),
+  remove: (id) => api(campaignPath(id), { method: "DELETE" }),
+  duplicate: (id) => api(campaignPath(id, "/duplicate"), { method: "POST", body: {} }),
+
+  // Renders unsaved content for a sample contact. Not tied to a campaign id, so
+  // the editor can preview what is on screen rather than what was last saved.
+  preview: (content) => api("/campaigns/preview", { method: "POST", body: content }),
+  // params: { search, purchasersOnly, groupIds: string[], page, pageSize }
+  contacts: (params = {}) => api(`/campaigns/contacts${campaignQuery(params)}`),
+  // Who would receive it right now: { count, suppressedExcluded, sample }
+  audienceCount: (audience) =>
+    api("/campaigns/audience-count", { method: "POST", body: { audience } }),
+
+  // Sends the SAVED draft to 1-5 addresses. 502 when every address failed.
+  testSend: (id, to) => api(campaignPath(id, "/test"), { method: "POST", body: { to } }),
+  // expectedCount is the number the admin confirmed. If the audience resolves to
+  // anything else by now the server answers 409 with `{ error, count }` (see
+  // err.data) instead of sending to people nobody agreed to.
+  send: (id, expectedCount) =>
+    api(campaignPath(id, "/send"), { method: "POST", body: { expectedCount } }),
+  pause: (id) => api(campaignPath(id, "/pause"), { method: "POST", body: {} }),
+  resume: (id) => api(campaignPath(id, "/resume"), { method: "POST", body: {} }),
+  cancel: (id) => api(campaignPath(id, "/cancel"), { method: "POST", body: {} }),
+  retryFailed: (id) => api(campaignPath(id, "/retry-failed"), { method: "POST", body: {} }),
+  // params: { status: 'all'|'queued'|'sent'|'failed'|'skipped', search, page, pageSize }
+  recipients: (id, params = {}) => api(campaignPath(id, `/recipients${campaignQuery(params)}`)),
+
+  // The suppression list: addresses no campaign will ever send to.
+  suppressions: (params = {}) => api(`/campaigns/suppressions${campaignQuery(params)}`),
+  addSuppression: (email, note) => api("/campaigns/suppressions", { method: "POST", body: { email, note } }),
+  removeSuppression: (email) =>
+    api(`/campaigns/suppressions/${encodeURIComponent(email)}`, { method: "DELETE" }),
 };
 
 // Service maintenance API. Photos go up base64 in the JSON body, already

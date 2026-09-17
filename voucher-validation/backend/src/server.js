@@ -30,6 +30,9 @@ import { makeAttachScope } from "./middleware/auth.js";
 import { reportEncryptionStatus } from "./services/secretBox.js";
 import { pruneTwoFactorEvents } from "./services/twoFactorLog.js";
 import { makeBillingRouter } from "./routes/billing.js";
+import { makeCampaignRouter } from "./routes/campaigns.js";
+import { makeCampaignController } from "./controllers/campaignController.js";
+import { makeCampaignSender } from "./services/campaignSender.js";
 
 const app = express();
 
@@ -73,6 +76,8 @@ app.use("/api/maintenance", (req, res, next) => {
   const isDocUpload = req.method === "POST" && /\/documents\/?$/.test(req.path);
   return isDocUpload ? next() : express.json({ limit: "15mb" })(req, res, next);
 });
+// Campaign drafts carry a whole HTML email.
+app.use("/api/campaigns", express.json({ limit: "5mb" }));
 app.use(express.json());
 
 // Boot env check (presence only — never log secret values)
@@ -132,6 +137,11 @@ app.use("/api/system", makeSystemRouter(pool));
 app.use("/api/mpaisa", makeMpaisaRouter(mpaisa));
 app.use("/api/maintenance", makeMaintenanceRouter(maintenance, attachScope));
 app.use("/api/billing", makeBillingRouter(pool, attachScope));
+// Email campaigns (admin only). The sender is created here so the routes can
+// wake it; it only RUNS on the primary instance (started below with the other
+// schedulers).
+const campaignSender = makeCampaignSender({ pool });
+app.use("/api/campaigns", makeCampaignRouter(makeCampaignController(pool, campaignSender)));
 
 // Health check (no secrets exposed)
 app.get("/health", (_req, res) =>
@@ -155,6 +165,14 @@ if (_isSchedulerPrimary) {
   syncScheduler.start().catch((e) => console.error("Sync scheduler failed to start:", e.message));
 } else {
   console.log(`[SyncScheduler] instance ${_instanceId} is not primary — scheduler not started`);
+}
+
+// Email campaign delivery. One sender for the deployment, like the schedulers:
+// two would each take their own slice of the 30-a-minute mailbox allowance.
+if (_isSchedulerPrimary) {
+  campaignSender.start().catch((e) => console.error("Campaign sender failed to start:", e.message));
+} else {
+  console.log(`[Campaigns] instance ${_instanceId} is not primary — sender not started`);
 }
 
 // Keep the two-factor audit trail from growing forever. It takes a row on every

@@ -394,7 +394,13 @@ function CheckRow({ checked, disabled, title, subtitle, note, mono = true, onCli
 }
 
 export default function SettingsPage() {
-  const [tab, setTab] = useState("general");
+  // ?tab=email opens straight onto a tab — other pages link here to fix one
+  // thing (Email Campaigns → "Email sending is turned off"). Unknown values fall
+  // back to General.
+  const [tab, setTab] = useState(() => {
+    const wanted = new URLSearchParams(window.location.search).get("tab");
+    return TABS.some((t) => t.value === wanted) ? wanted : "general";
+  });
   const [settings, setSettings] = useState([]); // eslint-disable-line no-unused-vars -- raw rows, kept for future keys
   const [loading, setLoading] = useState(true); // eslint-disable-line no-unused-vars
   // Details are shown by default; the button masks them for screen-sharing.
@@ -981,16 +987,21 @@ export default function SettingsPage() {
           <>
             <Panel
               title="Email (SMTP)"
-              subtitle="Outgoing mail server. Receipts and manual-assistance emails are sent through this account."
+              subtitle="Outgoing mail server. Receipts, manual-assistance emails and email campaigns are sent through this account."
               icon={<Mail size={15} />}
               tone="blue"
               padding={false}
             >
               <FormBody>
                 <SettingRow
-                  title="Enable email sending"
+                  title="Allow email campaigns"
                   description={
-                    smtp.enabled ? "The app may send email once the feature is live." : "Email sending is off."
+                    // What this switch actually governs. Receipts, manual-assistance
+                    // and account emails are sent whenever SMTP is configured; this
+                    // is the kill switch for bulk campaign sending only.
+                    smtp.enabled
+                      ? "Campaigns can be sent. Turning this off pauses any campaign at its next email."
+                      : "Campaigns cannot be sent. Receipts and account emails still go out."
                   }
                 >
                   <Toggle checked={smtp.enabled} onChange={(v) => setSmtpField("enabled", v)} />
