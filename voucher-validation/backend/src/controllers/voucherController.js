@@ -283,6 +283,11 @@ async function upsertVoucher(pool, voucherData) {
     disable_status, raw_data,
   } = voucherData;
 
+  // user_group_id is kept when an update brings none. A voucher never moves
+  // between user groups, but the Excel export carries only the group's name and
+  // the id is resolved from it; after a rename in Ruijie the name stops
+  // resolving, and blanking the id would make the plan's stock read zero until
+  // someone re-saved the plan.
   const [result] = await pool.query(
     `INSERT INTO vouchers (
       uuid, tenant_id, voucher_code, name_ref, package_name, time_period, used_time,
@@ -298,7 +303,9 @@ async function upsertVoucher(pool, voucherData) {
       max_clients = VALUES(max_clients), current_clients = VALUES(current_clients), quota = VALUES(quota),
       used_quota = VALUES(used_quota), status = VALUES(status), qrcode_url = VALUES(qrcode_url),
       download_rate_limit = VALUES(download_rate_limit), upload_rate_limit = VALUES(upload_rate_limit),
-      bind_mac = VALUES(bind_mac), user_group_id = VALUES(user_group_id), user_group_name = VALUES(user_group_name),
+      bind_mac = VALUES(bind_mac),
+      user_group_id = COALESCE(NULLIF(VALUES(user_group_id), ''), user_group_id),
+      user_group_name = VALUES(user_group_name),
       group_id = VALUES(group_id),
       first_name = VALUES(first_name), last_name = VALUES(last_name), email = VALUES(email),
       phone = VALUES(phone), comment = VALUES(comment), disable_status = VALUES(disable_status),
@@ -881,75 +888,122 @@ export function makeVoucherController(pool) {
       } catch (e) { console.error(e); return send.serverErr(res); }
     },
 
+    // GET /api/vouchers/user-groups?groupId=<village Ruijie group id>
+    //
+    // The user groups a plan or a voucher batch can be mapped to, with their
+    // allocation LIVE from Ruijie (quota MB, time period minutes, rates Kbps,
+    // 0 = no limit). One Ruijie call per request: the console asks when a plan
+    // form opens or an admin presses Refresh, never on a timer.
+    //
+    // Two sources, merged by group id:
+    //   • the voucher mirror — every group that has vouchers, with a count;
+    //   • Ruijie — every group that exists, with its current name and figures.
+    // Ruijie's name wins: a group renamed in Ruijie must show its new name, or a
+    // plan saved from this list keeps the old one and stops matching its own
+    // vouchers after the next sync. The mirror's name is kept as localName.
+    //
+    // When Ruijie cannot be reached the list is the mirror alone, every figure is
+    // null, and cloudSync:false + cloudError say so. The console must not mistake
+    // that for "this group has no limits".
     getUserGroups: async (req, res) => {
       try {
         const groupId = req.query.groupId || null;
-        // Primary source: distinct user groups already synced into local DB (per-site if given)
         const dbWhere = groupId
           ? "user_group_id IS NOT NULL AND user_group_id != '' AND group_id = ?"
           : "user_group_id IS NOT NULL AND user_group_id != ''";
-        const [dbGroups] = await pool.query(`
-          SELECT DISTINCT user_group_id, user_group_name,
+        const [dbRows] = await pool.query(`
+          SELECT user_group_id, user_group_name,
             AVG(time_period) AS avg_time_period,
-            COUNT(*) AS voucher_count
+            COUNT(*) AS voucher_count,
+            MAX(create_time) AS newest
           FROM vouchers
           WHERE ${dbWhere}
           GROUP BY user_group_id, user_group_name
           ORDER BY user_group_name
         `, groupId ? [groupId] : []);
 
-        // Also try Ruijie API for richer data (e.g. authprofileid / profile UUID)
-        let cloudGroups = [];
-        let cloudSync = false;
-        try {
-          const result = await ruijieService.getUserGroups({ groupId });
-          cloudGroups = result.data || [];
-          cloudSync = result.cloudSync ?? false;
-        } catch (_) { /* cloud unavailable, use DB only */ }
-
-        // Merge: if cloud returned data, enrich DB groups with authProfileId
-        const merged = dbGroups.map(dbg => {
-          const match = cloudGroups.find(
-            cg => String(cg.id) === String(dbg.user_group_id)
-          );
-          return {
-            id: dbg.user_group_id,
-            userGroupId: dbg.user_group_id,
-            name: dbg.user_group_name,
-            userGroupName: dbg.user_group_name,
-            avgTimePeriod: dbg.avg_time_period,
-            voucherCount: dbg.voucher_count,
-            authProfileId: match?.authProfileId || null,
-            timePeriod: match?.timePeriod || null,
-            quota: match?.quota || null,
-            downloadRateLimit: match?.downloadRateLimit || null,
-            uploadRateLimit: match?.uploadRateLimit || null,
-            noOfDevice: match?.noOfDevice || null,
-          };
-        });
-
-        // If cloud returned groups not in DB, append them too
-        for (const cg of cloudGroups) {
-          const cgId = String(cg.id);
-          if (!merged.find(m => String(m.id) === cgId)) {
-            merged.push({
-              id: cgId,
-              userGroupId: cgId,
-              name: cg.name || cg.userGroupName || `Group ${cgId}`,
-              userGroupName: cg.name || cg.userGroupName || `Group ${cgId}`,
-              avgTimePeriod: cg.timePeriod || null,
-              voucherCount: 0,
-              authProfileId: cg.authProfileId || null,
-              timePeriod: cg.timePeriod || null,
-              quota: cg.quota || null,
-              downloadRateLimit: cg.downloadRateLimit || null,
-              uploadRateLimit: cg.uploadRateLimit || null,
-              noOfDevice: cg.noOfDevice || null,
-            });
+        // One entry per id. Vouchers made before and after a rename carry two
+        // names for one group; the newest batch's name is the current one.
+        const byId = new Map();
+        for (const r of dbRows) {
+          const id = String(r.user_group_id);
+          const count = Number(r.voucher_count) || 0;
+          const prev = byId.get(id);
+          if (!prev) {
+            byId.set(id, { id, name: r.user_group_name, newest: r.newest, count, periodSum: Number(r.avg_time_period || 0) * count });
+            continue;
           }
+          // create_time is epoch milliseconds (BIGINT).
+          if (Number(r.newest) > Number(prev.newest || 0)) {
+            prev.name = r.user_group_name;
+            prev.newest = r.newest;
+          }
+          prev.count += count;
+          prev.periodSum += Number(r.avg_time_period || 0) * count;
         }
 
-        return send.ok(res, { userGroups: merged, cloudSync });
+        // While Ruijie is throttling the account (code 44), asking again only
+        // burns the quota customer voucher calls share and extends the pause.
+        const cloud = typeof ruijieService.isThrottled === 'function' && ruijieService.isThrottled()
+          ? { cloudSync: false, data: [], error: 'Ruijie is rate-limiting requests right now — try again in a few minutes' }
+          : await ruijieService.getUserGroups({ groupId });
+        const cloudSync = cloud?.cloudSync === true;
+        const cloudGroups = Array.isArray(cloud?.data) ? cloud.data : [];
+        const cloudById = new Map(cloudGroups.map((cg) => [String(cg.id), cg]));
+
+        // `?? null`, not `|| null`: 0 is Ruijie's "no limit", not "unknown".
+        const figures = (cg) => ({
+          authProfileId: cg?.authProfileId ?? null,
+          timePeriod: cg?.timePeriod ?? null,
+          quota: cg?.quota ?? null,
+          downloadRateLimit: cg?.downloadRateLimit ?? null,
+          uploadRateLimit: cg?.uploadRateLimit ?? null,
+          noOfDevice: cg?.noOfDevice ?? null,
+        });
+
+        const merged = [];
+        for (const g of byId.values()) {
+          const cg = cloudById.get(g.id);
+          const name = cg?.name || cg?.userGroupName || g.name;
+          merged.push({
+            id: g.id,
+            userGroupId: g.id,
+            name,
+            userGroupName: name,
+            localName: g.name,
+            inRuijie: cloudSync ? !!cg : null,
+            avgTimePeriod: g.count ? g.periodSum / g.count : null,
+            voucherCount: g.count,
+            ...figures(cg),
+          });
+        }
+        for (const cg of cloudGroups) {
+          const id = String(cg.id);
+          if (byId.has(id)) continue;
+          const name = cg.name || cg.userGroupName || `Group ${id}`;
+          merged.push({
+            id,
+            userGroupId: id,
+            name,
+            userGroupName: name,
+            localName: null,
+            inRuijie: true,
+            avgTimePeriod: cg.timePeriod ?? null,
+            voucherCount: 0,
+            ...figures(cg),
+          });
+        }
+
+        // Always the current answer: a plan form must never be filled from a
+        // response the browser kept.
+        res.set('Cache-Control', 'no-store');
+        return send.ok(res, {
+          userGroups: merged,
+          cloudSync,
+          cloudError: cloudSync ? null : cloud?.error || 'Ruijie could not be reached',
+          groupId,
+          fetchedAt: new Date().toISOString(),
+        });
       } catch (e) { console.error(e); return send.serverErr(res, e.message); }
     },
 

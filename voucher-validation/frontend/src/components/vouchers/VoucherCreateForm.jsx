@@ -121,7 +121,9 @@ export default function VoucherCreateForm({ groupId, siteName, onClose, onCreate
               <div
                 role="radiogroup"
                 aria-label="Voucher profile"
-                className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-[280px] overflow-y-auto pr-1"
+                // Phone: no inner scroll box. The sheet body already scrolls,
+                // and a scroll area inside a scrolling sheet traps the thumb.
+                className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-[280px] overflow-y-auto pr-1 max-sm:max-h-none max-sm:overflow-visible max-sm:pr-0"
               >
                 {userGroups.map((g) => {
                   const gid = String(g.id || g.userGroupId);
@@ -140,8 +142,10 @@ export default function VoucherCreateForm({ groupId, siteName, onClose, onCreate
 
           {/* Quantity */}
           <Field label="Quantity" required hint="Between 1 and 100. Each voucher gets a unique code.">
-            <div className="flex flex-wrap items-center gap-3">
-              <div className="flex items-center gap-2">
+            {/* Phone: the stepper spans the row (input takes the slack) and the
+                quick picks sit under it as equal, thumb-sized segments. */}
+            <div className="flex flex-wrap items-center gap-3 max-sm:flex-col max-sm:items-stretch">
+              <div className="flex items-center gap-2 max-sm:w-full">
                 <QtyStepButton onClick={() => setQuantity(Math.max(1, quantity - 1))} aria-label="Decrease quantity">
                   <Minus size={14} />
                 </QtyStepButton>
@@ -154,7 +158,7 @@ export default function VoucherCreateForm({ groupId, siteName, onClose, onCreate
                   value={quantity}
                   onChange={(e) => setQuantity(Math.max(1, Math.min(100, Number(e.target.value) || 1)))}
                   aria-label="Quantity"
-                  className="text-center w-20 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                  className="text-center w-20 max-sm:flex-1 max-sm:min-w-0 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
                 />
 
                 <QtyStepButton onClick={() => setQuantity(Math.min(100, quantity + 1))} aria-label="Increase quantity">
@@ -168,7 +172,7 @@ export default function VoucherCreateForm({ groupId, siteName, onClose, onCreate
                 value={quantity}
                 onChange={(n) => setQuantity(n)}
                 options={QUICK_QTYS.map((n) => ({ value: n, label: String(n) }))}
-                className="ml-auto"
+                className="ml-auto max-sm:ml-0 max-sm:w-full max-sm:[&>button]:flex-1 max-sm:[&>button]:justify-center max-sm:[&>button]:h-9"
               />
             </div>
           </Field>
@@ -176,7 +180,9 @@ export default function VoucherCreateForm({ groupId, siteName, onClose, onCreate
       </Modal.Body>
 
       <Modal.Footer>
-        <span className="mr-auto text-[12.5px] text-[var(--fg-muted)] min-w-0 truncate">
+        {/* Phone: the summary takes its own line and the two buttons share the
+            next one equally, so the primary action is wide and easy to hit. */}
+        <span className="mr-auto text-[12.5px] text-[var(--fg-muted)] min-w-0 truncate max-sm:basis-full max-sm:mr-0">
           {selectedGroup ? (
             <>
               {(selectedGroup.name || selectedGroup.userGroupName) + " · "}
@@ -188,12 +194,13 @@ export default function VoucherCreateForm({ groupId, siteName, onClose, onCreate
             "No profile selected"
           )}
         </span>
-        <Button variant="secondary" size="sm" onClick={onClose} disabled={submitting}>
+        <Button variant="secondary" size="sm" onClick={onClose} disabled={submitting} className="max-sm:flex-1">
           Cancel
         </Button>
         <Button
           variant="primary"
           size="sm"
+          className="max-sm:flex-[2]"
           onClick={handleSubmit}
           loading={submitting}
           disabled={loadingGroups || !selectedGroup}
@@ -251,7 +258,7 @@ function ProfileCard({ group, selected, onSelect }) {
             )}
             {group.noOfDevice != null && (
               <span className="flex items-center gap-1 tabular-nums">
-                <Users size={11} /> {group.noOfDevice} dev
+                <Users size={11} /> {Number(group.noOfDevice) === 0 ? "Any devices" : `${group.noOfDevice} dev`}
               </span>
             )}
             {group.voucherCount > 0 && (
@@ -284,7 +291,7 @@ function QtyStepButton({ children, ...props }) {
       type="button"
       {...props}
       className={
-        "h-10 w-10 flex items-center justify-center rounded-full " +
+        "h-10 w-10 shrink-0 flex items-center justify-center rounded-full " +
         "bg-[var(--surface)] border border-[var(--input-border)] " +
         "text-[var(--fg-secondary)] shadow-[var(--shadow-xs)] " +
         "hover:bg-[var(--bg-surface)] hover:text-[var(--fg-primary)] " +
@@ -311,8 +318,10 @@ function ProfileSkeleton() {
 }
 
 /* ------------ Formatters -------------------------------------------------- */
+// Ruijie uses 0 for "no limit" on a user group.
 function formatTime(minutes) {
   const m = Number(minutes || 0);
+  if (m === 0) return "No expiry";
   if (m < 60) return `${m} min`;
   if (m < 1440) return `${Math.round(m / 60)} h`;
   return `${Math.round(m / 1440)} d`;
@@ -320,6 +329,7 @@ function formatTime(minutes) {
 
 function formatQuota(mb) {
   const val = Number(mb || 0);
+  if (val === 0) return "Unlimited data";
   if (val < 1024) return `${val} MB`;
   return `${(val / 1024).toFixed(1)} GB`;
 }

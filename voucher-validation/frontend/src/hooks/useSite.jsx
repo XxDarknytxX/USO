@@ -7,7 +7,7 @@
 //     which villages to show. null → all; an array → that subset.
 //
 // The display filter comes in two layers:
-//   • globalVisibleSiteIds — the ESTATE DEFAULT, set once by an admin under
+//   • globalVisibleSiteIds — the ESTATE DEFAULT, set once by the superadmin under
 //     Settings and applied to everyone who has not chosen otherwise. This is
 //     where a test village is taken out of the console for the whole team.
 //   • visibleSiteIds — the PERSONAL override, this account's own choice. An

@@ -16,7 +16,7 @@ import { useState, useEffect, useMemo } from "react";
 import toast from "react-hot-toast";
 import {
   Users, UserPlus, Trash2, Shield, Eye, EyeOff, Edit3, RefreshCw, KeyRound,
-  ShieldOff, Send, Check, Wrench, Globe2, Mail, User as UserIcon,
+  ShieldOff, ShieldCheck, Send, Check, Wrench, Globe2, Mail, User as UserIcon,
   MailCheck, AlertTriangle, Copy, Clock,
   LayoutDashboard, Gauge, Dices, Receipt,
 } from "lucide-react";
@@ -91,14 +91,24 @@ const ROLES = {
     icon: Shield,
     tone: "brand",
     tile: "violet",
-    blurb: "Every village, every setting, every voucher — and these accounts.",
+    blurb: "Every village, voucher and account. The estate default, credentials, schedules and security policy stay with the superadmin.",
+    opens: [{ label: "Everything else", Icon: Globe2 }],
+    scoped: false,
+  },
+  superadmin: {
+    label: "Superadmin",
+    icon: ShieldCheck,
+    tone: "danger",
+    tile: "red",
+    blurb: "Everything an administrator can do, plus the estate default for everyone, email and Starlink credentials, schedules, security policy and superadmin accounts.",
     opens: [{ label: "Everything", Icon: Globe2 }],
     scoped: false,
   },
 };
 
 // Least privilege first, so the picker reads as a ladder rather than a menu.
-const ROLE_ORDER = ["viewer", "engineer", "billing", "admin"];
+// Superadmin is offered only to a superadmin; the server enforces the same.
+const ROLE_ORDER = ["viewer", "engineer", "billing", "admin", "superadmin"];
 
 function roleOf(role) {
   return (
@@ -239,7 +249,7 @@ export default function UsersPage() {
   const [linkHours, setLinkHours] = useState({ invite: 8, reset: 2 });
   const [query, setQuery] = useState("");
   const [roleFilter, setRoleFilter] = useState("all");
-  const { email: currentEmail } = useAuth();
+  const { email: currentEmail, isSuperadmin } = useAuth();
 
   async function loadUsers() {
     try {
@@ -332,14 +342,18 @@ export default function UsersPage() {
 
   const counts = useMemo(() => {
     const c = { all: users.length, admin: 0, viewer: 0, engineer: 0, billing: 0 };
-    for (const u of users) if (c[u.role] != null) c[u.role] += 1;
+    // Superadmins are administrators: they count, and filter, with the admins.
+    for (const u of users) {
+      const key = u.role === "superadmin" ? "admin" : u.role;
+      if (c[key] != null) c[key] += 1;
+    }
     return c;
   }, [users]);
 
   const shown = useMemo(() => {
     const needle = query.trim().toLowerCase();
     return users.filter((u) => {
-      if (roleFilter !== "all" && u.role !== roleFilter) return false;
+      if (roleFilter !== "all" && (u.role === "superadmin" ? "admin" : u.role) !== roleFilter) return false;
       if (!needle) return true;
       return (
         String(u.email || "").toLowerCase().includes(needle) ||
@@ -442,6 +456,9 @@ export default function UsersPage() {
                 shown.map((u) => {
                   const r = roleOf(u.role);
                   const isSelf = u.email === currentEmail;
+                  // A superadmin account is managed only by a superadmin (the
+                  // server refuses anyone else), so an admin sees it read-only.
+                  const locked = u.role === "superadmin" && !isSuperadmin;
                   // Waiting on a link — onboarding or reset, live or lapsed.
                   const awaiting = u.status !== "active";
                   return (
@@ -475,6 +492,9 @@ export default function UsersPage() {
                       </Td>
                       <Td><StatusCell user={u} /></Td>
                       <Td align="right">
+                        {locked ? (
+                          <span className="px-2 text-[11.5px] italic text-[var(--fg-subtle)]">managed by a superadmin</span>
+                        ) : (
                         <div className="flex items-center justify-end gap-1">
                           <IconButton onClick={() => setEditTarget(u)} size="sm" title="Edit user" aria-label={`Edit ${u.email}`}>
                             <Edit3 size={14} />
@@ -542,6 +562,7 @@ export default function UsersPage() {
                             </IconButton>
                           )}
                         </div>
+                        )}
                       </Td>
                     </tr>
                   );
@@ -698,6 +719,7 @@ const rowInput =
    through a wizard to do it.
    ========================================================================= */
 function UserFormModal({ mode, user, onClose, onSaved }) {
+  const { isSuperadmin } = useAuth();
   const isEdit = mode === "edit";
   const [form, setForm] = useState({
     email: user?.email || "",
@@ -839,7 +861,7 @@ function UserFormModal({ mode, user, onClose, onSaved }) {
 
   const rolePicker = (
     <div className="flex flex-col gap-2.5">
-      {ROLE_ORDER.map((value) => {
+      {ROLE_ORDER.filter((value) => value !== "superadmin" || isSuperadmin).map((value) => {
         const opt = ROLES[value];
         const selected = form.role === value;
         const Icon = opt.icon;

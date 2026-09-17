@@ -86,7 +86,7 @@ async function findUserByEmail(pool, email) {
 
 // The only roles that may ever be written. Anything else falls back to the
 // least-privileged one, so an unrecognised value can never grant access.
-const ROLES = new Set(["admin", "viewer", "engineer", "billing"]);
+const ROLES = new Set(["superadmin", "admin", "viewer", "engineer", "billing"]);
 export function safeRoleOf(role) {
   return ROLES.has(role) ? role : "viewer";
 }
@@ -95,7 +95,24 @@ export function safeRoleOf(role) {
 // question: it is the estate default under Settings, read by attachScope. Must
 // agree with SCOPED_ROLES in middleware/auth.js.
 const SCOPED_ROLES = new Set(["viewer", "engineer", "billing"]);
-const ROLE_LABELS = { admin: "administrator", viewer: "viewer", engineer: "field engineer", billing: "billing user" };
+const ROLE_LABELS = { superadmin: "superadmin", admin: "administrator", viewer: "viewer", engineer: "field engineer", billing: "billing user" };
+
+const isAdminLike = (role) => role === "admin" || role === "superadmin";
+
+/**
+ * Superadmin accounts are managed only by a superadmin: an admin can neither
+ * grant the role nor edit, reset or remove an account that holds it — or the
+ * role that governs the estate default and the credentials would be one admin
+ * edit away from anyone. Returns an error message, or null when allowed.
+ */
+function superadminGuard(actor, targetRole, newRole) {
+  if (actor?.role === "superadmin") return null;
+  if (targetRole === "superadmin" || newRole === "superadmin") {
+    return "Only a superadmin can manage superadmin accounts";
+  }
+  return null;
+}
+const forbidden = (res, msg) => res.status(403).json({ error: msg });
 
 
 async function insertUser(pool, { email, passwordHash, name, role }) {
@@ -319,6 +336,8 @@ export function makeAdminController(pool) {
         const [rows] = await pool.query("SELECT id, email, name, role FROM users WHERE id = ?", [req.params.id]);
         const user = rows[0];
         if (!user) return send.notFound(res, "User not found");
+        const denied = superadminGuard(req.user, user.role);
+        if (denied) return forbidden(res, denied);
 
         if (Number(user.id) === Number(req.user.id)) {
           return send.bad(
@@ -365,9 +384,11 @@ export function makeAdminController(pool) {
     // factor should be told, in case it was not them who asked.
     resetUserTwoFactor: async (req, res) => {
       try {
-        const [rows] = await pool.query("SELECT id, email, name, totp_enabled FROM users WHERE id = ?", [req.params.id]);
+        const [rows] = await pool.query("SELECT id, email, name, role, totp_enabled FROM users WHERE id = ?", [req.params.id]);
         const user = rows[0];
         if (!user) return send.notFound(res, "User not found");
+        const denied = superadminGuard(req.user, user.role);
+        if (denied) return forbidden(res, denied);
 
         // Resetting your OWN second factor with nothing but the session token
         // is a way around /2fa/disable, which asks for the password and refuses
@@ -417,6 +438,8 @@ export function makeAdminController(pool) {
         );
         const user = rows[0];
         if (!user) return send.notFound(res, "User not found");
+        const denied = superadminGuard(req.user, user.role);
+        if (denied) return forbidden(res, denied);
 
         const r = await sendPasswordLink(pool, user, "invite");
         if (r.sent) {
@@ -442,6 +465,9 @@ export function makeAdminController(pool) {
     // holds — which is the right state for "I invited the wrong person".
     revokeInvite: async (req, res) => {
       try {
+        const [[target]] = await pool.query("SELECT role FROM users WHERE id = ?", [req.params.id]);
+        const denied = superadminGuard(req.user, target?.role);
+        if (denied) return forbidden(res, denied);
         await revokeInvite(pool, Number(req.params.id));
         return send.ok(res, { success: true });
       } catch (e) {
@@ -761,13 +787,13 @@ export function makeAdminController(pool) {
 
     // GET /api/2fa/events — the audit trail.
     //
-    // An admin gets the estate-wide view; anybody else gets their own account
-    // and only their own. That second case is not a courtesy: the person best
+    // The superadmin gets the estate-wide view; anybody else — admins included —
+    // gets their own account and only their own. That second case is not a courtesy: the person best
     // placed to notice "I did not do that" is the account holder, and they
     // cannot notice it if they cannot see it.
     twoFactorEvents: async (req, res) => {
       try {
-        const mine = req.user.role !== "admin";
+        const mine = req.user.role !== "superadmin";
         const events = await readTwoFactorEvents(pool, {
           userId: mine ? req.user.id : req.query.userId ? Number(req.query.userId) : null,
           limit: req.query.limit,
@@ -899,7 +925,7 @@ export function makeAdminController(pool) {
           estateDefault = {
             mode: d.mode,
             updatedAt: d.updatedAt,
-            updatedByName: req.user?.role === "admin" ? d.updatedByName : null,
+            updatedByName: isAdminLike(req.user?.role) ? d.updatedByName : null,
           };
         } catch (e) {
           console.error("[prefs] global village default unreadable:", e.message);
@@ -1043,6 +1069,8 @@ export function makeAdminController(pool) {
       const { email, name, role } = req.body;
       const password = req.body.password || null;
       const effRole = safeRoleOf(role);
+      const deniedCreate = superadminGuard(req.user, null, effRole);
+      if (deniedCreate) return forbidden(res, deniedCreate);
 
       if (password && String(password).length < 6) {
         return send.bad(res, "A password you set must be at least 6 characters");
@@ -1155,15 +1183,30 @@ export function makeAdminController(pool) {
         // as something else.
         const effRole = role !== undefined ? safeRoleOf(role) : existing[0].role;
 
-        // Demoting the last admin leaves a console nobody can administer, and
-        // no amount of database access from the UI can undo it.
-        if (existing[0].role === "admin" && effRole !== "admin") {
+        const deniedUpdate = superadminGuard(req.user, existing[0].role, effRole);
+        if (deniedUpdate) {
+          conn.release();
+          return forbidden(res, deniedUpdate);
+        }
+
+        // Demoting the last administrator leaves a console nobody can
+        // administer, and no amount of database access from the UI can undo it.
+        if (isAdminLike(existing[0].role) && !isAdminLike(effRole)) {
           const [[{ admins }]] = await conn.query(
-            "SELECT COUNT(*) AS admins FROM users WHERE role = 'admin'"
+            "SELECT COUNT(*) AS admins FROM users WHERE role IN ('admin','superadmin')"
           );
           if (admins <= 1) {
             conn.release();
             return send.bad(res, "This is the only administrator — promote someone else first");
+          }
+        }
+        // Likewise the last superadmin: nobody else could change the estate
+        // default, the credentials or the security policy again.
+        if (existing[0].role === "superadmin" && effRole !== "superadmin") {
+          const [[{ supers }]] = await conn.query("SELECT COUNT(*) AS supers FROM users WHERE role = 'superadmin'");
+          if (supers <= 1) {
+            conn.release();
+            return send.bad(res, "This is the only superadmin — make someone else superadmin first");
           }
         }
         if (sets.length === 0) {
@@ -1202,12 +1245,20 @@ export function makeAdminController(pool) {
       try {
         const [[target]] = await pool.query("SELECT role FROM users WHERE id = ?", [targetId]);
         if (!target) return send.bad(res, "User not found");
-        if (target.role === "admin") {
+        const deniedDelete = superadminGuard(req.user, target.role);
+        if (deniedDelete) return forbidden(res, deniedDelete);
+        if (isAdminLike(target.role)) {
           const [[{ admins }]] = await pool.query(
-            "SELECT COUNT(*) AS admins FROM users WHERE role = 'admin'"
+            "SELECT COUNT(*) AS admins FROM users WHERE role IN ('admin','superadmin')"
           );
           if (admins <= 1) {
             return send.bad(res, "This is the only administrator — promote someone else first");
+          }
+        }
+        if (target.role === "superadmin") {
+          const [[{ supers }]] = await pool.query("SELECT COUNT(*) AS supers FROM users WHERE role = 'superadmin'");
+          if (supers <= 1) {
+            return send.bad(res, "This is the only superadmin — make someone else superadmin first");
           }
         }
         const [result] = await pool.query("DELETE FROM users WHERE id = ?", [targetId]);

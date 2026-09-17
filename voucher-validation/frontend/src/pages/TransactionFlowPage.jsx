@@ -27,6 +27,7 @@ import {
   Clock,
   Ticket,
   Mail,
+  SlidersHorizontal,
 } from "lucide-react";
 
 import { portalAuditApi, portalConfigApi } from "../services/api";
@@ -146,6 +147,11 @@ function formatDate(iso) {
   }
 }
 
+/** A session id short enough for a phone card's subtitle line. */
+function shortSession(id) {
+  return id.length > 16 ? `${id.slice(0, 16)}…` : id;
+}
+
 function formatLabel(s) {
   return (s || "")
     .split("_")
@@ -171,6 +177,12 @@ export default function TransactionFlowPage() {
   const [status, setStatus] = useState(() => searchParams.get("status") || "");
   const [startDate, setStartDate] = useState(() => searchParams.get("startDate") || "");
   const [endDate, setEndDate] = useState(() => searchParams.get("endDate") || "");
+  // Phone only: the less-used filters fold away behind a button. A drill-in
+  // that arrives with one of them already set opens the fold, so the filter
+  // narrowing the list is on screen rather than hidden.
+  const [moreFilters, setMoreFilters] = useState(() =>
+    ["sessionId", "voucherCode", "startDate", "endDate"].some((k) => searchParams.get(k))
+  );
 
   const fetchFlows = useCallback(async () => {
     setLoading(true);
@@ -200,6 +212,7 @@ export default function TransactionFlowPage() {
   const totalPages = Math.ceil(total / limit);
   const hasFilters =
     transactionId.trim() || sessionId.trim() || voucherCode.trim() || phone.trim() || status || startDate || endDate;
+  const foldedActive = [sessionId.trim(), voucherCode.trim(), startDate, endDate].filter(Boolean).length;
 
   const clearFilters = () => {
     setTransactionId("");
@@ -227,6 +240,10 @@ export default function TransactionFlowPage() {
         }
       />
 
+      {/* Desktop keeps its single strip. On a phone the everyday filters —
+          transaction, phone number, status — stay out, and the rest fold into
+          one group behind "More filters". The `contents` wrapper leaves the
+          desktop strip's items exactly where they were. */}
       <Toolbar>
         <SearchInput
           value={transactionId}
@@ -237,24 +254,33 @@ export default function TransactionFlowPage() {
           placeholder="Transaction ID…"
           width="w-48"
         />
-        <SearchInput
-          value={sessionId}
-          onChange={(e) => {
-            setSessionId(e.target.value);
-            setPage(1);
-          }}
-          placeholder="Session ID…"
-          width="w-48"
-        />
-        <SearchInput
-          value={voucherCode}
-          onChange={(e) => {
-            setVoucherCode(e.target.value);
-            setPage(1);
-          }}
-          placeholder="Voucher ID…"
-          width="w-44"
-        />
+        <div
+          className={
+            "contents " +
+            (moreFilters ? "max-sm:flex max-sm:flex-col max-sm:gap-2.5 max-sm:order-2" : "max-sm:hidden")
+          }
+        >
+          <SearchInput
+            value={sessionId}
+            onChange={(e) => {
+              setSessionId(e.target.value);
+              setPage(1);
+            }}
+            placeholder="Session ID…"
+            width="w-48"
+            className="max-sm:w-full"
+          />
+          <SearchInput
+            value={voucherCode}
+            onChange={(e) => {
+              setVoucherCode(e.target.value);
+              setPage(1);
+            }}
+            placeholder="Voucher ID…"
+            width="w-44"
+            className="max-sm:w-full"
+          />
+        </div>
         <SearchInput
           value={phone}
           onChange={(e) => {
@@ -271,6 +297,8 @@ export default function TransactionFlowPage() {
             setPage(1);
           }}
           style={{ ...PILL, width: 190 }}
+          // !important outranks the inline pill width, so the box fills its row.
+          className="max-sm:w-full! max-sm:h-10!"
           aria-label="Filter by status"
         >
           {STATUS_OPTIONS.map((o) => (
@@ -279,24 +307,44 @@ export default function TransactionFlowPage() {
             </option>
           ))}
         </Select>
-        <DateFilter
-          label="From"
-          value={startDate}
-          onChange={(v) => {
-            setStartDate(v);
-            setPage(1);
-          }}
-        />
-        <DateFilter
-          label="To"
-          value={endDate}
-          onChange={(v) => {
-            setEndDate(v);
-            setPage(1);
-          }}
-        />
+        <div className={moreFilters ? "contents max-sm:block max-sm:order-2" : "contents max-sm:hidden"}>
+          <DateRange>
+            <DateFilter
+              label="From"
+              value={startDate}
+              onChange={(v) => {
+                setStartDate(v);
+                setPage(1);
+              }}
+            />
+            <DateFilter
+              label="To"
+              value={endDate}
+              onChange={(v) => {
+                setEndDate(v);
+                setPage(1);
+              }}
+            />
+          </DateRange>
+        </div>
+        <Button
+          variant="secondary"
+          size="sm"
+          className="sm:hidden max-sm:order-1"
+          iconLeft={<SlidersHorizontal size={13} />}
+          onClick={() => setMoreFilters((v) => !v)}
+          aria-expanded={moreFilters}
+        >
+          {moreFilters ? "Fewer filters" : `More filters${foldedActive ? ` · ${foldedActive}` : ""}`}
+        </Button>
         {hasFilters && (
-          <Button variant="ghost" size="sm" iconLeft={<RotateCcw size={13} />} onClick={clearFilters}>
+          <Button
+            variant="ghost"
+            size="sm"
+            iconLeft={<RotateCcw size={13} />}
+            onClick={clearFilters}
+            className="max-sm:order-3"
+          >
             Clear all
           </Button>
         )}
@@ -365,19 +413,48 @@ function TransactionRow({ txn, isExpanded, onToggle }) {
 
   return (
     <>
-      <tr onClick={onToggle} className="cursor-pointer">
+      {/* On a phone the row is a card. Its first cell — the chevron here — is
+          the card's title, so it carries the transaction, its amount and the
+          event count, and the Transaction and Amount rows stand down. The
+          amber rail moves from that cell to the whole card's left edge. */}
+      <tr
+        onClick={onToggle}
+        aria-expanded={isExpanded}
+        className={
+          "cursor-pointer" + (txn.paidUnclaimed ? " max-sm:shadow-[inset_3px_0_0_var(--warning-fg)]" : "")
+        }
+      >
         {/* "Paid but no voucher" used to tint the whole card amber. A tinted row
             loses its tint to the table's hover rule, so the alert became a left
             rail — which survives hover and still reads down the column. A raw
             <td> here because the rail is an inline style and Td takes none;
             .sf-table still supplies the cell padding. */}
         <td
-          className="text-[var(--fg-muted)]"
+          className="text-[var(--fg-muted)] max-sm:shadow-none!"
           style={txn.paidUnclaimed ? { boxShadow: "inset 3px 0 0 var(--warning-fg)" } : undefined}
         >
-          {isExpanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+          <span className="max-sm:hidden">
+            {isExpanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+          </span>
+          <span className="sm:hidden flex w-full items-center gap-3 min-w-0">
+            <span className="min-w-0 flex-1">
+              <RecordCell
+                tone={TONE_TILE[cfg.tone] || "slate"}
+                icon={<Icon size={14} />}
+                title={txn.transactionId}
+                subtitle={`${txn.sessionId ? shortSession(txn.sessionId) : "No session"} · ${txn.eventCount} event${
+                  txn.eventCount !== 1 ? "s" : ""
+                }`}
+                mono
+              />
+            </span>
+            <span className="shrink-0 font-semibold text-[14px] text-[var(--fg-primary)] tabular-nums">
+              {txn.amount != null ? `$${Number(txn.amount).toFixed(2)}` : "—"}
+            </span>
+            {isExpanded ? <ChevronUp size={16} className="shrink-0" /> : <ChevronDown size={16} className="shrink-0" />}
+          </span>
         </td>
-        <Td>
+        <Td className="max-sm:hidden!">
           <RecordCell
             tone={TONE_TILE[cfg.tone] || "slate"}
             icon={<Icon size={14} />}
@@ -387,7 +464,7 @@ function TransactionRow({ txn, isExpanded, onToggle }) {
           />
         </Td>
         <Td>
-          <div className="flex flex-wrap items-center gap-1.5">
+          <div className="flex flex-wrap items-center gap-1.5 max-sm:justify-end">
             <StatusPill tone={cfg.tone}>{cfg.label}</StatusPill>
             {txn.paidUnclaimed && (
               <StatusPill tone="warning" dot={false}>
@@ -411,20 +488,26 @@ function TransactionRow({ txn, isExpanded, onToggle }) {
         </Td>
         <Td>{txn.planKey || "—"}</Td>
         <Td mono>{txn.customerPhone || "—"}</Td>
-        <Td align="right" nowrap strong className="tabular-nums">
+        <Td align="right" nowrap strong className="tabular-nums max-sm:hidden!">
           {txn.amount != null ? `$${Number(txn.amount).toFixed(2)}` : "—"}
         </Td>
         <Td nowrap muted>
-          {formatDate(txn.startedAt)}
-          <span className="block text-[11.5px] text-[var(--fg-muted)] tabular-nums">
-            {txn.eventCount} event{txn.eventCount !== 1 ? "s" : ""}
+          {/* One wrapper: a phone card would otherwise spread the date and the
+              count to opposite ends of the line. The count is in the card's
+              title there. */}
+          <span className="block">
+            {formatDate(txn.startedAt)}
+            <span className="block text-[11.5px] text-[var(--fg-muted)] tabular-nums max-sm:hidden">
+              {txn.eventCount} event{txn.eventCount !== 1 ? "s" : ""}
+            </span>
           </span>
         </Td>
       </tr>
 
       <AnimatePresence>
         {isExpanded && (
-          <tr>
+          // A phone card pads its row; the timeline sits flush under the card.
+          <tr className="max-sm:p-0!">
             {/* sf-table pads every cell; the timeline supplies its own padding
                 and must sit flush, and inline is the only padding the table's
                 own rule cannot win back. */}
@@ -436,7 +519,8 @@ function TransactionRow({ txn, isExpanded, onToggle }) {
                 transition={{ duration: 0.22 }}
                 className="overflow-hidden"
               >
-                <div className="border-t border-[var(--border-subtle)] bg-[var(--bg-surface)] px-6 py-6">
+                {/* text-left: a phone card centres a full-width cell. */}
+                <div className="border-t border-[var(--border-subtle)] max-sm:border-t-0 bg-[var(--bg-surface)] px-6 py-6 max-sm:px-4 max-sm:py-5 text-left">
                   <p className="text-label mb-5">
                     Event timeline · {txn.eventCount} event{txn.eventCount !== 1 ? "s" : ""}
                   </p>
@@ -518,11 +602,13 @@ function TimelineStep({ event, isLast }) {
 
         {msg && <p className="text-[12.5px] text-[var(--fg-secondary)] mt-1 leading-relaxed">{msg}</p>}
 
-        <div className="flex items-center gap-4 mt-1.5">
+        {/* On a touch screen the two text buttons grow to a thumb's height
+            (the negative margin keeps the rhythm of the timeline). */}
+        <div className="flex items-center gap-4 mt-1.5 pointer-coarse:gap-5 pointer-coarse:-my-1">
           {event.event_data && (
             <button
               onClick={() => setOpen(!open)}
-              className="text-[12px] font-semibold text-[var(--fg-muted)] hover:text-[var(--fg-primary)] transition-colors font-display"
+              className="text-[12px] font-semibold text-[var(--fg-muted)] hover:text-[var(--fg-primary)] transition-colors font-display pointer-coarse:inline-flex pointer-coarse:items-center pointer-coarse:min-h-9"
             >
               {open ? "Hide details" : "Show details"}
             </button>
@@ -531,7 +617,7 @@ function TimelineStep({ event, isLast }) {
             <button
               onClick={openPreview}
               disabled={loadingPreview}
-              className="text-[12px] font-semibold text-[var(--brand)] hover:opacity-80 transition-opacity inline-flex items-center gap-1 disabled:opacity-50 font-display"
+              className="text-[12px] font-semibold text-[var(--brand)] hover:opacity-80 transition-opacity inline-flex items-center gap-1 disabled:opacity-50 font-display pointer-coarse:min-h-9"
             >
               <Mail size={11} />
               {loadingPreview ? "Loading…" : "View email"}
@@ -568,12 +654,14 @@ function TimelineStep({ event, isLast }) {
           <Modal.Header
             eyebrow={preview.template === "manual_assist" ? "Manual assistance" : "Purchase receipt"}
             title="Email sent to the customer"
-            subtitle={`${preview.to || "unknown recipient"} · ${formatTs(preview.sentAt)}`}
+            subtitle={
+              <span className="break-all">{`${preview.to || "unknown recipient"} · ${formatTs(preview.sentAt)}`}</span>
+            }
             icon={Mail}
             onClose={() => setPreview(null)}
           />
           <Modal.Body>
-            <div className="flex flex-wrap items-center gap-x-5 gap-y-2 mb-4 text-[12.5px]">
+            <div className="flex flex-wrap items-center gap-x-5 gap-y-2 mb-4 text-[12.5px] [overflow-wrap:anywhere]">
               <span className="text-[var(--fg-muted)]">
                 Subject <span className="text-[var(--fg-primary)]">{preview.subject}</span>
               </span>
@@ -597,11 +685,11 @@ function TimelineStep({ event, isLast }) {
               title="Email preview"
               sandbox=""
               srcDoc={preview.html}
-              className="w-full h-[60vh] rounded-lg border border-[var(--border-default)] bg-white"
+              className="w-full h-[60vh] max-sm:h-[62dvh] rounded-lg border border-[var(--border-default)] bg-white"
             />
           </Modal.Body>
           <Modal.Footer>
-            <Button variant="secondary" onClick={() => setPreview(null)}>
+            <Button variant="secondary" onClick={() => setPreview(null)} className="max-sm:flex-1">
               Close
             </Button>
           </Modal.Footer>
@@ -611,18 +699,25 @@ function TimelineStep({ event, isLast }) {
   );
 }
 
+/** From/To as one pair. `contents` on desktop, so each bound is still its own
+ *  item in the filter strip; on a phone the two sit side by side. */
+function DateRange({ children }) {
+  return <div className="contents max-sm:grid max-sm:grid-cols-2 max-sm:gap-2.5">{children}</div>;
+}
+
 /** A date bound in the Toolbar. The word carries the meaning; a stacked label
- *  would make the strip a row taller for no gain. */
+ *  would make the strip a row taller for no gain — except on a phone, where
+ *  the pair is half a row each and the word goes above the box. */
 function DateFilter({ label, value, onChange }) {
   return (
-    <label className="inline-flex items-center gap-2 font-display text-[11.5px] font-bold uppercase tracking-[0.07em] text-[var(--fg-muted)]">
+    <label className="inline-flex items-center gap-2 max-sm:flex max-sm:flex-col max-sm:items-stretch max-sm:gap-1 max-sm:min-w-0 font-display text-[11.5px] font-bold uppercase tracking-[0.07em] text-[var(--fg-muted)]">
       {label}
       <Input
         type="date"
         value={value}
         onChange={(e) => onChange(e.target.value)}
         style={{ ...PILL, width: 152 }}
-        className="font-sans text-[12.5px] normal-case tracking-normal"
+        className="font-sans text-[12.5px] normal-case tracking-normal max-sm:w-full! max-sm:h-10! max-sm:min-w-0"
       />
     </label>
   );

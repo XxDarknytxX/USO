@@ -12,7 +12,7 @@ import {
   LayoutDashboard, Gauge, Network, Ticket, Receipt, History, RefreshCw, Globe,
   FileText, GitBranch, Users, Settings, Menu, X, ChevronLeft, ChevronRight,
   ChevronDown, LogOut, Shield, Eye, LifeBuoy, UserCircle, Wallet,
-  Wrench, Sun, Moon, Server, Megaphone,
+  Wrench, Sun, Moon, Server, Megaphone, ShieldCheck,
 } from "lucide-react";
 
 import { useAuth } from "../../hooks/useAuth";
@@ -93,7 +93,7 @@ export default function AppLayout() {
 function Shell() {
   const navigate = useNavigate();
   const location = useLocation();
-  const { email, name, role, isAdmin, isEngineer, isBilling, logout } = useAuth();
+  const { email, name, role, isAdmin, isSuperadmin, isEngineer, isBilling, logout } = useAuth();
   const { loading: siteLoading } = useSite();
   const { theme, toggle: toggleTheme } = useTheme();
 
@@ -110,8 +110,8 @@ function Shell() {
   // in the user-menu dropdown. Mirrors how Service Desk renders the name.
   const displayName = name?.trim() || (email ? email.split("@")[0] : "User");
   const initial = displayName[0].toUpperCase();
-  const roleLabel = role ? role.charAt(0).toUpperCase() + role.slice(1) : "User";
-  const RoleIcon = isAdmin ? Shield : isEngineer ? Wrench : isBilling ? Receipt : Eye;
+  const roleLabel = isSuperadmin ? "Superadmin" : role ? role.charAt(0).toUpperCase() + role.slice(1) : "User";
+  const RoleIcon = isSuperadmin ? ShieldCheck : isAdmin ? Shield : isEngineer ? Wrench : isBilling ? Receipt : Eye;
 
   // Section-level admin gate, then a per-item role gate, then drop any section
   // left empty.
@@ -162,7 +162,9 @@ function Shell() {
     );
 
   return (
-    <div className="relative flex h-screen overflow-hidden app-canvas text-[var(--fg-primary)]">
+    // h-dvh, not h-screen: on a phone 100vh includes the space behind the
+    // browser's own toolbars, which hid the bottom of every page under them.
+    <div className="relative flex h-dvh overflow-hidden app-canvas text-[var(--fg-primary)]">
       <FloatingBlobs variant="minimal" />
 
       {/* Mobile overlay */}
@@ -243,7 +245,7 @@ function Shell() {
                       title={!expanded ? label : undefined}
                       className={({ isActive }) =>
                         cn(
-                          "group relative flex items-center h-10 rounded-[12px] overflow-hidden transition-colors duration-150",
+                          "group relative flex items-center h-10 pointer-coarse:h-11 rounded-[12px] overflow-hidden transition-colors duration-150",
                           isActive
                             ? "bg-[var(--brand-soft)] text-[var(--brand-fg-on-soft)] font-semibold"
                             : "text-[var(--fg-secondary)] hover:bg-[var(--bg-surface)] hover:text-[var(--fg-primary)]"
@@ -304,8 +306,8 @@ function Shell() {
       {/* ===== MAIN ===== */}
       <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
         {/* Header — same surface + border as the sidebar (one continuous chrome) */}
-        <header className="h-16 flex-shrink-0 z-20 bg-[var(--bg-elevated)] border-b border-[var(--border-default)]">
-          <div className="h-full flex items-center justify-between gap-4 px-4 sm:px-6">
+        <header className="h-14 sm:h-16 flex-shrink-0 z-20 bg-[var(--bg-elevated)] border-b border-[var(--border-default)]">
+          <div className="h-full flex items-center justify-between gap-3 px-3 sm:gap-4 sm:px-6">
             <div className="flex items-center gap-3 min-w-0">
               <button
                 onClick={() => setMobileOpen(true)}
@@ -316,6 +318,11 @@ function Shell() {
               </button>
               <span className="hidden sm:block text-sm font-medium text-[var(--fg-muted)]">
                 Vodafone Fiji · USO Operations
+              </span>
+              {/* A phone has no sidebar on screen, so the bar says where you are. */}
+              <span className="flex min-w-0 items-center gap-2 sm:hidden">
+                <VodafoneLogo size={24} className="shrink-0" />
+                <span className="truncate text-[14px] font-semibold text-[var(--fg-primary)]">USO Operations</span>
               </span>
             </div>
 

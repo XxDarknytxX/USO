@@ -74,7 +74,7 @@ function VillageChips({ sites, groupIds, onChange }) {
 
   const chip = (active) =>
     cn(
-      "inline-flex h-8 items-center gap-1.5 rounded-full border px-3 text-[12.5px] font-semibold transition-colors focus-ring font-display",
+      "inline-flex h-8 items-center gap-1.5 rounded-full border px-3 text-[12.5px] font-semibold transition-colors focus-ring font-display pointer-coarse:h-9 pointer-coarse:px-3.5",
       active
         ? "border-[var(--brand-soft-hover)] bg-[var(--brand-soft)] text-[var(--brand-fg-on-soft)]"
         : "border-[var(--border-default)] bg-[var(--surface)] text-[var(--fg-secondary)] hover:border-[var(--border-hover)] hover:text-[var(--fg-primary)]"
@@ -88,7 +88,7 @@ function VillageChips({ sites, groupIds, onChange }) {
           <button
             type="button"
             onClick={() => onChange([])}
-            className="text-[11.5px] font-semibold text-[var(--fg-muted)] transition-colors hover:text-[var(--fg-primary)] font-display"
+            className="text-[11.5px] font-semibold text-[var(--fg-muted)] transition-colors hover:text-[var(--fg-primary)] font-display pointer-coarse:-my-2.5 pointer-coarse:-mr-2 pointer-coarse:min-h-9 pointer-coarse:px-2"
           >
             Any village
           </button>
@@ -186,7 +186,7 @@ function ContactPicker({ selected, onChange, contactsByEmail, onRemember }) {
             <button
               type="button"
               onClick={() => onChange([])}
-              className="text-[11.5px] font-semibold text-[var(--fg-muted)] transition-colors hover:text-[var(--fg-primary)] font-display"
+              className="text-[11.5px] font-semibold text-[var(--fg-muted)] transition-colors hover:text-[var(--fg-primary)] font-display pointer-coarse:-my-2.5 pointer-coarse:-mr-2 pointer-coarse:min-h-9 pointer-coarse:px-2"
             >
               Clear all
             </button>
@@ -195,14 +195,14 @@ function ContactPicker({ selected, onChange, contactsByEmail, onRemember }) {
         {selected.length === 0 ? (
           <p className="mt-1 text-[12px] text-[var(--fg-muted)]">Search below and tick the customers this email is for.</p>
         ) : (
-          <div className="mt-2 flex max-h-[148px] flex-wrap gap-1.5 overflow-y-auto">
+          <div className="mt-2 flex max-h-[148px] flex-wrap gap-1.5 overflow-y-auto max-sm:max-h-[220px]">
             {selected.map((e) => {
               const c = contactsByEmail[e];
               return (
                 <span
                   key={e}
                   className={cn(
-                    "inline-flex max-w-full items-center gap-1 rounded-full py-0.5 pl-2.5 pr-1 text-[12px] font-medium",
+                    "inline-flex max-w-full items-center gap-1 rounded-full py-0.5 pl-2.5 pr-1 text-[12px] font-medium pointer-coarse:py-0 pointer-coarse:pr-0.5",
                     c?.missing
                       ? "bg-[var(--danger-soft)] text-[var(--danger-fg)] line-through decoration-1"
                       : c?.suppressed
@@ -221,7 +221,7 @@ function ContactPicker({ selected, onChange, contactsByEmail, onRemember }) {
                   <button
                     type="button"
                     onClick={() => onChange(selected.filter((x) => x !== e))}
-                    className="grid h-5 w-5 shrink-0 place-items-center rounded-full opacity-70 transition hover:bg-[var(--surface)] hover:opacity-100"
+                    className="grid h-5 w-5 shrink-0 place-items-center rounded-full opacity-70 transition hover:bg-[var(--surface)] hover:opacity-100 pointer-coarse:h-8 pointer-coarse:w-8"
                     aria-label={`Remove ${c?.email || e}`}
                   >
                     <X size={11} />
@@ -293,7 +293,9 @@ function ContactPicker({ selected, onChange, contactsByEmail, onRemember }) {
                     onClick={() => toggle(c)}
                     className={cn(
                       c.suppressed ? "cursor-not-allowed opacity-60" : "cursor-pointer",
-                      on && "[&>td]:bg-[var(--brand-soft)]",
+                      // A phone card tints as one block; per-cell tint there
+                      // would stripe the card, since its cells are spaced lines.
+                      on && "[&>td]:bg-[var(--brand-soft)] max-sm:bg-[var(--brand-soft)] max-sm:[&>td]:bg-transparent",
                       loading && "opacity-70"
                     )}
                   >
@@ -308,8 +310,8 @@ function ContactPicker({ selected, onChange, contactsByEmail, onRemember }) {
                       />
                     </td>
                     <Td>
-                      <div className="flex min-w-0 max-w-[230px] flex-col">
-                        <span className="flex items-center gap-2 min-w-0">
+                      <div className="flex min-w-0 max-w-[230px] flex-col max-sm:ml-0! max-sm:max-w-none">
+                        <span className="flex items-center gap-2 min-w-0 max-sm:flex-wrap max-sm:gap-x-2 max-sm:gap-y-1">
                           <span className="truncate font-semibold text-[var(--fg-primary)]">{c.email}</span>
                           {c.suppressed && <Badge tone="warning">Excluded</Badge>}
                         </span>
@@ -420,6 +422,7 @@ export default function AudienceEditor({ audience, onChange, sites, countState, 
             value={audience.mode}
             onChange={(mode) => set({ mode })}
             size="sm"
+            className="max-sm:flex max-sm:w-full max-sm:[&>button]:flex-1 max-sm:[&>button]:justify-center"
           />
         </div>
         <p className="text-[12px] text-[var(--fg-muted)]">

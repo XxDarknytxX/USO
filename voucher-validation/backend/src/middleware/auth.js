@@ -48,9 +48,28 @@ export function requireAuthAllowing2FASetup(req, res, next) {
   }
 }
 
+/**
+ * Two administrator roles.
+ *   admin       runs the console day to day
+ *   superadmin  everything an admin can, plus the settings that change the
+ *               console for everyone or hold credentials: the estate default,
+ *               email (SMTP) and Starlink API configuration, the two-factor
+ *               policy and the schedules — and superadmin accounts themselves.
+ * Every "admin only" check below admits both; requireSuperadmin admits one.
+ */
+export const ADMIN_ROLES = new Set(["admin", "superadmin"]);
+export const isAdminRole = (role) => ADMIN_ROLES.has(role);
+
 export function requireAdmin(req, res, next) {
-  if (req.user?.role !== "admin") {
+  if (!isAdminRole(req.user?.role)) {
     return res.status(403).json({ error: "Admin access required" });
+  }
+  next();
+}
+
+export function requireSuperadmin(req, res, next) {
+  if (req.user?.role !== "superadmin") {
+    return res.status(403).json({ error: "Only the superadmin can change this" });
   }
   next();
 }
@@ -65,7 +84,7 @@ export function requireNotViewer(req, res, next) {
   // endpoint guarded by requireNotViewer — settings, audit logs, transaction
   // flows, voucher CRUD — would open to a field contractor the moment the role
   // was added. Allow-list the roles that may pass rather than deny-listing.
-  if (req.user?.role !== "admin") {
+  if (!isAdminRole(req.user?.role)) {
     return res.status(403).json({ error: "Not permitted for this account" });
   }
   next();
@@ -86,8 +105,8 @@ export function requireNotViewer(req, res, next) {
  * would be open to viewers by default. Keyed on the method, a new POST is
  * closed to them unless someone deliberately says otherwise.
  */
-const MAINTENANCE_READERS = new Set(["admin", "engineer", "viewer"]);
-const MAINTENANCE_WRITERS = new Set(["admin", "engineer"]);
+const MAINTENANCE_READERS = new Set(["superadmin", "admin", "engineer", "viewer"]);
+const MAINTENANCE_WRITERS = new Set(["superadmin", "admin", "engineer"]);
 
 export function requireMaintenanceAccess(req, res, next) {
   const role = req.user?.role;
@@ -113,7 +132,7 @@ export function requireMaintenanceAccess(req, res, next) {
  * An allow-list, applied at ROUTER level on the routers that serve that data,
  * so an endpoint added to one of them later is closed to engineers by default.
  */
-const DASHBOARD_ROLES = new Set(["admin", "viewer", "billing"]);
+const DASHBOARD_ROLES = new Set(["superadmin", "admin", "viewer", "billing"]);
 
 export function requireDashboardAccess(req, res, next) {
   if (!DASHBOARD_ROLES.has(req.user?.role)) {
@@ -130,8 +149,8 @@ export function requireDashboardAccess(req, res, next) {
  * Keyed on the method like maintenance, so a write route added later is
  * admin-only unless someone deliberately opens it.
  */
-const BILLING_READERS = new Set(["admin", "billing"]);
-const BILLING_WRITERS = new Set(["admin"]);
+const BILLING_READERS = new Set(["superadmin", "admin", "billing"]);
+const BILLING_WRITERS = new Set(["superadmin", "admin"]);
 
 export function requireBillingAccess(req, res, next) {
   const role = req.user?.role;
@@ -178,7 +197,7 @@ const SCOPED_ROLES = new Set(["viewer", "engineer", "billing"]);
  */
 export function makeAttachScope(pool) {
   return async function attachScope(req, res, next) {
-    if (req.user?.role === "admin") {
+    if (isAdminRole(req.user?.role)) {
       req.scope = { isViewer: false, projectIds: null, groupIds: null };
       return next();
     }

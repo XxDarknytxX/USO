@@ -23,6 +23,7 @@ import {
   Users, DollarSign, LifeBuoy, Activity, TrendingUp, Database, BarChart3,
   Clock, CheckCircle, Wifi, WifiOff, RefreshCw, Zap, HardDrive, ArrowUpRight,
   Ticket, MapPin, ChevronUp, ChevronDown, PackageOpen, ChevronRight, AlertTriangle,
+  ArrowUp, ArrowDown,
 } from "lucide-react";
 
 import { useNavigate } from "react-router-dom";
@@ -38,11 +39,12 @@ import {
   RevenueTrendPanel, RevenuePlanMix, SalesTotals, RiskTotals,
   SalesByHourPanel, SoldByPlanPanel, RevenueByVillagePanel, OutcomesPanel,
   VillageRevenuePanel,
+  PHONE_CARD, PhoneChevron, PhoneMore, phoneRowClass, usePhone, shortLabel,
 } from "../components/MonthlyBreakdown";
 import {
   PageShell, PageHeader, KpiGrid, StatCard, MeterCard, Panel, Toolbar, SearchInput, Tabs,
   DataTable, Th, Td, TableMessage, RecordCell, StatusPill, EmptyState,
-  Button, Modal,
+  Button, Modal, Select,
   SkeletonKpis, SkeletonCard, SkeletonTable,
   CHART_COLORS, CHART_SERIES, STATUS_COLORS, ChartTooltip, ChartGradient,
   useChartTheme, ChartStat, LegendRow, LegendRows, DONUT, DonutCenter,
@@ -69,6 +71,23 @@ const fmtAge = (s) => {
   return `${Math.round(s / 86400)}d`;
 };
 
+/**
+ * The villages table's columns, for the sort picker a phone gets in place of
+ * the header row (a stacked table has no header to tap). Same keys, same
+ * default directions as the column heads.
+ */
+const VILLAGE_SORTS = [
+  { key: "revenue", label: "Revenue" },
+  { key: "live", label: "Live users" },
+  { key: "sales", label: "Sales" },
+  { key: "uptimePct", label: "Uptime" },
+  { key: "slUsed", label: "Starlink GB" },
+  { key: "soldQ", label: "Purchased GB" },
+  { key: "active", label: "Active vouchers" },
+  { key: "vouchers", label: "Vouchers" },
+  { key: "name", label: "Village name" },
+];
+
 /** Data meters go teal → orange → red, so a village near its allocation reads hot. */
 function usageColor(pct) {
   return pct >= 90 ? "var(--danger-fg)" : pct >= 70 ? "var(--tile-orange)" : "var(--tile-teal)";
@@ -91,6 +110,8 @@ export default function Dashboard() {
   const [netOverview, setNetOverview] = useState(null);
 
   const ct = useChartTheme();
+  // A phone lays the quota chart out sideways; see the Capacity tab.
+  const phone = usePhone();
 
   // Ruijie groupIds of the villages currently in the "All Villages" scope.
   // Declared up here because the breakdown below has to be fetched for exactly
@@ -118,6 +139,8 @@ export default function Dashboard() {
   const [villageQuery, setVillageQuery] = useState("");
   const [sort, setSort] = useState({ key: "revenue", dir: "desc" });
   const [tab, setTab] = useState("sales");
+  // Phones show the first few villages and offer the rest (see PhoneMore).
+  const [showAllVillages, setShowAllVillages] = useState(false);
 
   // Load from our local DB mirror only — NO automatic Ruijie Cloud sync on
   // login/mount. Opening the dashboard must never hit Ruijie (that was feeding
@@ -617,6 +640,8 @@ export default function Dashboard() {
             icon={<HardDrive size={18} />}
             color="slate"
             sub="usage collection is off"
+            // Fifth of five in a two-up grid: full width rather than an orphan.
+            className="max-lg:col-span-2"
           />
         ) : (
           <MeterCard
@@ -630,6 +655,7 @@ export default function Dashboard() {
             sub={`${fmtNum(netHealth.withTelemetry || 0)} linked ${netHealth.withTelemetry === 1 ? "kit" : "kits"}`}
             noTotalNote="no plan cap published"
             onClick={() => navigate("/overview")}
+            className="max-lg:col-span-2"
           />
         )}
       </KpiGrid>
@@ -657,11 +683,34 @@ export default function Dashboard() {
             placeholder="Search villages…"
             width="w-72"
           />
+          {/* A stacked table has no header row to tap, so a phone sorts here. */}
+          <div className="sm:hidden flex items-center gap-2">
+            <div className="flex-1 min-w-0">
+              <Select
+                value={sort.key}
+                onChange={(e) => setSort({ key: e.target.value, dir: e.target.value === "name" ? "asc" : "desc" })}
+                aria-label="Sort villages by"
+              >
+                {VILLAGE_SORTS.map((o) => (
+                  <option key={o.key} value={o.key}>Sort by {o.label.toLowerCase()}</option>
+                ))}
+              </Select>
+            </div>
+            <Button
+              variant="secondary"
+              onClick={() => setSort((s) => ({ ...s, dir: s.dir === "asc" ? "desc" : "asc" }))}
+              iconLeft={sort.dir === "asc" ? <ArrowUp size={14} /> : <ArrowDown size={14} />}
+              aria-label={`Sort ${sort.dir === "asc" ? "ascending" : "descending"}; tap to reverse`}
+            >
+              {sort.key === "name" ? (sort.dir === "asc" ? "A–Z" : "Z–A") : sort.dir === "asc" ? "Low" : "High"}
+            </Button>
+          </div>
           <span className="text-[12.5px] text-[var(--fg-muted)]">
             {visibleVillages.length} of {villageRows.length} village{villageRows.length === 1 ? "" : "s"}
             {allVisible ? "" : " in scope"}
+            <span className="sm:hidden"> · revenue and sales for {mb.label || "the selected window"}</span>
           </span>
-          <span className="ml-auto text-[12.5px] text-[var(--fg-muted)]">
+          <span className="max-sm:hidden ml-auto text-[12.5px] text-[var(--fg-muted)]">
             Revenue and sales are for {mb.label || "the selected window"}
           </span>
         </Toolbar>
@@ -702,34 +751,60 @@ export default function Dashboard() {
                     : `No village matches “${villageQuery}”.`}
                 </TableMessage>
               ) : (
-                visibleVillages.map((r) => (
+                visibleVillages.map((r, i) => (
                   <tr
                     key={r.key}
                     onClick={r.siteId ? () => openVillage(r.siteId) : undefined}
-                    className={r.siteId ? "cursor-pointer" : undefined}
+                    // On a phone this row is a compact card, and only the first
+                    // few show until "Show all" — unless a search is narrowing
+                    // the list, when every match should be on screen.
+                    className={[
+                      r.siteId ? "cursor-pointer" : "",
+                      phoneRowClass(i, showAllVillages || !!villageQuery.trim()),
+                    ].join(" ")}
                     title={r.siteId ? `Open ${r.name}` : undefined}
                   >
-                    <Td>
+                    <Td className={PHONE_CARD.title}>
                       <span className="flex items-center gap-2.5 min-w-0">
                         <StatusDot online={r.online} hasNet={r.hasNet} source={r.onlineSource} sl={r.sl} />
                         {/* No onClick of its own: the row carries it now, and a
                             nested handler would fire, then bubble, opening the
                             village twice. */}
-                        <RecordCell title={r.name} subtitle={r.hostname} mono />
+                        <RecordCell
+                          title={
+                            <>
+                              {r.name}
+                              {r.siteId && <PhoneChevron className="max-sm:inline-block align-[-3px] ml-0.5" />}
+                            </>
+                          }
+                          subtitle={r.hostname}
+                          mono
+                        />
                       </span>
                     </Td>
-                    <Td align="right" className="tabular-nums">{fmtNum(r.vouchers)}</Td>
-                    <Td align="right" className="tabular-nums">{fmtNum(r.active)}</Td>
-                    <Td align="right" strong className="tabular-nums">{fmtNum(r.live)}</Td>
-                    <Td align="right" strong className="tabular-nums">{fmtMoney(r.revenue)}</Td>
-                    <Td align="right" className="tabular-nums">{fmtNum(r.sales)}</Td>
-                    <Td align="right">
+                    <Td align="right" className={`tabular-nums ${PHONE_CARD.stat}`}>{fmtNum(r.vouchers)}</Td>
+                    <Td align="right" className={`tabular-nums ${PHONE_CARD.stat}`}>{fmtNum(r.active)}</Td>
+                    <Td align="right" strong className={`tabular-nums ${PHONE_CARD.stat}`}>{fmtNum(r.live)}</Td>
+                    {/* The card's headline on a phone, carrying the sales count
+                        whose own column it hides there. */}
+                    <Td
+                      align="right"
+                      strong
+                      className={`tabular-nums ${PHONE_CARD.aside} max-sm:flex-col! max-sm:items-end! max-sm:gap-0.5!`}
+                    >
+                      <span>{fmtMoney(r.revenue)}</span>
+                      <span className="sm:hidden text-[11.5px] font-normal text-[var(--fg-muted)]">
+                        {fmtNum(r.sales)} sale{r.sales === 1 ? "" : "s"}
+                      </span>
+                    </Td>
+                    <Td align="right" className={`tabular-nums ${PHONE_CARD.hide}`}>{fmtNum(r.sales)}</Td>
+                    <Td align="right" className={PHONE_CARD.stat}>
                       <StarlinkDataCell sl={r.sl} />
                     </Td>
-                    <Td align="right">
+                    <Td align="right" className={PHONE_CARD.stat}>
                       <VoucherDataCell soldQ={r.soldQ} usedQ={r.soldUsedQ} sold={r.sold} />
                     </Td>
-                    <Td align="right">
+                    <Td align="right" className={PHONE_CARD.stat}>
                       {r.hasNet ? (
                         <span
                           className="flex flex-col items-end"
@@ -748,6 +823,14 @@ export default function Dashboard() {
               )}
             </tbody>
           </DataTable>
+          {!villageQuery.trim() && (
+            <PhoneMore
+              total={visibleVillages.length}
+              expanded={showAllVillages}
+              onToggle={() => setShowAllVillages((v) => !v)}
+              noun="villages"
+            />
+          )}
         </Panel>
       </div>
 
@@ -755,7 +838,8 @@ export default function Dashboard() {
               villages; grouped here it is reachable rather than scrolled past.
               Nothing was removed — only moved one click away. ----- */}
       <div className="flex flex-col gap-5">
-        <Tabs tabs={tabs} value={tab} onChange={setTab} variant="underline" />
+        {/* Tighter tabs on a phone so all five fit without scrolling. */}
+        <Tabs tabs={tabs} value={tab} onChange={setTab} variant="underline" className="max-sm:[&_button]:px-2.5" />
 
         {tab === "sales" && (
           <div className="flex flex-col gap-5">
@@ -806,7 +890,7 @@ export default function Dashboard() {
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
               <Panel title="Package distribution" subtitle="Voucher pool by plan" icon={<Activity size={15} />} tone="indigo">
                 {pieData.length === 0 ? (
-                  <EmptyState icon={PackageOpen} title="No data available" />
+                  <EmptyState className="max-sm:py-8" icon={PackageOpen} title="No data available" />
                 ) : (
                   <>
                     <div className="relative mx-auto" style={{ width: 196, height: 196 }}>
@@ -851,7 +935,7 @@ export default function Dashboard() {
             {/* Per-plan utilisation. Click a plan to open the voucher list. */}
             <Panel title="Plan utilisation" subtitle="Share active, share of allocation consumed" icon={<Wifi size={15} />} tone="teal">
               {scopedPackageStats.length === 0 ? (
-                <EmptyState icon={PackageOpen} title="No packages in this category" />
+                <EmptyState className="max-sm:py-8" icon={PackageOpen} title="No packages in this category" />
               ) : (
                 <div className="grid grid-cols-1 xl:grid-cols-2 gap-3">
                   {scopedPackageStats.map((pkg, i) => {
@@ -871,7 +955,8 @@ export default function Dashboard() {
                         <div className="flex items-center justify-between gap-3 mb-2.5">
                           <span className="flex items-center gap-2 min-w-0 text-[13px] font-semibold text-[var(--fg-primary)] font-display">
                             <span className="w-2.5 h-2.5 rounded-[3px] shrink-0" style={{ background: color }} />
-                            <span className="truncate">{pkg.package_name || "Unknown"}</span>
+                            {/* Two lines on a phone rather than an ellipsis mid-name. */}
+                            <span className="min-w-0 sm:truncate max-sm:line-clamp-2">{pkg.package_name || "Unknown"}</span>
                           </span>
                           <span className="flex items-center gap-1.5 shrink-0">
                             <span className="text-[13px] font-semibold tabular-nums text-[var(--fg-primary)]">{fmtNum(total)}</span>
@@ -948,7 +1033,7 @@ export default function Dashboard() {
             <div className="grid grid-cols-1 lg:grid-cols-[1fr_1.4fr] gap-5">
               <Panel title="Status breakdown" subtitle="The whole voucher pool" icon={<CheckCircle size={15} />} tone="blue">
                 {statusData.length === 0 ? (
-                  <EmptyState icon={PackageOpen} title="No data available" />
+                  <EmptyState className="max-sm:py-8" icon={PackageOpen} title="No data available" />
                 ) : (
                   <>
                     <div className="relative mx-auto" style={{ width: 196, height: 196 }}>
@@ -973,7 +1058,7 @@ export default function Dashboard() {
 
               <Panel title="Quota by package" subtitle="Allocated · Consumed (GB) per plan" icon={<TrendingUp size={15} />} tone="teal">
                 {quotaBarData.length === 0 ? (
-                  <EmptyState icon={PackageOpen} title="No data available" />
+                  <EmptyState className="max-sm:py-8" icon={PackageOpen} title="No data available" />
                 ) : (
                   <>
                     <ChartStat
@@ -981,6 +1066,20 @@ export default function Dashboard() {
                       unit="consumed"
                       caption={`of ${formatQuota(metrics.totalQuota)} allocated across ${fmtNum(quotaBarData.length)} plan${quotaBarData.length === 1 ? "" : "s"}`}
                     />
+                    {phone ? (
+                      // Sideways on a phone: plan names read along the axis in
+                      // full width instead of tilted, clipped and overlapping.
+                      <ResponsiveContainer width="100%" height={Math.max(160, quotaBarData.length * 56 + 32)}>
+                        <BarChart data={quotaBarData} layout="vertical" barGap={3} barCategoryGap="24%" margin={{ top: 4, right: 12, bottom: 0, left: 0 }}>
+                          <CartesianGrid {...gridProps(ct)} horizontal={false} vertical />
+                          <XAxis type="number" {...axisX(ct)} tickFormatter={(v) => `${v} GB`} />
+                          <YAxis type="category" dataKey="name" {...axisY(ct, { width: 96 })} tickFormatter={(v) => shortLabel(v, 13)} />
+                          <Tooltip content={<ChartTooltip valueFormatter={(v) => `${fmtNum(v)} GB`} />} cursor={{ fill: ct.cursor }} />
+                          <Bar dataKey="allocated" name="Allocated" fill={CHART_COLORS.slate} radius={[0, 6, 6, 0]} maxBarSize={14} isAnimationActive={false} />
+                          <Bar dataKey="consumed" name="Consumed" fill={CHART_COLORS.brand} radius={[0, 6, 6, 0]} maxBarSize={14} isAnimationActive={false} />
+                        </BarChart>
+                      </ResponsiveContainer>
+                    ) : (
                     <ResponsiveContainer width="100%" height={300}>
                       <BarChart data={quotaBarData} barGap={4} barCategoryGap={BAR_CATEGORY_GAP} margin={{ top: 8, right: 12, bottom: 24, left: 0 }}>
                         <CartesianGrid {...gridProps(ct)} />
@@ -998,6 +1097,7 @@ export default function Dashboard() {
                         <Bar dataKey="consumed" name="Consumed" fill={CHART_COLORS.brand} radius={BAR_RADIUS} maxBarSize={BAR_MAX_SIZE} isAnimationActive={false} />
                       </BarChart>
                     </ResponsiveContainer>
+                    )}
                     <LegendRows>
                       <LegendRow color={CHART_COLORS.slate} label="Allocated" value={formatQuota(metrics.totalQuota)} />
                       <LegendRow color={CHART_COLORS.brand} label="Consumed" value={formatQuota(metrics.totalDataUsage)} />
@@ -1022,7 +1122,7 @@ export default function Dashboard() {
             }
           >
             {syncTrendData.length === 0 ? (
-              <EmptyState icon={Clock} title="No sync history yet" description="Run a sync to pull fresh voucher data." />
+              <EmptyState className="max-sm:py-8" icon={Clock} title="No sync history yet" description="Run a sync to pull fresh voucher data." />
             ) : (
               <>
                 {/* `updated` is collected per sync but never plotted, so it is
@@ -1131,18 +1231,24 @@ export default function Dashboard() {
                 </thead>
                 <tbody>
                   {(drillDownData.vouchers || []).slice(0, 15).map((v) => (
-                    <tr key={v.uuid}>
-                      <Td>
+                    // Its own tracks rather than PHONE_CARD's thirds: in a bottom
+                    // sheet a third is too narrow for "117 MB / 1.0 GB", so the
+                    // short figures take what they need and data takes the rest.
+                    <tr
+                      key={v.uuid}
+                      className="max-sm:grid! max-sm:grid-cols-[auto_auto_minmax(0,1fr)] max-sm:gap-x-5! max-sm:gap-y-3!"
+                    >
+                      <Td className="max-sm:col-span-2 max-sm:self-center">
                         <span className="font-mono text-[12.5px] font-semibold px-1.5 py-0.5 rounded bg-[var(--brand-soft)] text-[var(--brand-fg-on-soft)]">
                           {v.voucher_code}
                         </span>
                       </Td>
-                      <Td>
+                      <Td className="max-sm:col-start-3 max-sm:row-start-1 max-sm:self-center max-sm:justify-end! max-sm:before:hidden!">
                         <VoucherStatusPill status={v.status} />
                       </Td>
-                      <Td align="right" mono>{v.current_clients}/{v.max_clients}</Td>
-                      <Td align="right" mono>{formatDuration(v.used_time)} / {formatDuration(v.time_period)}</Td>
-                      <Td align="right" mono>{formatQuota(v.used_quota)} / {formatQuota(v.quota)}</Td>
+                      <Td align="right" mono className={PHONE_CARD.cell}>{v.current_clients}/{v.max_clients}</Td>
+                      <Td align="right" mono className={`${PHONE_CARD.cell} max-sm:whitespace-nowrap!`}>{formatDuration(v.used_time)} / {formatDuration(v.time_period)}</Td>
+                      <Td align="right" mono className={PHONE_CARD.cell}>{formatQuota(v.used_quota)} / {formatQuota(v.quota)}</Td>
                     </tr>
                   ))}
                 </tbody>
@@ -1197,7 +1303,7 @@ function AttentionPill({ tone, icon, count, label, title, onClick }) {
       onClick={onClick || undefined}
       title={title}
       className={
-        "inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-[12.5px] transition-colors " +
+        "inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-[12.5px] transition-colors pointer-coarse:min-h-9 " +
         tones[tone] +
         (onClick ? " hover:brightness-[0.97] cursor-pointer" : "")
       }

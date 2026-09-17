@@ -18,12 +18,12 @@
 // scrolling inside a 600-pixel box. Still the sandboxed iframe — never a new tab
 // or a blob URL, which would run the email's HTML with the console's own origin.
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { Eye, Loader2, Monitor, Smartphone, AlignLeft, RefreshCw, AlertTriangle, Maximize2, X } from "lucide-react";
 import { campaignApi } from "../../services/api";
 import { Panel, Segmented, Button, Skeleton } from "../ui";
-import { Callout } from "./campaignUi";
+import { Callout, useIsPhone } from "./campaignUi";
 
 function cn(...p) {
   return p.filter(Boolean).join(" ");
@@ -73,11 +73,56 @@ function senderName(from) {
 }
 
 /**
+ * The sandboxed email frame, laid out at `width` CSS pixels and scaled down to
+ * fit when its box is narrower. Without this a phone shows "Desktop" and
+ * "Mobile" identically — both squeezed to the phone's own width — so the
+ * device switch would do nothing there. With `fit` off (or a box that is wide
+ * enough) the frame simply fills its box, exactly as before.
+ */
+function FitFrame({ width, fit, html, title, className }) {
+  const boxRef = useRef(null);
+  const [box, setBox] = useState(null); // { w, h } in CSS px
+
+  useLayoutEffect(() => {
+    const el = boxRef.current;
+    if (!el || !fit) return undefined;
+    const measure = () => {
+      const w = el.clientWidth;
+      const h = el.clientHeight;
+      setBox((b) => (b && b.w === w && b.h === h ? b : { w, h }));
+    };
+    measure();
+    if (typeof window.ResizeObserver === "undefined") return undefined;
+    const ro = new window.ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [fit]);
+
+  const scale = fit && width && box && box.w > 0 && box.w < width ? box.w / width : 1;
+  return (
+    <div ref={boxRef} className={cn("relative overflow-hidden", className)}>
+      <iframe
+        title={title}
+        sandbox=""
+        srcDoc={html}
+        className="block bg-white"
+        style={
+          scale < 1
+            ? { width, height: box.h / scale, transform: `scale(${scale})`, transformOrigin: "0 0" }
+            : { width: "100%", height: "100%" }
+        }
+      />
+    </div>
+  );
+}
+
+/**
  * The email over the whole window. Esc or the close button returns to the
  * editor; the page underneath does not scroll while it is open.
  */
 function FullPagePreview({ data, preheader, from, initialDevice, onClose }) {
   const [device, setDevice] = useState(initialDevice === "text" ? "text" : initialDevice || "desktop");
+  const isPhone = useIsPhone();
   const closeRef = useRef(null);
   const onCloseRef = useRef(onClose);
   onCloseRef.current = onClose;
@@ -154,7 +199,15 @@ function FullPagePreview({ data, preheader, from, initialDevice, onClose }) {
             )}
             style={{ width: device === "mobile" ? 390 : "100%", maxWidth: "100%" }}
           >
-            <iframe title="Full page email preview" sandbox="" srcDoc={data?.html || ""} className="block h-full w-full bg-white" />
+            {/* A phone lays "Desktop" out at 600px and scales it to fit, so the
+                switch shows the difference; elsewhere the frame fills the window. */}
+            <FitFrame
+              title="Full page email preview"
+              html={data?.html || ""}
+              width={device === "mobile" ? 390 : 600}
+              fit={isPhone}
+              className="h-full w-full bg-white"
+            />
           </div>
         )}
       </div>
@@ -178,7 +231,10 @@ export default function EmailPreview({
   frameClassName = "h-[600px]",
   className,
 }) {
-  const [device, setDevice] = useState("desktop");
+  const isPhone = useIsPhone();
+  // A phone opens on the phone rendering — the one its user can actually read
+  // at this size. "Desktop" is still a tap away, scaled to fit.
+  const [device, setDevice] = useState(() => (isPhone ? "mobile" : "desktop"));
   const [fullPage, setFullPage] = useState(false);
   const { data, loading, error, retry } = preview;
   const warnings = data?.warnings || [];
@@ -302,11 +358,12 @@ export default function EmailPreview({
             )}
             style={{ width: device === "mobile" ? 375 : 600, maxWidth: "100%" }}
           >
-            <iframe
+            <FitFrame
               title="Email preview"
-              sandbox=""
-              srcDoc={data.html}
-              className={cn("block w-full bg-white", frameClassName)}
+              html={data.html}
+              width={device === "mobile" ? 375 : 600}
+              fit={isPhone}
+              className={cn("w-full bg-white", frameClassName)}
             />
           </div>
         )}

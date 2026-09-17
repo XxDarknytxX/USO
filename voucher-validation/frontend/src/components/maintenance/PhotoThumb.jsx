@@ -42,6 +42,15 @@ export default function PhotoThumb({ photoId, caption, onRemove, onOpen, size = 
     };
   }, [photoId]);
 
+  // On a touch screen the remove control is always on show, sitting where a
+  // thumb reaching for the photo can land on it, so there it asks first. With
+  // a mouse it only appears on hover and removes straight away, as before.
+  function remove() {
+    const touch = typeof window !== "undefined" && window.matchMedia?.("(pointer: coarse)").matches;
+    if (touch && !window.confirm("Remove this photo?")) return;
+    onRemove(photoId);
+  }
+
   const box = SIZES[size] || SIZES.md;
   // Only the larger tiles have room for a caption strip; on a contact sheet it
   // would cover the photograph it is describing.
@@ -94,18 +103,24 @@ export default function PhotoThumb({ photoId, caption, onRemove, onOpen, size = 
       {onRemove && (
         <button
           type="button"
-          onClick={() => onRemove(photoId)}
+          onClick={remove}
           title="Remove photo"
           aria-label="Remove photo"
           className={
-            "absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full bg-[var(--brand)] text-white " +
-            "flex items-center justify-center shadow-[var(--shadow-sm)] " +
+            "absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full " +
+            "flex items-center justify-center " +
             // Keyboard users never trigger :hover, so the control has to appear
             // on focus too or it is unreachable without a mouse.
-            "opacity-0 group-hover:opacity-100 focus-visible:opacity-100 transition-opacity"
+            "opacity-0 group-hover:opacity-100 focus-visible:opacity-100 transition-opacity " +
+            // A touch screen has no hover at all: there the control is always
+            // shown, and the button is a thumb-sized square in the tile's corner
+            // around the same small red dot.
+            "pointer-coarse:opacity-100 pointer-coarse:top-0 pointer-coarse:right-0 pointer-coarse:w-9 pointer-coarse:h-9"
           }
         >
-          <X size={11} />
+          <span className="w-5 h-5 pointer-coarse:w-6 pointer-coarse:h-6 rounded-full bg-[var(--brand)] text-white flex items-center justify-center shadow-[var(--shadow-sm)]">
+            <X size={11} />
+          </span>
         </button>
       )}
     </div>

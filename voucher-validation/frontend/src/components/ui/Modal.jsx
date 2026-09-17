@@ -47,7 +47,9 @@ export default function Modal({
     <AnimatePresence>
       {open && (
         <motion.div
-          className="fixed inset-0 z-[60] flex items-center justify-center p-4 sm:p-6"
+          // A phone gets a bottom sheet: full width, anchored to the bottom
+          // edge where the thumb is, as tall as the screen allows.
+          className="fixed inset-0 z-[60] flex items-end justify-center p-0 sm:items-center sm:p-6"
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
@@ -66,10 +68,10 @@ export default function Modal({
           {/* Panel */}
           <motion.div
             className={
-              `relative w-full ${widths[width]} max-h-[88vh] flex flex-col ` +
+              `relative w-full ${widths[width]} max-h-[92dvh] sm:max-h-[88vh] flex flex-col ` +
               `bg-[var(--surface-raised)] ` +
               `border border-[var(--border-default)] ` +
-              `rounded-2xl shadow-[var(--shadow-elevated)] ` +
+              `rounded-t-2xl rounded-b-none sm:rounded-2xl shadow-[var(--shadow-elevated)] ` +
               `overflow-hidden grain ${className}`
             }
             initial={{ scale: 0.98, opacity: 0, y: 12 }}
@@ -105,8 +107,8 @@ function Header({
   return (
     <div
       className={
-        `relative flex items-start justify-between gap-4 ` +
-        `px-7 pt-6 pb-5 ` +
+        `relative flex items-start justify-between gap-3 sm:gap-4 ` +
+        `px-5 pt-5 pb-4 sm:px-7 sm:pt-6 sm:pb-5 ` +
         `border-b border-[var(--border-subtle)] ` +
         className
       }
@@ -115,7 +117,7 @@ function Header({
         {Icon && (
           <span
             className={
-              "shrink-0 w-11 h-11 rounded-[13px] flex items-center justify-center " +
+              "shrink-0 w-10 h-10 sm:w-11 sm:h-11 rounded-[13px] flex items-center justify-center " +
               "bg-[var(--brand-soft)] text-[var(--brand)] " +
               "border border-[var(--brand-soft-hover)]"
             }
@@ -129,7 +131,7 @@ function Header({
               {eyebrow}
             </span>
           )}
-          <h2 className="text-[18px] font-semibold tracking-tight text-[var(--text-primary)] leading-tight">
+          <h2 className="text-[17px] sm:text-[18px] font-semibold tracking-tight text-[var(--text-primary)] leading-tight">
             {title}
           </h2>
           {subtitle && (
@@ -140,7 +142,7 @@ function Header({
         </div>
       </div>
       {onClose && (
-        <IconButton onClick={onClose} aria-label="Close" size="sm">
+        <IconButton onClick={onClose} aria-label="Close" size="sm" className="shrink-0">
           <X size={16} />
         </IconButton>
       )}
@@ -166,7 +168,7 @@ function Header({
  */
 function Body({ children, className = "" }) {
   return (
-    <div className={`min-h-0 flex-1 overflow-y-auto px-7 py-6 ${className}`}>
+    <div className={`min-h-0 flex-1 overflow-y-auto overscroll-contain px-5 py-5 sm:px-7 sm:py-6 ${className}`}>
       {children}
     </div>
   );
@@ -177,8 +179,9 @@ function Footer({ children, className = "" }) {
   return (
     <div
       className={
-        `shrink-0 flex items-center justify-end gap-2.5 ` +
-        `px-7 py-4 ` +
+        `shrink-0 flex flex-wrap items-center justify-end gap-2.5 ` +
+        // Clear of the home indicator on a phone.
+        `px-5 pt-3.5 pb-[max(0.875rem,env(safe-area-inset-bottom))] sm:px-7 sm:py-4 ` +
         `border-t border-[var(--border-subtle)] ` +
         `bg-[var(--surface-sunken)] ` +
         className

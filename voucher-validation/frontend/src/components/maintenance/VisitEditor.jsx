@@ -37,6 +37,13 @@ const CONDITION_OPTIONS = ["ok", "attention", "faulty", "na"].map((v) => ({
 
 const fmtDate = (d) => (d ? new Date(d).toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" }) : "—");
 
+// On a phone the condition picker spans the card and each option is a
+// thumb-height target; from sm up it is the compact pill it always was.
+const PHONE_SEGMENTED = "max-sm:flex max-sm:w-full max-sm:[&>button]:grow max-sm:[&>button]:justify-center max-sm:[&>button]:h-9";
+// Photos are the evidence an engineer is checking before filing, so they are a
+// size larger on a phone, where there is no hover to preview them.
+const PHONE_THUMB = "max-sm:h-20 max-sm:w-20";
+
 export default function VisitEditor({ visitId, isAdmin, onClose, onChanged }) {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -255,7 +262,9 @@ export default function VisitEditor({ visitId, isAdmin, onClose, onChanged }) {
                     onChange={(e) => setData((d) => ({ ...d, visit: { ...d.visit, visitDate: e.target.value } }))}
                   />
                 </Field>
-                <Field label="Engineer">
+                {/* On a phone the header's subtitle already names the engineer;
+                    a disabled box repeating it is a screen of scroll for nothing. */}
+                <Field label="Engineer" className="max-sm:hidden">
                   <Input value={visit?.engineerName || ""} disabled />
                 </Field>
               </div>
@@ -300,6 +309,7 @@ export default function VisitEditor({ visitId, isAdmin, onClose, onChanged }) {
                       ) : (
                         <Segmented
                           size="sm"
+                          className={PHONE_SEGMENTED}
                           options={CONDITION_OPTIONS}
                           value={c.condition}
                           onChange={(v) => setCheck(c.key, { condition: v })}
@@ -329,6 +339,7 @@ export default function VisitEditor({ visitId, isAdmin, onClose, onChanged }) {
                           photoId={p.id}
                           caption={p.caption}
                           size="sm"
+                          className={PHONE_THUMB}
                           onRemove={locked ? undefined : removePhoto}
                           onOpen={(url) => setLightbox({ url, caption: c.label })}
                         />
@@ -348,7 +359,9 @@ export default function VisitEditor({ visitId, isAdmin, onClose, onChanged }) {
                         <span className="text-[11.5px] text-[var(--fg-muted)]">No photo</span>
                       )}
 
-                      <span className="ml-auto flex items-center gap-2">
+                      {/* On a phone the filing control gets a line of its own:
+                          "File this" is the action the card is for. */}
+                      <span className="ml-auto flex items-center gap-2 max-sm:ml-0 max-sm:w-full max-sm:justify-between">
                         {c.status === "submitted" ? (
                           <>
                             <span className="text-[11.5px] text-[var(--success-fg)] flex items-center gap-1">
@@ -365,6 +378,7 @@ export default function VisitEditor({ visitId, isAdmin, onClose, onChanged }) {
                             <Button
                               variant="primary"
                               size="sm"
+                              className="max-sm:w-full"
                               onClick={() => fileComponent(c.key)}
                               loading={filing === c.key}
                               disabled={
@@ -385,6 +399,17 @@ export default function VisitEditor({ visitId, isAdmin, onClose, onChanged }) {
                           )
                         )}
                       </span>
+                      {/* Why "File this" is greyed out. On desktop the button's
+                          tooltip says it; a finger never hovers, so a phone
+                          gets the reason in words under the button. */}
+                      {!locked && filing !== c.key &&
+                        (c.condition === "na" ? !String(c.notes || "").trim() : c.photos.length === 0) && (
+                          <span className="w-full text-center text-[11.5px] text-[var(--fg-muted)] sm:hidden">
+                            {c.condition === "na"
+                              ? "Say why it is not applicable in the notes to file it."
+                              : "Add at least one photo to file this."}
+                          </span>
+                        )}
                     </div>
                   </div>
                 );
@@ -422,6 +447,7 @@ export default function VisitEditor({ visitId, isAdmin, onClose, onChanged }) {
                     photoId={p.id}
                     caption={p.caption}
                     size="sm"
+                    className={PHONE_THUMB}
                     onRemove={readOnly ? undefined : removePhoto}
                     onOpen={(url) => setLightbox({ url, caption: "General" })}
                   />
@@ -449,21 +475,23 @@ export default function VisitEditor({ visitId, isAdmin, onClose, onChanged }) {
       <Modal.Footer>
         {readOnly ? (
           <>
-            <span className="mr-auto flex items-center gap-1.5 text-[11.5px] text-[var(--fg-muted)]">
+            <span className="mr-auto flex items-center gap-1.5 text-[11.5px] text-[var(--fg-muted)] max-sm:basis-full">
               <Lock size={12} /> Filed reports are locked as evidence
             </span>
             {isAdmin && (
-              <Button variant="secondary" onClick={reopen} iconLeft={<Unlock size={14} />}>
+              <Button variant="secondary" className="max-sm:grow" onClick={reopen} iconLeft={<Unlock size={14} />}>
                 Reopen report
               </Button>
             )}
-            <Button variant="primary" onClick={onClose}>Close</Button>
+            <Button variant="primary" className="max-sm:grow" onClick={onClose}>Close</Button>
           </>
         ) : (
           <>
             {/* No all-or-nothing step: each component files itself, and the
                 report completes when the last one is in. */}
-            <span className="mr-auto flex items-center gap-1.5 text-[11.5px] text-[var(--fg-muted)]">
+            {/* On a phone: the status on its own line, the two buttons
+                sharing the row beneath it. */}
+            <span className="mr-auto flex items-center gap-1.5 text-[11.5px] text-[var(--fg-muted)] max-sm:basis-full">
               {filedCount === totalCount ? (
                 <>
                   <CheckCircle2 size={12} className="text-[var(--success-fg)]" />
@@ -476,10 +504,10 @@ export default function VisitEditor({ visitId, isAdmin, onClose, onChanged }) {
                 </>
               )}
             </span>
-            <Button variant="secondary" onClick={() => save()} loading={saving} iconLeft={!saving && <Save size={14} />}>
+            <Button variant="secondary" className="max-sm:grow" onClick={() => save()} loading={saving} iconLeft={!saving && <Save size={14} />}>
               Save draft
             </Button>
-            <Button variant="primary" onClick={onClose}>Done for now</Button>
+            <Button variant="primary" className="max-sm:grow" onClick={onClose}>Done for now</Button>
           </>
         )}
       </Modal.Footer>
@@ -490,7 +518,7 @@ export default function VisitEditor({ visitId, isAdmin, onClose, onChanged }) {
           onClick={() => setLightbox(null)}
         >
           <button
-            className="absolute top-4 right-4 text-white/80 hover:text-white"
+            className="absolute top-4 right-4 text-white/80 hover:text-white pointer-coarse:top-[max(0.75rem,env(safe-area-inset-top))] pointer-coarse:right-3 pointer-coarse:p-2.5 pointer-coarse:rounded-full pointer-coarse:bg-black/40"
             onClick={() => setLightbox(null)}
             aria-label="Close"
           >

@@ -19,14 +19,17 @@ export default function MonthPicker({ state, compact = false }) {
   const { month, months, loading, select, step, canGoBack, canGoForward, reload } = state;
 
   return (
-    <div className="flex items-center gap-1.5">
+    // A full row of its own on a phone, the window select taking the slack, so
+    // it lines up with the header's other controls instead of floating.
+    <div className="flex items-center gap-1.5 max-sm:w-full">
       <Button variant="ghost" size="sm" onClick={() => step(1)} disabled={!canGoBack} aria-label="Earlier month">
         <ChevronLeft size={15} />
       </Button>
+      <div className="max-sm:flex-1 max-sm:min-w-0">
       <Select
         value={month}
         onChange={(e) => select(e.target.value)}
-        className={compact ? "min-w-[168px]" : "min-w-[205px]"}
+        className={compact ? "min-w-[168px] max-sm:min-w-0" : "min-w-[205px] max-sm:min-w-0"}
         aria-label="Reporting window"
       >
         <optgroup label="Quick ranges">
@@ -44,6 +47,7 @@ export default function MonthPicker({ state, compact = false }) {
           </optgroup>
         )}
       </Select>
+      </div>
       <Button variant="ghost" size="sm" onClick={() => step(-1)} disabled={!canGoForward} aria-label="Later month">
         <ChevronRight size={15} />
       </Button>

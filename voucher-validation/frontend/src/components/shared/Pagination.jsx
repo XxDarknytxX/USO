@@ -9,7 +9,7 @@ export default function Pagination({ page, totalPages, total, onPageChange }) {
   return (
     <div
       className={
-        "flex items-center justify-between gap-3 px-5 py-3 " +
+        "flex flex-wrap items-center justify-between gap-x-3 gap-y-2 px-4 py-3 sm:px-5 " +
         "border-t border-[var(--border-subtle)] bg-[var(--surface-sunken)]"
       }
     >
@@ -39,7 +39,7 @@ export default function Pagination({ page, totalPages, total, onPageChange }) {
               key={pageNum}
               onClick={() => onPageChange(pageNum)}
               className={
-                "min-w-[28px] h-7 px-2 rounded text-[12px] font-mono transition-colors focus-ring " +
+                "min-w-[28px] h-7 px-2 pointer-coarse:min-w-9 pointer-coarse:h-9 rounded text-[12px] font-mono transition-colors focus-ring " +
                 (active
                   ? "bg-[var(--brand-soft)] text-[var(--brand-fg-on-soft)] border border-[var(--brand-soft-hover)]"
                   : "text-[var(--text-secondary)] border border-transparent hover:bg-[var(--surface-hover)] hover:text-[var(--text-primary)]")
@@ -68,7 +68,7 @@ function PageNavButton({ children, disabled, ...props }) {
       {...props}
       disabled={disabled}
       className={
-        "h-7 w-7 flex items-center justify-center rounded " +
+        "h-7 w-7 pointer-coarse:h-9 pointer-coarse:w-9 flex items-center justify-center rounded " +
         "text-[var(--text-tertiary)] hover:bg-[var(--surface-hover)] hover:text-[var(--text-primary)] " +
         "disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent " +
         "focus-ring transition-colors"

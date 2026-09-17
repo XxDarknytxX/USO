@@ -31,6 +31,39 @@ import VisitEditor from "../components/maintenance/VisitEditor";
 const fmtDate = (d) =>
   d ? new Date(d).toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" }) : "—";
 
+const cx = (...p) => p.filter(Boolean).join(" ");
+
+/*
+ * Phone cards. Below 640px DataTable turns each row into a card of labelled
+ * lines; these tune that card and do nothing on a wider screen. The `!` is
+ * needed because the stacking CSS is unlayered and would otherwise win.
+ *  • PHONE_HIDE — a line that only says "—", or repeats the card's title.
+ *  • PHONE_ACTIONS — the row's buttons: no "ACTION" label, full width, for a thumb.
+ *  • PHONE_BLOCK — prose (notes): label above, text left-aligned below it,
+ *    rather than a ragged right-aligned paragraph.
+ */
+const PHONE_HIDE = "max-sm:hidden!";
+const PHONE_ACTIONS = "max-sm:before:hidden! max-sm:pt-1";
+const PHONE_ACTIONS_ROW = "max-sm:w-full! max-sm:ml-0!";
+const PHONE_BLOCK = "max-sm:flex-col max-sm:gap-1! max-sm:text-left!";
+
+/**
+ * The card title on a phone: the village, with the date under it and an
+ * optional status at the right. Hidden from sm up, where the table's own
+ * columns say the same thing.
+ */
+function PhoneTitle({ title, sub, aside }) {
+  return (
+    <span className="flex flex-1 items-start justify-between gap-3 sm:hidden">
+      <span className="flex min-w-0 flex-col">
+        <span className="text-[14px] font-semibold text-[var(--fg-primary)]">{title}</span>
+        {sub && <span className="text-[12px] text-[var(--fg-muted)]">{sub}</span>}
+      </span>
+      {aside && <span className="shrink-0">{aside}</span>}
+    </span>
+  );
+}
+
 const CONDITION_TONE = { ok: "success", attention: "warning", faulty: "danger", na: "neutral" };
 const CONDITION_LABEL = { ok: "OK", attention: "Needs attention", faulty: "Faulty", na: "N/A" };
 
@@ -235,7 +268,7 @@ export default function MaintenancePage() {
           ]}
         />
         {tab !== "schedule" && (
-          <div className="ml-auto flex flex-wrap items-center gap-2.5">
+          <div className="ml-auto flex flex-wrap items-center gap-2.5 max-sm:flex-col max-sm:items-stretch">
             {villageFilter}
             {tab === "submissions" && (
               <Select
@@ -305,9 +338,14 @@ export default function MaintenancePage() {
                           onClick={() => navigate(`/maintenance/village/${s.projectId}`)}
                         />
                       </Td>
-                      <Td nowrap>{fmtDate(s.lastVisitDate)}</Td>
-                      <Td>{s.lastEngineer || "—"}</Td>
-                      <Td><ConditionPill value={s.lastCondition} /></Td>
+                      {/* On a phone card, what is due leads and the last visit
+                          follows; a village never serviced has no last visit
+                          to show, so those lines go rather than read "—". */}
+                      <Td nowrap className={cx("max-sm:order-2", !s.lastVisitDate && PHONE_HIDE)}>
+                        {fmtDate(s.lastVisitDate)}
+                      </Td>
+                      <Td className={cx("max-sm:order-2", !s.lastEngineer && PHONE_HIDE)}>{s.lastEngineer || "—"}</Td>
+                      <Td className={cx("max-sm:order-1", !s.lastCondition && PHONE_HIDE)}><ConditionPill value={s.lastCondition} /></Td>
                       <Td nowrap>
                         <span
                           className={
@@ -320,11 +358,12 @@ export default function MaintenancePage() {
                           {dueLabel(s)}
                         </span>
                       </Td>
-                      <Td align="right">
-                        <div className="flex items-center justify-end gap-2">
+                      <Td align="right" className={cx("max-sm:order-3", PHONE_ACTIONS)}>
+                        <div className={cx("flex items-center justify-end gap-2", PHONE_ACTIONS_ROW)}>
                           <Button
                             variant="secondary"
                             size="sm"
+                            className="max-sm:flex-1"
                             iconLeft={<Wrench size={13} />}
                             onClick={() => navigate(`/maintenance/village/${s.projectId}`)}
                           >
@@ -372,25 +411,35 @@ export default function MaintenancePage() {
                 {loading ? (
                   <TableMessage colSpan={7}>Loading…</TableMessage>
                 ) : (
-                  scopedVisits.map((v) => (
+                  scopedVisits.map((v) => {
+                    const statusPill =
+                      v.status === "submitted" ? (
+                        <StatusPill tone="success" dot={false}>
+                          <Lock size={10} /> Filed
+                        </StatusPill>
+                      ) : (
+                        <StatusPill tone="warning">Draft</StatusPill>
+                      );
+                    return (
                     <tr key={v.id}>
-                      <Td nowrap>{fmtDate(v.visitDate)}</Td>
-                      <Td strong>{v.projectName || "—"}</Td>
-                      <Td>{v.engineerName || "—"}</Td>
-                      <Td><ConditionPill value={v.overallCondition} /></Td>
-                      <Td align="right" className="tabular-nums">{v.photoCount ?? 0}</Td>
-                      <Td>
-                        {v.status === "submitted" ? (
-                          <StatusPill tone="success" dot={false}>
-                            <Lock size={10} /> Filed
-                          </StatusPill>
-                        ) : (
-                          <StatusPill tone="warning">Draft</StatusPill>
-                        )}
+                      {/* A phone card is titled by the village, not the date. */}
+                      <Td nowrap>
+                        <PhoneTitle title={v.projectName || "—"} sub={fmtDate(v.visitDate)} aside={statusPill} />
+                        <span className="max-sm:hidden">{fmtDate(v.visitDate)}</span>
                       </Td>
-                      <Td align="right">
-                        <div className="flex items-center justify-end gap-1">
-                          <Button variant="ghost" size="sm" onClick={() => setOpenVisit(v.id)}>
+                      <Td strong className={PHONE_HIDE}>{v.projectName || "—"}</Td>
+                      <Td>{v.engineerName || "—"}</Td>
+                      <Td className={cx(!v.overallCondition && PHONE_HIDE)}><ConditionPill value={v.overallCondition} /></Td>
+                      <Td align="right" className="tabular-nums">{v.photoCount ?? 0}</Td>
+                      <Td className={PHONE_HIDE}>{statusPill}</Td>
+                      <Td align="right" className={PHONE_ACTIONS}>
+                        <div className={cx("flex items-center justify-end gap-1", PHONE_ACTIONS_ROW, "max-sm:gap-2")}>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="max-sm:flex-1"
+                            onClick={() => setOpenVisit(v.id)}
+                          >
                             {v.status === "submitted" ? "View" : "Continue"}
                           </Button>
                           {/* Drafts only — a filed report is evidence, and an
@@ -409,7 +458,8 @@ export default function MaintenancePage() {
                         </div>
                       </Td>
                     </tr>
-                  ))
+                    );
+                  })
                 )}
               </tbody>
             </DataTable>
@@ -451,17 +501,33 @@ export default function MaintenancePage() {
                 ) : (
                   scopedSubmissions.map((x, i) => (
                     <tr key={`${x.visitId}-${x.component}-${i}`}>
-                      <Td nowrap>{fmtDate(x.submittedAt)}</Td>
-                      <Td strong>{x.projectName || "—"}</Td>
+                      <Td nowrap>
+                        <PhoneTitle
+                          title={x.projectName || "—"}
+                          sub={x.submittedAt ? `Filed ${fmtDate(x.submittedAt)}` : null}
+                          aside={x.condition ? <ConditionPill value={x.condition} /> : null}
+                        />
+                        <span className="max-sm:hidden">{fmtDate(x.submittedAt)}</span>
+                      </Td>
+                      <Td strong className={PHONE_HIDE}>{x.projectName || "—"}</Td>
                       <Td>{x.componentLabel}</Td>
-                      <Td><ConditionPill value={x.condition} /></Td>
+                      <Td className={PHONE_HIDE}><ConditionPill value={x.condition} /></Td>
                       <Td align="right" className="tabular-nums">{x.photoCount}</Td>
                       <Td>{x.engineerName || "—"}</Td>
-                      <Td className="max-w-[280px] truncate">
-                        <span title={x.notes || ""}>{x.notes || "—"}</span>
+                      {/* Truncated to one line in the table; a phone card has
+                          the room to show the note whole. */}
+                      <Td className={cx("sm:max-w-[280px] sm:truncate", PHONE_BLOCK, !x.notes && PHONE_HIDE)}>
+                        <span title={x.notes || ""} className="max-sm:ml-0!">{x.notes || "—"}</span>
                       </Td>
-                      <Td align="right">
-                        <Button variant="ghost" size="sm" onClick={() => setOpenVisit(x.visitId)}>Open</Button>
+                      <Td align="right" className={PHONE_ACTIONS}>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className={cx("max-sm:flex-1", PHONE_ACTIONS_ROW)}
+                          onClick={() => setOpenVisit(x.visitId)}
+                        >
+                          Open
+                        </Button>
                       </Td>
                     </tr>
                   ))

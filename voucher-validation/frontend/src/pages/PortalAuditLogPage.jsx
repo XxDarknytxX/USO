@@ -13,7 +13,7 @@ import { useEffect, useState, useCallback } from "react";
 import toast from "react-hot-toast";
 import { format } from "date-fns";
 import { motion, AnimatePresence } from "framer-motion";
-import { FileText, ChevronDown, ChevronUp, RotateCcw, RefreshCw } from "lucide-react";
+import { FileText, ChevronDown, ChevronUp, RotateCcw, RefreshCw, SlidersHorizontal } from "lucide-react";
 
 import { portalAuditApi } from "../services/api";
 import Pagination from "../components/shared/Pagination";
@@ -99,6 +99,15 @@ function formatEventLabel(eventType) {
     .join(" ");
 }
 
+/** Phone card title: the year is noise on a log that is read the same week. */
+function formatShortTimestamp(iso) {
+  try {
+    return format(new Date(iso), "MMM d, HH:mm:ss");
+  } catch {
+    return iso || "—";
+  }
+}
+
 function formatTimestamp(iso) {
   try {
     return format(new Date(iso), "MMM dd, yyyy HH:mm:ss");
@@ -138,6 +147,9 @@ export default function PortalAuditLogPage() {
   const [sessionId, setSessionId] = useState("");
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
+  // Phone only: the session and date filters fold away behind a button, so the
+  // log is not a screen and a half below the page header.
+  const [moreFilters, setMoreFilters] = useState(false);
 
   const fetchLogs = useCallback(async () => {
     setLoading(true);
@@ -166,6 +178,7 @@ export default function PortalAuditLogPage() {
   const totalPages = Math.ceil(total / limit);
   const hasFilters =
     eventType || transactionId.trim() || sessionId.trim() || startDate || endDate;
+  const foldedActive = [sessionId.trim(), startDate, endDate].filter(Boolean).length;
 
   const clearFilters = () => {
     setEventType("");
@@ -201,6 +214,8 @@ export default function PortalAuditLogPage() {
             setPage(1);
           }}
           style={{ ...PILL, width: 210 }}
+          // !important outranks the inline pill width, so the box fills its row.
+          className="max-sm:w-full! max-sm:h-10!"
           aria-label="Filter by event type"
         >
           <option value="">All events</option>
@@ -221,35 +236,64 @@ export default function PortalAuditLogPage() {
           width="w-52"
         />
 
-        <SearchInput
-          value={sessionId}
-          onChange={(e) => {
-            setSessionId(e.target.value);
-            setPage(1);
-          }}
-          placeholder="Session ID…"
-          width="w-52"
-        />
+        {/* `contents` on desktop: these stay ordinary items of the filter strip.
+            On a phone they are one foldable group. */}
+        <div
+          className={
+            "contents " +
+            (moreFilters ? "max-sm:flex max-sm:flex-col max-sm:gap-2.5 max-sm:order-2" : "max-sm:hidden")
+          }
+        >
+          <SearchInput
+            value={sessionId}
+            onChange={(e) => {
+              setSessionId(e.target.value);
+              setPage(1);
+            }}
+            placeholder="Session ID…"
+            width="w-52"
+            className="max-sm:w-full"
+          />
 
-        <DateFilter
-          label="From"
-          value={startDate}
-          onChange={(v) => {
-            setStartDate(v);
-            setPage(1);
-          }}
-        />
-        <DateFilter
-          label="To"
-          value={endDate}
-          onChange={(v) => {
-            setEndDate(v);
-            setPage(1);
-          }}
-        />
+          <DateRange>
+            <DateFilter
+              label="From"
+              value={startDate}
+              onChange={(v) => {
+                setStartDate(v);
+                setPage(1);
+              }}
+            />
+            <DateFilter
+              label="To"
+              value={endDate}
+              onChange={(v) => {
+                setEndDate(v);
+                setPage(1);
+              }}
+            />
+          </DateRange>
+        </div>
+
+        <Button
+          variant="secondary"
+          size="sm"
+          className="sm:hidden max-sm:order-1"
+          iconLeft={<SlidersHorizontal size={13} />}
+          onClick={() => setMoreFilters((v) => !v)}
+          aria-expanded={moreFilters}
+        >
+          {moreFilters ? "Fewer filters" : `More filters${foldedActive ? ` · ${foldedActive}` : ""}`}
+        </Button>
 
         {hasFilters && (
-          <Button variant="ghost" size="sm" iconLeft={<RotateCcw size={13} />} onClick={clearFilters}>
+          <Button
+            variant="ghost"
+            size="sm"
+            iconLeft={<RotateCcw size={13} />}
+            onClick={clearFilters}
+            className="max-sm:order-3"
+          >
             Clear all
           </Button>
         )}
@@ -311,18 +355,34 @@ export default function PortalAuditLogPage() {
 function LogRow({ log, isExpanded, onToggle }) {
   return (
     <>
-      <tr onClick={onToggle} className="cursor-pointer">
+      {/* On a phone the row is a card whose title line is the event and when it
+          happened — the chevron cell is the card's first cell, so it carries
+          them — and the Timestamp/Event rows stand down. An empty voucher is
+          not worth a line of its own there, and the source system (the same
+          for nearly every row) moves into the opened detail. */}
+      <tr onClick={onToggle} className="cursor-pointer" aria-expanded={isExpanded}>
         <Td>
           {/* Colour on a child, not on Td: two text-colour utilities on one
               element resolve by stylesheet order, which is not ours to pick. */}
-          <span className="text-[var(--fg-muted)]">
+          <span className="text-[var(--fg-muted)] max-sm:hidden">
             {isExpanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
           </span>
+          <span className="sm:hidden flex w-full items-center gap-2 min-w-0">
+            <Badge tone={EVENT_TONES[log.event_type] || "neutral"}>
+              {formatEventLabel(log.event_type)}
+            </Badge>
+            <span className="ml-auto text-[12px] text-[var(--fg-muted)] tabular-nums whitespace-nowrap">
+              {formatShortTimestamp(log.event_timestamp)}
+            </span>
+            <span className="shrink-0 text-[var(--fg-muted)]">
+              {isExpanded ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+            </span>
+          </span>
         </Td>
-        <Td nowrap muted>
+        <Td nowrap muted className="max-sm:hidden!">
           {formatTimestamp(log.event_timestamp)}
         </Td>
-        <Td>
+        <Td className="max-sm:hidden!">
           <Badge tone={EVENT_TONES[log.event_type] || "neutral"}>
             {formatEventLabel(log.event_type)}
           </Badge>
@@ -331,19 +391,22 @@ function LogRow({ log, isExpanded, onToggle }) {
           <span className="text-[var(--brand-fg-on-soft)]">{log.transaction_id || "—"}</span>
         </Td>
         <Td nowrap>{log.plan_key || "—"}</Td>
-        <Td mono strong nowrap>
+        <Td mono strong nowrap className={log.voucher_code ? undefined : "max-sm:hidden!"}>
           {log.voucher_code || "—"}
         </Td>
         <Td align="right" nowrap className="tabular-nums">
           {log.amount != null ? `$${Number(log.amount).toFixed(2)}` : "—"}
         </Td>
         <Td mono>{log.customer_phone || "—"}</Td>
-        <Td muted>{log.source_system || "—"}</Td>
+        <Td muted className="max-sm:hidden!">
+          {log.source_system || "—"}
+        </Td>
       </tr>
 
       <AnimatePresence>
         {isExpanded && (
-          <tr>
+          // A phone card pads its row; the detail sits flush under the card.
+          <tr className="max-sm:p-0!">
             {/* sf-table pads every cell; the expansion supplies its own padding
                 and must sit flush, and inline is the only padding the table's
                 own rule cannot win back. */}
@@ -355,7 +418,8 @@ function LogRow({ log, isExpanded, onToggle }) {
                 transition={{ duration: 0.2 }}
                 className="overflow-hidden"
               >
-                <div className="px-6 py-5 bg-[var(--bg-surface)] border-t border-[var(--border-subtle)]">
+                {/* text-left: a phone card centres a full-width cell. */}
+                <div className="px-6 py-5 max-sm:px-4 max-sm:py-4 max-sm:border-t-0 text-left bg-[var(--bg-surface)] border-t border-[var(--border-subtle)]">
                   {log.event_data?.message && (
                     <div className="mb-5 rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-elevated)] px-4 py-3">
                       <span className="text-label block mb-1">Summary</span>
@@ -363,16 +427,19 @@ function LogRow({ log, isExpanded, onToggle }) {
                     </div>
                   )}
 
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-x-6 gap-y-4 mb-5">
+                  {/* Two-up on a phone for the short identifiers; anything long
+                      (a session, a user agent, a date) takes the whole row. */}
+                  <div className="grid grid-cols-2 md:grid-cols-3 gap-x-4 md:gap-x-6 gap-y-4 mb-5">
                     <DetailItem label="Event ID" value={log.id} />
-                    <DetailItem label="Session ID" value={log.session_id} />
+                    <DetailItem label="Source" value={log.source_system} className="sm:hidden" />
+                    <DetailItem label="Session ID" value={log.session_id} wide />
                     <DetailItem label="User Group ID" value={log.user_group_id} />
                     <DetailItem label="Source IP" value={log.source_ip} />
                     <DetailItem label="Client IP" value={log.event_data?.clientIp} />
-                    <DetailItem label="User Agent" value={log.event_data?.userAgent} />
-                    <DetailItem label="Received at" value={formatTimestamp(log.received_at)} />
-                    <DetailItem label="Event timestamp" value={formatTimestamp(log.event_timestamp)} />
-                    {log.event_data?.error && <DetailItem label="Error" value={log.event_data.error} />}
+                    <DetailItem label="User Agent" value={log.event_data?.userAgent} wide />
+                    <DetailItem label="Received at" value={formatTimestamp(log.received_at)} wide />
+                    <DetailItem label="Event timestamp" value={formatTimestamp(log.event_timestamp)} wide />
+                    {log.event_data?.error && <DetailItem label="Error" value={log.event_data.error} wide />}
                   </div>
 
                   <div>
@@ -389,27 +456,34 @@ function LogRow({ log, isExpanded, onToggle }) {
   );
 }
 
-function DetailItem({ label, value }) {
+function DetailItem({ label, value, wide = false, className = "" }) {
   return (
-    <div className="min-w-0">
+    <div className={`min-w-0 ${wide ? "max-md:col-span-2" : ""} ${className}`}>
       <span className="text-label">{label}</span>
       <p className="text-[12.5px] text-[var(--fg-secondary)] font-mono mt-1 break-all">{value || "—"}</p>
     </div>
   );
 }
 
+/** From/To as one pair. `contents` on desktop, so each bound is still its own
+ *  item in the filter strip; on a phone the two sit side by side. */
+function DateRange({ children }) {
+  return <div className="contents max-sm:grid max-sm:grid-cols-2 max-sm:gap-2.5">{children}</div>;
+}
+
 /** A date bound in the Toolbar. The word carries the meaning; a stacked label
- *  would make the strip two rows tall for no gain. */
+ *  would make the strip two rows tall for no gain — except on a phone, where
+ *  the pair is half a row each and the word goes above the box. */
 function DateFilter({ label, value, onChange }) {
   return (
-    <label className="inline-flex items-center gap-2 font-display text-[11.5px] font-bold uppercase tracking-[0.07em] text-[var(--fg-muted)]">
+    <label className="inline-flex items-center gap-2 max-sm:flex max-sm:flex-col max-sm:items-stretch max-sm:gap-1 max-sm:min-w-0 font-display text-[11.5px] font-bold uppercase tracking-[0.07em] text-[var(--fg-muted)]">
       {label}
       <Input
         type="date"
         value={value}
         onChange={(e) => onChange(e.target.value)}
         style={{ ...PILL, width: 152 }}
-        className="font-sans text-[12.5px] normal-case tracking-normal"
+        className="font-sans text-[12.5px] normal-case tracking-normal max-sm:w-full! max-sm:h-10! max-sm:min-w-0"
       />
     </label>
   );

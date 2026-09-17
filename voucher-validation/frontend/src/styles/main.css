@@ -571,3 +571,162 @@ body {
   .sf-table tbody tr { transition: background-color 120ms linear; }
   .sf-table tbody tr:hover { background: var(--bg-surface); }
 }
+
+/* ═══════════════════════════════ Phones ═══════════════════════════════════
+ * Deliberately UNLAYERED: these must win over the component layers above,
+ * and only ever apply at phone width or on a touch screen.
+ * ════════════════════════════════════════════════════════════════════════ */
+
+/* iOS zooms the whole page into any field whose text is under 16px, and does
+   not zoom back out. Every field is 16px on a phone. */
+@media (max-width: 639px) {
+  input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]),
+  select,
+  textarea {
+    font-size: 16px !important;
+  }
+}
+
+/* A finger is not a cursor. */
+@media (pointer: coarse) {
+  input[type="checkbox"],
+  input[type="radio"] {
+    width: 20px;
+    height: 20px;
+  }
+}
+
+/* Tables become cards on a phone (DataTable adds .sf-table--stack and copies
+   each header into its cells' data-label). A row is a card; each cell is a
+   "LABEL  value" line; the first cell is the card's title. A table that is
+   genuinely a grid opts out with <DataTable stack={false}> and scrolls.
+   These rules are deliberately unlayered, so they beat Tailwind utilities: a
+   page that needs to override one of these properties on a phone uses the
+   important form (max-sm:ml-0!, max-sm:before:hidden!). */
+@media (max-width: 639px) {
+  .sf-table--stack,
+  .sf-table--stack tbody {
+    display: block;
+    width: 100%;
+  }
+  .sf-table--stack thead {
+    display: none;
+  }
+  .sf-table--stack tbody tr {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    gap: 7px;
+    padding: 13px 16px;
+    border-bottom: 1px solid var(--border-subtle);
+  }
+  .sf-table--stack tbody tr:last-child {
+    border-bottom: 0;
+  }
+  .sf-table--stack tbody td {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 14px;
+    min-width: 0;
+    padding: 0;
+    border: 0 !important;
+    text-align: right;
+    white-space: normal !important;
+    overflow-wrap: anywhere;
+  }
+  .sf-table--stack tbody td::before {
+    content: attr(data-label);
+    flex: 0 0 auto;
+    max-width: 42%;
+    padding-top: 2px;
+    text-align: left;
+    font-family: var(--font-display);
+    font-size: 10.5px;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--fg-muted);
+  }
+  .sf-table--stack tbody td > * {
+    min-width: 0;
+  }
+  /* A labelled value sits at the right at its own size. A cell's content that
+     spreads itself across the width on desktop ("3  /  3") would otherwise be
+     pulled apart across the whole card. */
+  .sf-table--stack tbody td:not(:first-child):not([data-label=""]) > *:not(button) {
+    width: auto !important;
+    flex: 0 1 auto;
+    margin-left: auto;
+  }
+  /* An icon-only button is sized by its width class, so it keeps it. */
+  .sf-table--stack tbody td:not(:first-child):not([data-label=""]) > button {
+    flex: none;
+    margin-left: auto;
+  }
+  /* Several children in one labelled cell ("0", "/", "3") move right as one
+     group: only the first is pushed. The same goes for the card title that
+     follows a lone checkbox, which stays on the left. */
+  .sf-table--stack tbody td:not(:first-child):not([data-label=""]) > * + *:not(button),
+  .sf-table--stack tbody td:not(:first-child):not([data-label=""]) > * + button {
+    margin-left: 0;
+  }
+  .sf-table--stack tbody td:has(> input[type="checkbox"]:only-child) + td > * {
+    margin-left: 0;
+  }
+  /* A labelled line with nothing to say ("—") is left off the card. */
+  .sf-table--stack tbody td[data-blank] {
+    display: none;
+  }
+  /* Room to read, rather than an ellipsis: a phone card can wrap. */
+  .sf-table--stack tbody td .truncate {
+    white-space: normal;
+    overflow: visible;
+    text-overflow: clip;
+    overflow-wrap: anywhere;
+  }
+  /* No label: the card's title (first cell, or the cell after a lone checkbox),
+     and columns whose header is empty (actions). They run the full width. */
+  .sf-table--stack tbody td:first-child,
+  .sf-table--stack tbody td[data-label=""],
+  .sf-table--stack tbody td:has(> input[type="checkbox"]:only-child) + td {
+    justify-content: flex-start;
+    text-align: left;
+  }
+  .sf-table--stack tbody td:first-child::before,
+  .sf-table--stack tbody td[data-label=""]::before,
+  .sf-table--stack tbody td:has(> input[type="checkbox"]:only-child) + td::before {
+    display: none;
+  }
+  .sf-table--stack tbody td:first-child,
+  .sf-table--stack tbody td:has(> input[type="checkbox"]:only-child) + td {
+    font-size: 14px;
+  }
+  /* Loading / empty rows span the table: centred, no label. */
+  .sf-table--stack tbody td[colspan] {
+    display: block;
+    text-align: center;
+  }
+  .sf-table--stack tbody td[colspan]::before {
+    display: none;
+  }
+  .sf-table--stack tbody td:empty {
+    display: none;
+  }
+  /* A selection checkbox sits in the card's top-right corner. */
+  .sf-table--stack tbody td:has(> input[type="checkbox"]:only-child) {
+    position: absolute;
+    top: 13px;
+    right: 16px;
+    width: auto;
+  }
+  .sf-table--stack tbody tr:has(> td > input[type="checkbox"]:only-child) {
+    padding-right: 52px;
+  }
+  /* A list that scrolls in its own box on desktop just flows on a phone —
+     a scroll area inside a scrolling page is a trap for a thumb. */
+  .sf-table-wrap--stack {
+    max-height: none !important;
+    overflow: visible !important;
+  }
+}

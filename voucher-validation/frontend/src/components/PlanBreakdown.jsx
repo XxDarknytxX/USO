@@ -10,8 +10,10 @@
 // own: the caller wraps it in an unpadded Panel, so the table's header row sits
 // flush against the panel head instead of a card inside a card.
 
+import { useState } from "react";
 import { AlertTriangle, PackageOpen } from "lucide-react";
 import { DataTable, Th, Td, StatusPill, EmptyState, CHART_SERIES } from "./ui";
+import { PHONE_CARD, PhoneChevron, PhoneMore, phoneRowClass } from "./MonthlyBreakdown";
 
 const fmtNum = (n) => Number(n || 0).toLocaleString();
 
@@ -39,6 +41,8 @@ export default function PlanBreakdown({
   // it does in the revenue donut. A caller may still pin one colour.
   color = null,
 }) {
+  // Phones list the first few plans and offer the rest; see PhoneMore.
+  const [showAll, setShowAll] = useState(false);
   const rows = packages
     .map((p) => {
       const total = Number(p.total || 0);
@@ -59,7 +63,7 @@ export default function PlanBreakdown({
     .sort((a, b) => b.total - a.total);
 
   if (rows.length === 0) {
-    return <EmptyState icon={PackageOpen} title="No voucher packages yet" description="Plans appear once vouchers are synced." />;
+    return <EmptyState className="max-sm:py-8" icon={PackageOpen} title="No voucher packages yet" description="Plans appear once vouchers are synced." />;
   }
 
   const t = rows.reduce(
@@ -76,7 +80,7 @@ export default function PlanBreakdown({
       {/* Restock notice — the one thing on this table that needs acting on, so
           it sits above the header rather than inside a Stock column footnote. */}
       {lowPlans.length > 0 && (
-        <div className="flex items-start gap-2.5 px-5 py-3.5 bg-[var(--warning-soft)] border-b border-[var(--warning-border)]">
+        <div className="flex items-start gap-2.5 px-4 sm:px-5 py-3.5 bg-[var(--warning-soft)] border-b border-[var(--warning-border)]">
           <AlertTriangle size={15} className="text-[var(--warning-fg)] mt-0.5 shrink-0" />
           <div className="text-[12.5px] text-[var(--warning-fg)] leading-relaxed">
             <span className="font-semibold font-display">
@@ -112,25 +116,30 @@ export default function PlanBreakdown({
               key={r.name}
               onClick={onSelect ? () => onSelect(r.name) : undefined}
               title={onSelect ? `View ${r.name} vouchers` : undefined}
-              className={onSelect ? "cursor-pointer" : undefined}
+              className={[onSelect ? "cursor-pointer" : "", phoneRowClass(i, showAll)].join(" ")}
             >
-              <Td strong>
+              <Td strong className={PHONE_CARD.title}>
                 <span className="flex items-center gap-2.5 min-w-0">
                   <span
                     className="w-2.5 h-2.5 rounded-[3px] shrink-0"
                     style={{ background: color || CHART_SERIES[i % CHART_SERIES.length] }}
                   />
                   <span className="truncate">{r.name}</span>
+                  {onSelect && <PhoneChevron />}
                 </span>
               </Td>
-              <Td align="right" className="tabular-nums">{fmtNum(r.total)}</Td>
-              <Td align="right" className="tabular-nums">
-                <span className="font-semibold text-[var(--fg-primary)]">{fmtNum(r.sold)}</span>
-                <span className="text-[var(--fg-muted)] ml-1">· {r.soldPct}%</span>
+              <Td align="right" className={`tabular-nums ${PHONE_CARD.stat}`}>{fmtNum(r.total)}</Td>
+              <Td align="right" className={`tabular-nums ${PHONE_CARD.stat}`}>
+                {/* One element, not two: a stacked phone card spreads a cell's
+                    children apart, which parted the figure from its share. */}
+                <span>
+                  <span className="font-semibold text-[var(--fg-primary)]">{fmtNum(r.sold)}</span>
+                  <span className="text-[var(--fg-muted)] ml-1">· {r.soldPct}%</span>
+                </span>
               </Td>
-              <Td align="right" className="tabular-nums text-[var(--success-fg)] font-semibold">{fmtNum(r.active)}</Td>
-              <Td align="right" className="tabular-nums" muted>{fmtNum(r.expired)}</Td>
-              <Td align="right" className="tabular-nums">
+              <Td align="right" className={`tabular-nums text-[var(--success-fg)] font-semibold ${PHONE_CARD.stat}`}>{fmtNum(r.active)}</Td>
+              <Td align="right" className={`tabular-nums ${PHONE_CARD.stat}`} muted>{fmtNum(r.expired)}</Td>
+              <Td align="right" className={`tabular-nums ${PHONE_CARD.stat}`}>
                 <span
                   className="font-semibold"
                   style={{
@@ -145,26 +154,27 @@ export default function PlanBreakdown({
                   {fmtNum(r.left)}
                 </span>
               </Td>
-              <Td align="right" className="tabular-nums">{formatQuota(r.usedMb)}</Td>
-              <Td>
+              <Td align="right" className={`tabular-nums ${PHONE_CARD.stat}`}>{formatQuota(r.usedMb)}</Td>
+              <Td className={PHONE_CARD.aside}>
                 <StockPill stock={r.stock} />
               </Td>
             </tr>
           ))}
           {/* Totals live in the tbody, not a tfoot: .sf-table only pads
               `tbody td`, so a footer row would sit unpadded and out of grid. */}
-          <tr className="bg-[var(--bg-surface)]">
-            <Td strong>All plans</Td>
-            <Td align="right" strong className="tabular-nums">{fmtNum(t.total)}</Td>
-            <Td align="right" strong className="tabular-nums">{fmtNum(t.sold)}</Td>
-            <Td align="right" strong className="tabular-nums">{fmtNum(t.active)}</Td>
-            <Td align="right" strong className="tabular-nums">{fmtNum(t.expired)}</Td>
-            <Td align="right" strong className="tabular-nums">{fmtNum(t.left)}</Td>
-            <Td align="right" strong className="tabular-nums">{formatQuota(t.usedMb)}</Td>
+          <tr className={`bg-[var(--bg-surface)] ${PHONE_CARD.row}`}>
+            <Td strong className={PHONE_CARD.titleFull}>All plans</Td>
+            <Td align="right" strong className={`tabular-nums ${PHONE_CARD.stat}`}>{fmtNum(t.total)}</Td>
+            <Td align="right" strong className={`tabular-nums ${PHONE_CARD.stat}`}>{fmtNum(t.sold)}</Td>
+            <Td align="right" strong className={`tabular-nums ${PHONE_CARD.stat}`}>{fmtNum(t.active)}</Td>
+            <Td align="right" strong className={`tabular-nums ${PHONE_CARD.stat}`}>{fmtNum(t.expired)}</Td>
+            <Td align="right" strong className={`tabular-nums ${PHONE_CARD.stat}`}>{fmtNum(t.left)}</Td>
+            <Td align="right" strong className={`tabular-nums ${PHONE_CARD.stat}`}>{formatQuota(t.usedMb)}</Td>
             <Td />
           </tr>
         </tbody>
       </DataTable>
+      <PhoneMore total={rows.length} expanded={showAll} onToggle={() => setShowAll((v) => !v)} noun="plans" />
     </div>
   );
 }

@@ -31,6 +31,7 @@ import {
   PackageOpen,
   Wifi,
   Hourglass,
+  SlidersHorizontal,
 } from "lucide-react";
 
 import { voucherApi } from "../services/api";
@@ -109,6 +110,10 @@ export default function VouchersPage() {
   const [packages, setPackages] = useState([]);
   const [stats, setStats] = useState(null);
   const [viewMode, setViewMode] = useState("active");
+
+  // Phone only: the secondary filters fold behind one button so the list is
+  // not three screens down. Desktop always shows them inline.
+  const [filtersOpen, setFiltersOpen] = useState(false);
 
   // Selection
   const [selected, setSelected] = useState(new Set());
@@ -273,6 +278,10 @@ export default function VouchersPage() {
 
   const totalPages = Math.ceil(total / limit);
   const hasFilters = statusFilter || packageFilter || searchInput || phoneInput;
+  // The filters folded behind the phone "Filters" button, counted so a
+  // narrowed list never looks unexplained.
+  const foldedFilterCount = [phoneInput, statusFilter, packageFilter].filter(Boolean).length;
+  const allOnPageSelected = vouchers.length > 0 && selected.size === vouchers.length;
   const colCount = isAdmin ? 10 : 9;
 
   return (
@@ -355,7 +364,7 @@ export default function VouchersPage() {
           <Button
             variant="secondary"
             size="xs"
-            className="ml-auto"
+            className="ml-auto max-sm:w-full"
             onClick={() => { setSoldFrom(""); setSoldTo(""); setPage(1); }}
           >
             Show all vouchers
@@ -364,16 +373,35 @@ export default function VouchersPage() {
       )}
 
       <Toolbar>
-        <SearchInput
-          value={searchInput}
-          onChange={(e) => setSearchInput(e.target.value)}
-          placeholder="Search code, name, email…"
-          width="w-64"
-        />
+        {/* On a phone the search shares its row with the Filters button; from
+            sm up the wrapper dissolves (display: contents) and both sit in the
+            toolbar exactly as before — the button itself is phone-only. */}
+        <div className="flex items-center gap-2 sm:contents">
+          <SearchInput
+            value={searchInput}
+            onChange={(e) => setSearchInput(e.target.value)}
+            placeholder="Search code, name, email…"
+            width="w-64"
+            className="max-sm:w-auto max-sm:flex-1 max-sm:min-w-0 max-sm:[&_input]:text-ellipsis"
+          />
+          <Button
+            variant={foldedFilterCount ? "brand-ghost" : "secondary"}
+            size="md"
+            className="sm:hidden shrink-0"
+            onClick={() => setFiltersOpen((v) => !v)}
+            aria-expanded={filtersOpen}
+            iconLeft={<SlidersHorizontal size={14} />}
+          >
+            {foldedFilterCount ? `Filters · ${foldedFilterCount}` : "Filters"}
+          </Button>
+        </div>
 
+        {/* The phone, status and package filters fold behind that button on a
+            phone, and the view switch moves above them (flex order) so the
+            always-visible controls stay together. Desktop order is untouched. */}
         {/* Not a SearchInput: this one needs its own icon and a disabled state,
             because phone lookup only exists on the active list endpoint. */}
-        <div className="relative w-48">
+        <div className={"relative w-48 max-sm:order-2 " + (filtersOpen ? "" : "max-sm:hidden")}>
           <Phone
             size={14}
             className="absolute left-3 top-1/2 -translate-y-1/2 z-10 text-[var(--fg-muted)] pointer-events-none"
@@ -390,12 +418,12 @@ export default function VouchersPage() {
                 ? "Phone search works on the active list — clear the Search box / switch off Historical"
                 : ""
             }
-            className="h-9! rounded-full! bg-[var(--bg-surface)]! pl-9 pr-8"
+            className="h-9! max-sm:h-10! rounded-full! bg-[var(--bg-surface)]! pl-9 pr-8"
           />
           {phoneInput && (
             <button
               onClick={() => setPhoneInput("")}
-              className="absolute right-3 top-1/2 -translate-y-1/2 z-10 text-[var(--fg-muted)] hover:text-[var(--fg-primary)]"
+              className="absolute right-3 top-1/2 -translate-y-1/2 z-10 text-[var(--fg-muted)] hover:text-[var(--fg-primary)] max-sm:right-1 max-sm:h-9 max-sm:w-9 max-sm:flex max-sm:items-center max-sm:justify-center"
               aria-label="Clear phone filter"
             >
               <X size={13} />
@@ -413,9 +441,10 @@ export default function VouchersPage() {
             { value: "active", label: "Active" },
             { value: "historical", label: "Historical" },
           ]}
+          className="max-sm:order-1 max-sm:[&>button]:flex-1 max-sm:[&>button]:justify-center"
         />
 
-        <div className="w-44">
+        <div className={"w-44 max-sm:order-2 " + (filtersOpen ? "" : "max-sm:hidden")}>
           <Select
             value={statusFilter}
             onChange={(e) => {
@@ -423,7 +452,7 @@ export default function VouchersPage() {
               setPage(1);
             }}
             aria-label="Status filter"
-            className="h-9! rounded-full! bg-[var(--bg-surface)]!"
+            className="h-9! max-sm:h-10! rounded-full! bg-[var(--bg-surface)]!"
           >
             <option value="">All status</option>
             <option value="sold">Sold (not unused)</option>
@@ -435,7 +464,7 @@ export default function VouchersPage() {
         </div>
 
         {packages.length > 0 && (
-          <div className="w-52">
+          <div className={"w-52 max-sm:order-2 " + (filtersOpen ? "" : "max-sm:hidden")}>
             <Select
               value={packageFilter}
               onChange={(e) => {
@@ -443,7 +472,7 @@ export default function VouchersPage() {
                 setPage(1);
               }}
               aria-label="Package filter"
-              className="h-9! rounded-full! bg-[var(--bg-surface)]!"
+              className="h-9! max-sm:h-10! rounded-full! bg-[var(--bg-surface)]!"
             >
               <option value="">All packages</option>
               {packages.map((name) => (
@@ -459,7 +488,7 @@ export default function VouchersPage() {
           <Button
             variant="ghost"
             size="sm"
-            className="ml-auto"
+            className="ml-auto max-sm:order-3"
             onClick={() => {
               setSearchInput("");
               setPhoneInput("");
@@ -533,7 +562,9 @@ export default function VouchersPage() {
                 initial={{ height: 0, opacity: 0 }}
                 animate={{ height: "auto", opacity: 1 }}
                 exit={{ height: 0, opacity: 0 }}
-                className="overflow-hidden"
+                // A phone gets its own bar pinned to the bottom of the screen
+                // (below the list), since this one scrolls away with the header.
+                className="overflow-hidden max-sm:hidden"
               >
                 <div className="flex flex-wrap items-center gap-3 px-5 py-2.5 bg-[var(--brand-soft)] border-b border-[var(--border-subtle)]">
                   <span className="text-[12.5px] font-semibold text-[var(--brand-fg-on-soft)] font-display">
@@ -576,6 +607,23 @@ export default function VouchersPage() {
             )}
           </AnimatePresence>
 
+          {/* The header row — and its select-all box — is hidden once the rows
+              become cards, so a phone gets its own select-all line. The whole
+              line is the label, so it is one easy tap. */}
+          {isAdmin && (
+            <label className="sm:hidden flex items-center justify-between gap-3 min-h-11 px-4 border-b border-[var(--border-subtle)] bg-[var(--surface-sunken)] cursor-pointer">
+              <span className="text-[12.5px] font-semibold text-[var(--fg-secondary)] font-display">
+                {allOnPageSelected ? "Deselect all on this page" : `Select all ${vouchers.length} on this page`}
+              </span>
+              <input
+                type="checkbox"
+                checked={allOnPageSelected}
+                onChange={toggleAll}
+                className="accent-[var(--brand)] cursor-pointer"
+              />
+            </label>
+          )}
+
           <DataTable>
             <thead>
               <tr>
@@ -599,6 +647,10 @@ export default function VouchersPage() {
                 <Th align="right">Data</Th>
                 <Th>Created</Th>
                 <Th align="right">Usage</Th>
+                {/* Phone-only column (hidden from sm up, header and cells alike,
+                    so the desktop grid is unchanged). Its empty header leaves
+                    the card line unlabelled and full width. */}
+                <Th className="sm:hidden!" />
               </tr>
             </thead>
             <tbody>
@@ -610,14 +662,27 @@ export default function VouchersPage() {
                   <tr
                     key={v.uuid}
                     onClick={() => openDetail(v.uuid)}
-                    className={"cursor-pointer " + (isSelected ? "[&>td]:bg-[var(--brand-soft)]" : "")}
+                    className={
+                      // Phone: the card keeps its normal right padding — only
+                      // the title line needs to clear the checkbox (below) —
+                      // and a selected card tints whole, not cell by cell.
+                      "cursor-pointer max-sm:pr-4! " +
+                      (isSelected
+                        ? "[&>td]:bg-[var(--brand-soft)] max-sm:[&>td]:bg-transparent max-sm:bg-[var(--brand-soft)]"
+                        : "")
+                    }
                   >
                     {isAdmin && (
                       // A raw <td> here on purpose: the whole cell — padding
                       // included — must swallow the click, or ticking a box
                       // would also open the record. It still inherits
                       // .sf-table's cell padding.
-                      <td className="w-10" onClick={(e) => e.stopPropagation()}>
+                      // On a phone the cell is the card's top-right corner; its
+                      // padding makes a 36px hit area around the 20px box.
+                      <td
+                        className="w-10 max-sm:w-auto! max-sm:p-2! max-sm:top-[5px]! max-sm:right-2!"
+                        onClick={(e) => e.stopPropagation()}
+                      >
                         <input
                           type="checkbox"
                           checked={isSelected}
@@ -627,39 +692,43 @@ export default function VouchersPage() {
                         />
                       </td>
                     )}
-                    <Td nowrap>
-                      <span className="font-mono text-[13px] font-semibold tracking-tight text-[var(--fg-primary)] truncate block">
+                    <Td nowrap className={"max-sm:items-center! " + (isAdmin ? "max-sm:pr-10!" : "")}>
+                      <span className="font-mono text-[13px] font-semibold tracking-tight text-[var(--fg-primary)] truncate block max-sm:ml-0! max-sm:text-[15px]">
                         {v.voucher_code}
+                      </span>
+                      {/* Phone: the status rides on the title line. */}
+                      <span className="sm:hidden! max-sm:ml-auto! shrink-0">
+                        <StatusBadge status={v.status} />
                       </span>
                     </Td>
                     <Td>
-                      <span className="block truncate max-w-[180px]">{v.package_name || "—"}</span>
+                      <span className="block truncate max-w-[180px] max-sm:max-w-none">{v.package_name || "—"}</span>
                     </Td>
-                    <Td>
+                    <Td className="max-sm:hidden!">
                       <StatusBadge status={v.status} />
                     </Td>
-                    <Td mono nowrap>
+                    <Td mono nowrap className={v.payer_phone ? "" : "max-sm:hidden!"}>
                       {v.payer_phone || "—"}
                     </Td>
-                    <Td align="right" nowrap className="tabular-nums">
+                    <Td align="right" nowrap className="tabular-nums max-sm:hidden!">
                       <span className="font-semibold text-[var(--fg-primary)]">{v.current_clients}</span>
                       <span className="text-[var(--fg-subtle)] mx-0.5">/</span>
                       <span>{v.max_clients}</span>
                     </Td>
-                    <Td align="right" nowrap className="tabular-nums">
+                    <Td align="right" nowrap className="tabular-nums max-sm:hidden!">
                       <span className="font-semibold text-[var(--fg-primary)]">{formatMin(v.used_time)}</span>
                       <span className="text-[var(--fg-subtle)] mx-0.5">/</span>
                       <span>{formatMin(v.time_period)}</span>
                     </Td>
-                    <Td align="right" nowrap className="tabular-nums">
+                    <Td align="right" nowrap className="tabular-nums max-sm:hidden!">
                       <span className="font-semibold text-[var(--fg-primary)]">{formatMB(v.used_quota)}</span>
                       <span className="text-[var(--fg-subtle)] mx-0.5">/</span>
                       <span>{formatMB(v.quota)}</span>
                     </Td>
-                    <Td muted nowrap className="tabular-nums">
+                    <Td muted nowrap className="tabular-nums max-sm:hidden!">
                       {v.create_time ? fmtShortDate(Number(v.create_time)) : "—"}
                     </Td>
-                    <Td align="right" nowrap>
+                    <Td align="right" nowrap className="max-sm:hidden!">
                       <a
                         href={usageUrl(v)}
                         target="_blank"
@@ -671,6 +740,31 @@ export default function VouchersPage() {
                         <ExternalLink size={12} /> Usage
                       </a>
                     </Td>
+                    {/* Phone-only: consumption as a three-up strip, then the
+                        created date and the usage-page link as a real button. */}
+                    <td className="sm:hidden!">
+                      <div className="w-full flex flex-col gap-2.5 pt-0.5">
+                        <div className="grid grid-cols-3 rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-surface)] divide-x divide-[var(--border-subtle)]">
+                          <UsageFigure label="Clients" used={v.current_clients ?? 0} of={v.max_clients ?? 0} />
+                          <UsageFigure label="Time" used={formatMin(v.used_time)} of={formatMin(v.time_period)} />
+                          <UsageFigure label="Data" used={formatMB(v.used_quota)} of={formatMB(v.quota)} />
+                        </div>
+                        <div className="flex items-center justify-between gap-3">
+                          <span className="text-[12px] text-[var(--fg-muted)] tabular-nums">
+                            {v.create_time ? `Created ${fmtShortDate(Number(v.create_time))}` : "Created —"}
+                          </span>
+                          <a
+                            href={usageUrl(v)}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            onClick={(e) => e.stopPropagation()}
+                            className="inline-flex shrink-0 items-center gap-1.5 h-9 px-3.5 rounded-full border border-[var(--input-border)] bg-[var(--surface)] text-[12.5px] font-semibold text-[var(--fg-secondary)] shadow-[var(--shadow-xs)] active:bg-[var(--surface-pressed)] font-display"
+                          >
+                            <ExternalLink size={13} /> Usage page
+                          </a>
+                        </div>
+                      </div>
+                    </td>
                   </tr>
                 );
               })}
@@ -680,6 +774,43 @@ export default function VouchersPage() {
           <Pagination page={page} totalPages={totalPages} total={total} onPageChange={setPage} />
         </Panel>
       )}
+
+      {/* Phone bulk bar. Sticky, not fixed: it rides the bottom of the screen
+          while the list scrolls, then settles into its own place below the
+          pagination, so at the end of the page it covers nothing. */}
+      <AnimatePresence>
+        {isAdmin && selected.size > 0 && (
+          <motion.div
+            initial={{ y: 16, opacity: 0 }}
+            animate={{ y: 0, opacity: 1 }}
+            exit={{ y: 16, opacity: 0 }}
+            transition={{ duration: 0.15 }}
+            className="sm:hidden sticky bottom-[max(0.75rem,env(safe-area-inset-bottom))] z-30 rounded-2xl border border-[var(--border-default)] bg-[var(--bg-elevated)] shadow-[var(--shadow-elevated)] p-3"
+            role="region"
+            aria-label="Bulk actions"
+          >
+            <div className="flex items-center justify-between gap-3 mb-2.5 pl-1">
+              <span className="text-[13px] font-semibold text-[var(--fg-primary)] font-display">
+                {selected.size} selected
+              </span>
+              <Button variant="ghost" size="xs" onClick={() => setSelected(new Set())} iconLeft={<X size={13} />}>
+                Clear
+              </Button>
+            </div>
+            <div className="grid grid-cols-3 gap-2">
+              <Button variant="secondary" size="sm" onClick={() => handleBulk("enable")} iconLeft={<CheckCircle size={13} />}>
+                Enable
+              </Button>
+              <Button variant="secondary" size="sm" onClick={() => handleBulk("disable")} iconLeft={<Ban size={13} />}>
+                Disable
+              </Button>
+              <Button variant="danger" size="sm" onClick={() => handleBulk("delete")} iconLeft={<Trash2 size={13} />}>
+                Delete
+              </Button>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* ----- Modals ----- */}
       <AnimatePresence>
@@ -721,6 +852,17 @@ export default function VouchersPage() {
 }
 
 /* ------------ Local helpers ------------------------------------------------ */
+
+// One figure in the phone card's usage strip: used on top, the allowance under.
+function UsageFigure({ label, used, of }) {
+  return (
+    <div className="min-w-0 px-2.5 py-2">
+      <div className="text-[10px] font-bold uppercase tracking-[0.06em] text-[var(--fg-muted)] font-display">{label}</div>
+      <div className="mt-0.5 text-[14px] font-semibold text-[var(--fg-primary)] tabular-nums leading-tight break-words">{used}</div>
+      <div className="text-[11.5px] text-[var(--fg-muted)] tabular-nums leading-tight break-words">of {of}</div>
+    </div>
+  );
+}
 
 // "16 Sep 2026" — the console's date shape everywhere else. A bare
 // toLocaleDateString() renders "9/16/2026", which is the one ambiguous format

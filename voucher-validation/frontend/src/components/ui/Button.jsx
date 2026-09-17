@@ -16,10 +16,12 @@ const baseStyles =
   "active:scale-[0.98] disabled:pointer-events-none disabled:opacity-45 " +
   "focus-ring rounded-full whitespace-nowrap select-none";
 
+// The small sizes grow on a touch screen: 28px is a comfortable click and a
+// miss for a thumb. Desktop density is unchanged.
 const sizes = {
-  xs: "h-7 px-3 text-[12px] gap-1.5",
-  sm: "h-8 px-3.5 text-[12.5px]",
-  md: "h-9 px-4 text-[13px]",
+  xs: "h-7 px-3 text-[12px] gap-1.5 pointer-coarse:h-9",
+  sm: "h-8 px-3.5 text-[12.5px] pointer-coarse:h-9",
+  md: "h-9 px-4 text-[13px] pointer-coarse:h-10",
   lg: "h-11 px-5 text-[14px]",
 };
 
@@ -83,7 +85,7 @@ export default Button;
 
 /** Icon-only button. Round, to match the pill family. */
 export function IconButton({ size = "md", variant = "ghost", className = "", children, ...props }) {
-  const dims = { xs: "h-7 w-7", sm: "h-8 w-8", md: "h-9 w-9", lg: "h-10 w-10" };
+  const dims = { xs: "h-7 w-7 pointer-coarse:h-9 pointer-coarse:w-9", sm: "h-8 w-8 pointer-coarse:h-9 pointer-coarse:w-9", md: "h-9 w-9 pointer-coarse:h-10 pointer-coarse:w-10", lg: "h-10 w-10" };
   return (
     <button {...props} className={`${baseStyles} ${dims[size]} ${variants[variant]} ${className} px-0`}>
       {children}

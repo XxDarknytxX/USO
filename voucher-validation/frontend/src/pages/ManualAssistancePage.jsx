@@ -197,6 +197,9 @@ export default function ManualAssistancePage() {
         <Segmented
           value={statusFilter}
           onChange={setStatusFilter}
+          // A phone gives the segment a full row; share it out evenly rather
+          // than leaving three pills huddled at the left.
+          className="max-sm:[&>button]:flex-1 max-sm:[&>button]:justify-center"
           options={[
             { value: "open", label: "Open", count: unresolved || undefined },
             { value: "resolved", label: "Resolved" },
@@ -253,17 +256,34 @@ export default function ManualAssistancePage() {
                 <TableMessage colSpan={COLUMNS}>No case matches “{query.trim()}”.</TableMessage>
               ) : (
                 shown.map((c) => (
+                  // On a phone each case is a card: the customer with what
+                  // they paid opposite on the title line, then the code to
+                  // hand over, and the two actions as a full-width pair at the
+                  // foot — the part of the card a thumb is nearest.
                   <tr key={c.transactionId}>
                     <Td>
-                      <RecordCell
-                        tone="orange"
-                        icon={<Phone size={14} />}
-                        title={c.customerPhone || "Unknown number"}
-                        subtitle={c.transactionId}
-                        mono
-                      />
+                      <span className="flex items-start gap-3 min-w-0 max-sm:w-full">
+                        <span className="min-w-0 flex-1">
+                          <RecordCell
+                            tone="orange"
+                            icon={<Phone size={14} />}
+                            title={c.customerPhone || "Unknown number"}
+                            subtitle={c.transactionId}
+                            mono
+                          />
+                        </span>
+                        {/* Capped, so a long plan name wraps under the amount
+                            rather than squeezing the transaction id into a
+                            column of fragments. */}
+                        <span className="sm:hidden shrink-0 max-w-[42%] text-right">
+                          <span className="block font-semibold text-[var(--fg-primary)] tabular-nums">
+                            {fmtMoney(c.amount)}
+                          </span>
+                          <span className="block text-[11.5px] text-[var(--fg-muted)]">{c.planName || "—"}</span>
+                        </span>
+                      </span>
                     </Td>
-                    <Td align="right" nowrap>
+                    <Td align="right" nowrap className="max-sm:hidden!">
                       <span className="font-semibold text-[var(--fg-primary)] tabular-nums">
                         {fmtMoney(c.amount)}
                       </span>
@@ -276,7 +296,7 @@ export default function ManualAssistancePage() {
                         <button
                           onClick={() => copy(c.voucherCode)}
                           title="Copy code"
-                          className="inline-flex items-center gap-1.5 px-2 py-1 rounded-md font-mono text-[12.5px] font-semibold bg-[var(--brand-soft)] text-[var(--brand-fg-on-soft)] hover:opacity-80 transition-opacity"
+                          className="inline-flex items-center gap-1.5 px-2 py-1 rounded-md font-mono text-[12.5px] font-semibold bg-[var(--brand-soft)] text-[var(--brand-fg-on-soft)] hover:opacity-80 transition-opacity pointer-coarse:min-h-9 pointer-coarse:px-3"
                         >
                           <Ticket size={12} />
                           {c.voucherCode}
@@ -296,8 +316,8 @@ export default function ManualAssistancePage() {
                         <StatusPill tone="warning">Open</StatusPill>
                       )}
                     </Td>
-                    <Td align="right">
-                      <div className="flex items-center justify-end gap-2">
+                    <Td align="right" className="max-sm:before:hidden! max-sm:pt-1.5!">
+                      <div className="flex items-center justify-end gap-2 max-sm:w-full! max-sm:[&>*]:flex-1 max-sm:[&>*]:basis-0">
                         {/* Only offered when we actually have an address for
                             this number — there is nothing to email otherwise.
                             The reason is shown rather than the button simply
@@ -315,7 +335,7 @@ export default function ManualAssistancePage() {
                             </Button>
                           ) : (
                             <span
-                              className="text-[11.5px] text-[var(--fg-muted)] whitespace-nowrap"
+                              className="text-[11.5px] text-[var(--fg-muted)] whitespace-nowrap max-sm:whitespace-normal max-sm:text-left"
                               title="Add this number under M-PAiSA Mapping to email their code"
                             >
                               No email on file
@@ -353,7 +373,7 @@ export default function ManualAssistancePage() {
           />
           <Modal.Body>
             <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-surface)] px-4 py-3.5 mb-6">
-              <dl className="grid grid-cols-[auto_1fr] gap-x-5 gap-y-2 text-[13px]">
+              <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-5 gap-y-2 text-[13px] [overflow-wrap:anywhere]">
                 <dt className="text-[var(--fg-muted)]">Phone</dt>
                 <dd className="font-mono text-[var(--fg-primary)]">{emailCase.customerPhone || "—"}</dd>
                 <dt className="text-[var(--fg-muted)]">Plan</dt>
@@ -387,7 +407,9 @@ export default function ManualAssistancePage() {
             </p>
           </Modal.Body>
           <Modal.Footer>
-            <Button variant="secondary" onClick={() => setEmailCase(null)} disabled={sending}>
+            {/* A phone splits the footer between the two, so Send is a full
+                thumb's width. */}
+            <Button variant="secondary" onClick={() => setEmailCase(null)} disabled={sending} className="max-sm:flex-1">
               Cancel
             </Button>
             <Button
@@ -396,6 +418,7 @@ export default function ManualAssistancePage() {
               loading={sending}
               disabled={!emailTo.trim()}
               iconLeft={!sending && <Mail size={14} />}
+              className="max-sm:flex-1"
             >
               Send code
             </Button>

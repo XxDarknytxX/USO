@@ -190,15 +190,21 @@ export default function ActivityLogPage() {
             <tbody>
               {events.map((evt) => (
                 <tr key={evt.id}>
-                  <Td muted nowrap className="tabular-nums">
+                  <Td muted nowrap className="tabular-nums max-sm:items-center! max-sm:text-[var(--fg-primary)]! max-sm:font-semibold">
                     {new Date(evt.event_timestamp).toLocaleString()}
+                    {/* Phone: what happened rides on the title line. */}
+                    <span className="sm:hidden! max-sm:ml-auto shrink-0 font-normal">
+                      <StatusPill tone={EVENT_TONES[evt.event_type] || "neutral"}>
+                        {evt.event_type.replace("_", " ")}
+                      </StatusPill>
+                    </span>
                   </Td>
-                  <Td>
+                  <Td className="max-sm:hidden!">
                     <StatusPill tone={EVENT_TONES[evt.event_type] || "neutral"}>
                       {evt.event_type.replace("_", " ")}
                     </StatusPill>
                   </Td>
-                  <Td nowrap>
+                  <Td nowrap className="max-sm:items-center!">
                     {evt.voucher_uuid ? (
                       // Clicking a UUID filters the log to that voucher — the
                       // question this table always prompts next.
@@ -208,7 +214,9 @@ export default function ActivityLogPage() {
                           setPage(1);
                         }}
                         title={`Show only ${evt.voucher_uuid}`}
-                        className="font-mono text-[12px] font-semibold text-[var(--fg-primary)] hover:text-[var(--brand)] transition-colors"
+                        aria-label={`Show only events for voucher ${evt.voucher_uuid}`}
+                        // Phone: a chip with a real, thumb-sized hit area.
+                        className="font-mono text-[12px] font-semibold text-[var(--fg-primary)] hover:text-[var(--brand)] transition-colors max-sm:inline-flex max-sm:items-center max-sm:h-9 max-sm:px-3.5 max-sm:rounded-full max-sm:border max-sm:border-[var(--border-default)] max-sm:bg-[var(--bg-surface)] max-sm:active:bg-[var(--surface-pressed)]"
                       >
                         {evt.voucher_uuid.substring(0, 12)}…
                       </button>
@@ -216,11 +224,20 @@ export default function ActivityLogPage() {
                       <span className="text-[var(--fg-muted)]">—</span>
                     )}
                   </Td>
-                  <Td mono nowrap>
+                  {/* Phone: empty lines are dropped from the card rather than
+                      shown as a label and a dash. */}
+                  <Td mono nowrap className={evt.old_status && evt.new_status ? "" : "max-sm:hidden!"}>
                     {evt.old_status && evt.new_status ? `${evt.old_status} → ${evt.new_status}` : "—"}
                   </Td>
-                  <Td muted>
-                    <span className="block max-w-[320px] truncate" title={evt.notes || ""}>
+                  {/* Phone: prose reads left-aligned under its label, not
+                      squeezed flush-right beside it. */}
+                  <Td
+                    muted
+                    className={
+                      "max-sm:flex-col! max-sm:gap-1! max-sm:text-left! " + (evt.notes ? "" : "max-sm:hidden!")
+                    }
+                  >
+                    <span className="block max-w-[320px] truncate max-sm:max-w-none max-sm:ml-0!" title={evt.notes || ""}>
                       {evt.notes || "—"}
                     </span>
                   </Td>

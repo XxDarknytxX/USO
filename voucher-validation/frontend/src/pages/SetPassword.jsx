@@ -131,7 +131,8 @@ export default function SetPassword() {
   }
 
   return (
-    <div className="min-h-screen grid lg:grid-cols-[1.05fr_1fr] bg-[var(--bg-base)] text-[var(--fg-primary)]">
+    // dvh below lg: a phone's 100vh includes the browser bar.
+    <div className="min-h-screen max-lg:min-h-dvh grid lg:grid-cols-[1.05fr_1fr] bg-[var(--bg-base)] text-[var(--fg-primary)]">
       {/* Brand panel — same frame as sign-in, so this reads as the console and
           not as a page that merely mentions it. */}
       <aside className="relative hidden overflow-hidden lg:flex flex-col justify-between p-12 xl:p-16 text-white">
@@ -168,7 +169,8 @@ export default function SetPassword() {
         </p>
       </aside>
 
-      <main className="relative flex flex-col justify-center px-6 py-12 sm:px-10 lg:px-14 xl:px-20">
+      {/* Near the top on a phone, so the button stays above the keyboard. */}
+      <main className="relative flex flex-col justify-center px-6 py-12 max-sm:justify-start max-sm:px-5 max-sm:pt-10 max-sm:pb-8 sm:px-10 lg:px-14 xl:px-20">
         <div
           aria-hidden
           className="pointer-events-none absolute inset-0"
@@ -182,7 +184,7 @@ export default function SetPassword() {
         />
 
         <div className="relative mx-auto w-full max-w-[404px]">
-          <div className="mb-10 flex items-center gap-3 lg:hidden">
+          <div className="mb-10 flex items-center gap-3 lg:hidden max-sm:mb-8">
             <span className="flex h-11 w-11 items-center justify-center rounded-[14px] bg-[var(--brand-soft)]">
               <VodafoneLogo size={26} />
             </span>
@@ -213,7 +215,7 @@ export default function SetPassword() {
                   are short on purpose. Ask your administrator to send another; it takes them a moment.
                 </p>
               </div>
-              <Button variant="secondary" onClick={() => navigate("/login")}>
+              <Button variant="secondary" onClick={() => navigate("/login")} className="max-sm:w-full">
                 Go to sign in
               </Button>
             </div>
@@ -236,7 +238,7 @@ export default function SetPassword() {
               </div>
               {/* The token was already taken off the URL, so reloading the page
                   would lose it. Retry re-runs the check with the one in memory. */}
-              <Button variant="primary" onClick={check}>Try again</Button>
+              <Button variant="primary" onClick={check} className="max-sm:w-full">Try again</Button>
             </div>
           )}
 
@@ -252,14 +254,14 @@ export default function SetPassword() {
                 {/* A reset and a first-time setup are different moments. Someone
                     recovering an account wants to know their old password is gone
                     and why; "Welcome" is the wrong thing to say to them. */}
-                <h1 className="font-display text-[32px] font-extrabold leading-[1.1] tracking-[-0.028em]">
+                <h1 className="font-display text-[28px] font-extrabold leading-[1.1] tracking-[-0.028em] sm:text-[32px] max-sm:[overflow-wrap:anywhere]">
                   {isReset
                     ? "Choose a new password"
                     : account?.name ? `Welcome, ${account.name.split(" ")[0]}` : "Choose a password"}
                 </h1>
                 <p className="mt-2.5 text-[13.5px] leading-relaxed text-[var(--fg-secondary)]">
                   {isReset ? "An administrator reset the password for " : "Setting the password for "}
-                  <span className="font-medium text-[var(--fg-primary)]">{account?.email}</span>.
+                  <span className="font-medium text-[var(--fg-primary)] max-sm:[overflow-wrap:anywhere]">{account?.email}</span>.
                   {isReset && " The old one no longer works."}
                 </p>
               </div>
@@ -292,13 +294,13 @@ export default function SetPassword() {
                         placeholder="Something only you would pick"
                       />
                     </span>
-                    <span className="flex items-center pr-3">
+                    <span className="flex items-center pr-3 pointer-coarse:pr-1.5">
                       <button
                         type="button"
                         onClick={() => setShow((v) => !v)}
                         tabIndex={-1}
                         aria-label={show ? "Hide password" : "Show password"}
-                        className="rounded-lg p-1.5 text-[var(--fg-muted)] transition-colors hover:bg-[var(--surface-hover)] hover:text-[var(--fg-primary)]"
+                        className="rounded-lg p-1.5 text-[var(--fg-muted)] transition-colors hover:bg-[var(--surface-hover)] hover:text-[var(--fg-primary)] pointer-coarse:grid pointer-coarse:h-10 pointer-coarse:w-10 pointer-coarse:place-items-center pointer-coarse:p-0"
                       >
                         {show ? <EyeOff size={15} /> : <Eye size={15} />}
                       </button>

@@ -24,7 +24,10 @@ export function useAuth() {
       role,
       email: payload?.email || "",
       name: payload?.name || "",
-      isAdmin: role === "admin",
+      // Both administrator roles. isSuperadmin marks the one that also owns
+      // the estate default, credentials, schedules and security policy.
+      isAdmin: role === "admin" || role === "superadmin",
+      isSuperadmin: role === "superadmin",
       isViewer: role === "viewer",
       // Field contractor: maintenance only, nothing else in the app.
       isEngineer: role === "engineer",
@@ -46,7 +49,7 @@ export function useAuth() {
 // numbers behind them. Mirrors DASHBOARD_ROLES in the backend's auth middleware,
 // which is the real boundary — this copy only keeps the SPA from sending someone
 // to a page whose every request would be refused.
-const DASHBOARD_ROLES = new Set(["admin", "viewer", "billing"]);
+const DASHBOARD_ROLES = new Set(["superadmin", "admin", "viewer", "billing"]);
 
 export function canSeeDashboard(role) {
   return DASHBOARD_ROLES.has(role);
@@ -54,7 +57,7 @@ export function canSeeDashboard(role) {
 
 // Who may open the Billing page. Mirrors BILLING_READERS in the backend; only
 // admins may change the target.
-const BILLING_ROLES = new Set(["admin", "billing"]);
+const BILLING_ROLES = new Set(["superadmin", "admin", "billing"]);
 
 export function canSeeBilling(role) {
   return BILLING_ROLES.has(role);
@@ -84,6 +87,8 @@ export function clearSiteCache() {
     /* storage unavailable: nothing cached to leak */
   }
 }
+
+export const isAdminRole = (role) => role === "admin" || role === "superadmin";
 
 // Standalone helper (no hooks) for use outside React components
 export function getAuthRole() {

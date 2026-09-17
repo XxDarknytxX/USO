@@ -155,7 +155,7 @@ export default function TwoFactorVerifyModal({
           <button
             type="button"
             onClick={() => { setUseBackup((v) => !v); setErr(""); }}
-            className="self-start text-[12.5px] font-medium text-[var(--brand-fg-on-soft)] hover:underline"
+            className="self-start text-[12.5px] font-medium text-[var(--brand-fg-on-soft)] hover:underline pointer-coarse:-my-2 pointer-coarse:min-h-9"
           >
             {useBackup ? "Use my authenticator app instead" : "I can't reach my authenticator app"}
           </button>

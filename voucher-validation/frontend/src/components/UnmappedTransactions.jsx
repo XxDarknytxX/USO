@@ -128,19 +128,20 @@ export default function UnmappedTransactions() {
       icon={<UserX size={15} />}
       tone="orange"
       actions={
-        <div className="flex flex-wrap items-center justify-end gap-2">
+        <div className="flex flex-wrap items-center justify-end gap-2 max-sm:w-full">
           <SearchInput
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder="Search number…"
-            width="w-56"
+            width="w-full sm:w-56"
           />
-          <Button variant="secondary" size="sm" onClick={load} disabled={loading} iconLeft={<RefreshCw size={14} />}>
+          <Button variant="secondary" size="sm" className="max-sm:flex-1" onClick={load} disabled={loading} iconLeft={<RefreshCw size={14} />}>
             Refresh
           </Button>
           <Button
             variant="primary"
             size="sm"
+            className="max-sm:flex-1"
             onClick={exportCsv}
             loading={exporting}
             disabled={total === 0 || exporting}

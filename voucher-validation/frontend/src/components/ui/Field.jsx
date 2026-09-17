@@ -237,7 +237,7 @@ export function TagInput({
               e.stopPropagation();
               remove(tag);
             }}
-            className="text-[var(--brand-fg-on-soft)]/60 hover:text-[var(--brand-fg-on-soft)] transition-colors"
+            className="text-[var(--brand-fg-on-soft)]/60 hover:text-[var(--brand-fg-on-soft)] transition-colors pointer-coarse:-my-1.5 pointer-coarse:-mr-1.5 pointer-coarse:grid pointer-coarse:h-7 pointer-coarse:w-7 pointer-coarse:place-items-center"
             aria-label={`Remove ${tag}`}
           >
             <X size={12} />

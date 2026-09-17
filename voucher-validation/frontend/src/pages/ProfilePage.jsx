@@ -10,7 +10,7 @@
 // an afterthought.
 
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { UserCircle, Shield, Eye, Moon, Sun, Check, LogOut, Wrench, Mail, IdCard, Receipt } from "lucide-react";
+import { UserCircle, Shield, ShieldCheck, Eye, Moon, Sun, Check, LogOut, Wrench, Mail, IdCard, Receipt } from "lucide-react";
 
 import { useAuth } from "../hooks/useAuth";
 import { useTheme } from "../hooks/useTheme";
@@ -40,12 +40,12 @@ function ThemeCard({ mode, active, onClick }) {
       )}
     >
       {/* Mini dashboard preview */}
-      <div className={cn("rounded-lg overflow-hidden p-3", isDark ? "bg-[#0a0a0c]" : "bg-[#F5F6F8]")}>
-        <div className="flex gap-2 h-24">
+      <div className={cn("rounded-lg overflow-hidden p-2 sm:p-3", isDark ? "bg-[#0a0a0c]" : "bg-[#F5F6F8]")}>
+        <div className="flex gap-1.5 sm:gap-2 h-16 sm:h-24">
           {/* mini sidebar */}
           <div
             className={cn(
-              "w-10 rounded-md p-1.5 flex flex-col gap-1.5 border",
+              "w-7 sm:w-10 rounded-md p-1 sm:p-1.5 flex flex-col gap-1 sm:gap-1.5 border",
               isDark ? "bg-[#111113] border-white/[0.06]" : "bg-white border-black/[0.08]"
             )}
           >
@@ -108,16 +108,18 @@ export default function ProfilePage() {
   // does not reopen a dialog for something already done.
   const [params, setParams] = useSearchParams();
   const forcePasswordChange = params.get("changePassword") === "1";
-  const { email, name, role, isAdmin, isEngineer, isBilling, logout } = useAuth();
+  const { email, name, role, isAdmin, isSuperadmin, isEngineer, isBilling, logout } = useAuth();
   const { theme, setTheme } = useTheme();
 
   const displayName = name?.trim() || (email ? email.split("@")[0] : "User");
   const initial = displayName[0].toUpperCase();
-  const roleLabel = role ? role.charAt(0).toUpperCase() + role.slice(1) : "User";
-  const RoleIcon = isAdmin ? Shield : isEngineer ? Wrench : isBilling ? Receipt : Eye;
+  const roleLabel = isSuperadmin ? "Superadmin" : role ? role.charAt(0).toUpperCase() + role.slice(1) : "User";
+  const RoleIcon = isSuperadmin ? ShieldCheck : isAdmin ? Shield : isEngineer ? Wrench : isBilling ? Receipt : Eye;
   // Scope is the estate default, not a per-person assignment.
-  const roleBlurb = isAdmin
-    ? "Full administrative access to every village, setting and account."
+  const roleBlurb = isSuperadmin
+    ? "Full access, including the estate default, email and Starlink credentials, schedules, security policy and superadmin accounts."
+    : isAdmin
+    ? "Administrative access to every village and account. The estate default, credentials, schedules and security policy belong to the superadmin."
     : isEngineer
       ? "Maintenance for the estate's villages: you can view the record and file reports with photos from site."
       : isBilling
@@ -177,7 +179,7 @@ export default function ProfilePage() {
 
         {/* Appearance — the theme switch lives here, not in the header chrome. */}
         <Panel title="Appearance" subtitle="Choose how the console looks on this device." icon={<Sun size={15} />} tone="orange">
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div className="grid grid-cols-2 gap-3 sm:gap-4">
             <ThemeCard mode="dark" active={theme === "dark"} onClick={() => setTheme("dark")} />
             <ThemeCard mode="light" active={theme === "light"} onClick={() => setTheme("light")} />
           </div>

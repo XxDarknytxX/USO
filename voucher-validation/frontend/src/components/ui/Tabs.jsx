@@ -48,6 +48,19 @@ export default function Tabs({
 
   useLayoutEffect(syncEdges, [syncEdges, tabs.length, size, variant]);
 
+  // On a phone the strip is wider than the screen, and the page can open on a
+  // tab that sits past the edge (Settings?tab=security). Bring the active tab
+  // into view whenever it changes, clear of the edge fade.
+  useLayoutEffect(() => {
+    const el = stripRef.current;
+    const btn = el?.querySelector("[data-active]");
+    if (!btn || el.scrollWidth <= el.clientWidth) return;
+    const s = el.getBoundingClientRect();
+    const b = btn.getBoundingClientRect();
+    if (b.left < s.left + FADE) el.scrollLeft += b.left - s.left - FADE;
+    else if (b.right > s.right - FADE) el.scrollLeft += b.right - s.right + FADE;
+  }, [value, variant, tabs.length]);
+
   useEffect(() => {
     const el = stripRef.current;
     if (!el || typeof ResizeObserver === "undefined") return;
@@ -59,8 +72,10 @@ export default function Tabs({
   if (variant === "pills") {
     return (
       <div
+        ref={stripRef}
         className={cn(
           "inline-flex items-center gap-1 p-1 rounded-full bg-[var(--bg-surface)] border border-[var(--border-default)]",
+          "max-w-full overflow-x-auto scrollbar-none",
           className
         )}
       >
@@ -70,9 +85,10 @@ export default function Tabs({
             <button
               key={tab.value}
               type="button"
+              data-active={active || undefined}
               onClick={() => onChange?.(tab.value)}
               className={cn(
-                "relative inline-flex items-center gap-2 rounded-full font-semibold transition-all duration-200",
+                "relative inline-flex shrink-0 items-center gap-2 whitespace-nowrap rounded-full font-semibold transition-all duration-200",
                 size === "sm" ? "px-3.5 py-1.5 text-[12.5px]" : "px-4 py-2 text-[13px]",
                 active
                   ? "bg-[var(--surface)] text-[var(--fg-primary)] shadow-[var(--shadow-sm)]"
@@ -118,6 +134,7 @@ export default function Tabs({
             <button
               key={tab.value}
               type="button"
+              data-active={active || undefined}
               onClick={() => onChange?.(tab.value)}
               className={cn(
                 "group relative inline-flex items-center gap-2 whitespace-nowrap font-semibold transition-colors duration-150",

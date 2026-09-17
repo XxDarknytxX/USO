@@ -28,8 +28,8 @@ export function makeUserRouter(controller) {
   // config/db.js and the ROLES whitelist in adminController — 'engineer' was
   // missing here while the column, the middleware and the UI all had it, so
   // creating or editing one answered 400.
-  const ROLES = ["admin", "viewer", "engineer", "billing"];
-  const roleMsg = "Role must be admin, viewer, engineer or billing";
+  const ROLES = ["superadmin", "admin", "viewer", "engineer", "billing"];
+  const roleMsg = "Role must be superadmin, admin, viewer, engineer or billing";
 
   // POST /api/users
   // `password` is OPTIONAL: leaving it out is the invite path, where the

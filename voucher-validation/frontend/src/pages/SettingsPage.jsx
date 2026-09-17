@@ -142,7 +142,9 @@ function VillageScopePanels() {
     globalVisibleSiteIds, followingEstateDefault, followEstateDefault,
     visibleSites, allVisible, reload, estateDefault,
   } = useSite();
-  const { isAdmin } = useAuth();
+  // The estate default applies to everyone, so only the superadmin sets it.
+  // Other admins read it and adjust their own view below.
+  const { isSuperadmin: isAdmin } = useAuth();
 
   // The estate default is edited here as a draft and saved explicitly. It
   // changes what every other account sees, which is not something to commit on
@@ -283,7 +285,7 @@ function VillageScopePanels() {
                       : `${globalCount} of ${sites.length} villages.`}
                 {savedNote}
                 {dirty && " Unsaved changes — nothing applies until you save."}
-                {!isAdmin && " Set by an administrator."}
+                {!isAdmin && " Set by the superadmin — change your own view below."}
               </span>
             }
           />
@@ -394,12 +396,18 @@ function CheckRow({ checked, disabled, title, subtitle, note, mono = true, onCli
 }
 
 export default function SettingsPage() {
+  // Admins see General and the Starlink service lines. Email (SMTP), the
+  // Starlink API account, schedules and security are the superadmin's — the
+  // server refuses them to anyone else; this only keeps them out of sight.
+  const { isSuperadmin } = useAuth();
+  const visibleTabs = isSuperadmin ? TABS : TABS.filter((t) => t.value === "general" || t.value === "starlink");
+
   // ?tab=email opens straight onto a tab — other pages link here to fix one
-  // thing (Email Campaigns → "Email sending is turned off"). Unknown values fall
-  // back to General.
+  // thing (Email Campaigns → "Email sending is turned off"). Unknown values, or
+  // a tab this account cannot open, fall back to General.
   const [tab, setTab] = useState(() => {
     const wanted = new URLSearchParams(window.location.search).get("tab");
-    return TABS.some((t) => t.value === wanted) ? wanted : "general";
+    return visibleTabs.some((t) => t.value === wanted) ? wanted : "general";
   });
   const [settings, setSettings] = useState([]); // eslint-disable-line no-unused-vars -- raw rows, kept for future keys
   const [loading, setLoading] = useState(true); // eslint-disable-line no-unused-vars
@@ -563,11 +571,13 @@ export default function SettingsPage() {
   }
 
   useEffect(() => {
+    loadStarlinkSites();
+    if (!isSuperadmin) return;
     loadSettings();
     loadSmtp();
     loadStarlink();
-    loadStarlinkSites();
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isSuperadmin]);
 
   async function loadSettings() {
     setLoading(true);
@@ -768,11 +778,11 @@ export default function SettingsPage() {
         tone="slate"
       />
 
-      <Tabs tabs={TABS} value={tab} onChange={setTab} />
+      <Tabs tabs={visibleTabs} value={tab} onChange={setTab} />
 
       <div className="flex flex-col gap-5">
         {/* ═══════════════════════════ General ═══════════════════════════ */}
-        {tab === "security" && <SecurityTab />}
+        {tab === "security" && isSuperadmin && <SecurityTab />}
 
         {tab === "general" && (
           <>
@@ -826,7 +836,7 @@ export default function SettingsPage() {
         )}
 
         {/* ══════════════════════════ Schedules ══════════════════════════ */}
-        {tab === "schedules" && (
+        {tab === "schedules" && isSuperadmin && (
           <>
             <Panel
               title="Voucher sync"
@@ -983,7 +993,7 @@ export default function SettingsPage() {
         )}
 
         {/* ════════════════════════════ Email ════════════════════════════ */}
-        {tab === "email" && (
+        {tab === "email" && isSuperadmin && (
           <>
             <Panel
               title="Email (SMTP)"
@@ -1245,6 +1255,7 @@ export default function SettingsPage() {
         {/* ═══════════════════════════ Starlink ══════════════════════════ */}
         {tab === "starlink" && (
           <>
+            {isSuperadmin ? (
             <Panel
               title="Starlink API"
               subtitle="Credentials for the Starlink account. Shared by every village; the service line below decides which kit each village reads."
@@ -1359,6 +1370,11 @@ export default function SettingsPage() {
                 </Button>
               </PanelFooter>
             </Panel>
+            ) : (
+              <p className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-surface)] px-4 py-3 text-[12.5px] text-[var(--fg-secondary)]">
+                The Starlink API account (credentials and endpoints) is managed by the superadmin. You can set each village's service line below.
+              </p>
+            )}
 
             <Panel
               title="Village service lines"
@@ -1519,21 +1535,21 @@ function TwoFactorLog() {
           {shown.map((e) => {
             const c = EVENT_COPY[e.event] || { label: e.event, tone: "neutral", Icon: History };
             return (
-              <div key={e.id} className="flex items-start gap-3 px-5 py-3">
-                <span className="mt-0.5 shrink-0">
+              <div key={e.id} className="flex flex-col gap-1.5 px-4 py-3 sm:flex-row sm:items-start sm:gap-3 sm:px-5">
+                <span className="shrink-0 sm:mt-0.5">
                   <StatusPill tone={e.success ? c.tone : "danger"} dot={false}>
                     <c.Icon size={11} />
                     {c.label}
                   </StatusPill>
                 </span>
                 <div className="min-w-0 flex-1">
-                  <p className="truncate text-[12.5px] text-[var(--fg-primary)]">
+                  <p className="break-words text-[12.5px] text-[var(--fg-primary)] sm:truncate">
                     {e.userEmail || (e.userId ? `account #${e.userId}` : "an account since deleted")}
                     {e.actorEmail && (
                       <span className="text-[var(--fg-muted)]"> · by {e.actorEmail}</span>
                     )}
                   </p>
-                  <p className="mt-0.5 truncate text-[11.5px] text-[var(--fg-muted)]">
+                  <p className="mt-0.5 break-words text-[11.5px] text-[var(--fg-muted)] sm:truncate">
                     {new Date(e.at).toLocaleString("en-AU", {
                       day: "numeric", month: "short", year: "numeric",
                       hour: "2-digit", minute: "2-digit",

@@ -249,13 +249,14 @@ export default function SystemHealthPage() {
             tone="teal"
             padding={false}
           >
-            <DataTable maxHeight={320}>
+            {/* A grid of numbers reads better as a table than as 25 cards. */}
+            <DataTable maxHeight={320} stack={false}>
               <thead>
                 <tr>
                   <Th>Table</Th>
-                  <Th align="right">Rows (approx)</Th>
+                  <Th align="right"><span className="sm:hidden">Rows</span><span className="max-sm:hidden">Rows (approx)</span></Th>
                   <Th align="right">Size</Th>
-                  <Th align="right">Share</Th>
+                  <Th align="right" className="max-sm:hidden">Share</Th>
                 </tr>
               </thead>
               <tbody>
@@ -270,12 +271,12 @@ export default function SystemHealthPage() {
                       : 0;
                     return (
                       <tr key={t.name}>
-                        <Td mono>{t.name}</Td>
-                        <Td align="right" className="tabular-nums">
+                        <Td mono className="max-sm:break-all">{t.name}</Td>
+                        <Td align="right" nowrap className="tabular-nums">
                           {t.approxRows.toLocaleString()}
                         </Td>
-                        <Td align="right" strong className="tabular-nums">{fmtBytes(t.bytes)}</Td>
-                        <Td align="right" className="tabular-nums text-[var(--fg-muted)]">
+                        <Td align="right" strong nowrap className="tabular-nums">{fmtBytes(t.bytes)}</Td>
+                        <Td align="right" className="tabular-nums text-[var(--fg-muted)] max-sm:hidden">
                           {share < 1 ? "<1%" : `${Math.round(share)}%`}
                         </Td>
                       </tr>

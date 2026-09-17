@@ -47,6 +47,10 @@ const TAB_LABELS = {
 
 const fmtDate = (d) =>
   d ? new Date(d).toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" }) : "—";
+// On a phone the condition picker spans its field with thumb-height options;
+// from sm up it is the compact pill it always was.
+const PHONE_SEGMENTED = "max-sm:flex max-sm:w-full max-sm:[&>button]:grow max-sm:[&>button]:justify-center";
+
 const fmtBytes = (n) => {
   const v = Number(n || 0);
   if (v < 1024) return `${v} B`;
@@ -92,6 +96,23 @@ export default function VillageProfilePage() {
   const [tab, setTab] = useState("overview");
   const [lightbox, setLightbox] = useState(null);
   const [uploadOpen, setUploadOpen] = useState(false);
+  const tabsRef = useRef(null);
+
+  // On a phone the tabs sit a screen and a half down, under the header and the
+  // service tiles. Opening a component from a card further down the overview
+  // would otherwise leave the reader looking at the bottom of a shorter page,
+  // with the tab they opened scrolled away above them. Only then, and only on
+  // a phone, bring the strip back to the top.
+  const selectTab = useCallback((next) => {
+    setTab(next);
+    const el = tabsRef.current;
+    if (!el || !window.matchMedia?.("(max-width: 639px)").matches) return;
+    window.requestAnimationFrame(() => {
+      const scroller = el.closest("main");
+      const top = scroller ? scroller.getBoundingClientRect().top : 0;
+      if (el.getBoundingClientRect().top < top) el.scrollIntoView({ block: "start", behavior: "smooth" });
+    });
+  }, []);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -199,7 +220,9 @@ export default function VillageProfilePage() {
         </KpiGrid>
       )}
 
-      <Tabs tabs={tabs} value={tab} onChange={setTab} variant="underline" size="sm" />
+      <div ref={tabsRef} className="scroll-mt-3">
+        <Tabs tabs={tabs} value={tab} onChange={selectTab} variant="underline" size="sm" />
+      </div>
 
       {loading ? (
         <Panel padding={false}>
@@ -232,7 +255,7 @@ export default function VillageProfilePage() {
                 className="group flex flex-col rounded-xl border border-[var(--border-default)] bg-[var(--bg-elevated)] shadow-[var(--shadow-card)] transition-[box-shadow,border-color] duration-200 hover:border-[var(--border-hover)] hover:shadow-[var(--shadow-card-hover)]"
               >
                 <button
-                  onClick={() => setTab(c.key)}
+                  onClick={() => selectTab(c.key)}
                   className="text-left p-4 focus-ring rounded-t-xl"
                   title={`Open ${c.label}`}
                 >
@@ -241,7 +264,7 @@ export default function VillageProfilePage() {
                       <ObjectTile tone={c.neverInspected ? "slate" : C?.tile || "slate"} size="sm">
                         <CardIcon size={15} />
                       </ObjectTile>
-                      <span className="text-[13.5px] font-semibold text-[var(--fg-primary)] truncate font-display group-hover:text-[var(--brand)] transition-colors">
+                      <span className="text-[13.5px] font-semibold text-[var(--fg-primary)] truncate max-sm:whitespace-normal font-display group-hover:text-[var(--brand)] transition-colors">
                         {c.label}
                       </span>
                     </div>
@@ -307,7 +330,7 @@ export default function VillageProfilePage() {
       {lightbox && (
         <div className="fixed inset-0 z-[80] bg-black/80 flex items-center justify-center p-6" onClick={() => setLightbox(null)}>
           <button
-            className="absolute top-4 right-4 text-white/80 hover:text-white"
+            className="absolute top-4 right-4 text-white/80 hover:text-white pointer-coarse:top-[max(0.75rem,env(safe-area-inset-top))] pointer-coarse:right-3 pointer-coarse:p-2.5 pointer-coarse:rounded-full pointer-coarse:bg-black/40"
             onClick={() => setLightbox(null)}
             aria-label="Close"
           >
@@ -315,7 +338,7 @@ export default function VillageProfilePage() {
           </button>
           <img src={lightbox.url} alt={lightbox.caption} className="max-h-full max-w-full rounded-xl shadow-[var(--shadow-xl)]" />
           {lightbox.caption && (
-            <span className="absolute bottom-6 left-1/2 -translate-x-1/2 px-3 py-1.5 rounded-full bg-black/60 text-[12px] text-white/90">
+            <span className="absolute bottom-6 left-1/2 -translate-x-1/2 px-3 py-1.5 rounded-full bg-black/60 text-[12px] text-white/90 max-sm:max-w-[calc(100%-2rem)] max-sm:truncate max-sm:bottom-[max(1.5rem,env(safe-area-inset-bottom))]">
               {lightbox.caption}
             </span>
           )}
@@ -343,7 +366,7 @@ function ComponentTab({ component: c, projectId, canService, onOpenPhoto, onChan
         icon={C ? <C.Icon size={15} /> : <CircleDashed size={15} />}
         tone={c.neverInspected ? "slate" : C?.tile || "slate"}
         actions={
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <ComponentPill component={c} />
             {canService && pending && (
               <Button variant="primary" size="sm" onClick={() => setServicing(true)} iconLeft={<Camera size={14} />}>
@@ -392,7 +415,11 @@ function ComponentTab({ component: c, projectId, canService, onOpenPhoto, onChan
                   {c.photos.map((p, i) => (
                     <div
                       key={p.id}
-                      className={`relative aspect-square ${i === 0 && c.photos.length >= 3 ? "sm:col-span-2 sm:row-span-2" : ""}`}
+                      className={`relative aspect-square ${i === 0 && c.photos.length >= 3 ? "sm:col-span-2 sm:row-span-2" : ""} ${
+                        // Two to a row on a phone: an odd count would strand the
+                        // last frame alone, so the first one takes the full row.
+                        i === 0 && c.photos.length % 2 === 1 && c.photos.length >= 3 ? "max-sm:col-span-2" : ""
+                      }`}
                     >
                       <PhotoThumb
                         photoId={p.id}
@@ -412,9 +439,9 @@ function ComponentTab({ component: c, projectId, canService, onOpenPhoto, onChan
       {/* Work in progress is surfaced on the tab, but editing it happens in the
           modal — the tab stays a view of the village, not a form. */}
       {canService && pending && draft && (draft.condition || draftPhotos.length > 0) && (
-        <div className="flex items-center gap-2.5 px-4 py-3 rounded-xl border border-[var(--warning-border)] bg-[var(--warning-soft)]">
+        <div className="flex flex-wrap items-center gap-2.5 px-4 py-3 rounded-xl border border-[var(--warning-border)] bg-[var(--warning-soft)]">
           <AlertTriangle size={14} className="text-[var(--warning-fg)] shrink-0" />
-          <span className="text-[12.5px] text-[var(--fg-secondary)]">
+          <span className="text-[12.5px] text-[var(--fg-secondary)] min-w-0 flex-1">
             You have an unfiled inspection for this component
             {draft.condition ? ` (${COND[draft.condition]?.label})` : ""}
             {draftPhotos.length ? ` · ${draftPhotos.length} photo${draftPhotos.length === 1 ? "" : "s"}` : ""}.
@@ -426,8 +453,8 @@ function ComponentTab({ component: c, projectId, canService, onOpenPhoto, onChan
       )}
 
       {canService && draft && !pending && (
-        <div className="flex items-center gap-2 text-[12px] text-[var(--fg-muted)] px-1">
-          <Lock size={12} className="text-[var(--success-fg)]" />
+        <div className="flex items-center gap-2 text-[12px] text-[var(--fg-muted)] px-1 max-sm:items-start">
+          <Lock size={12} className="text-[var(--success-fg)] shrink-0 max-sm:mt-0.5" />
           Filed on this visit. An admin can reopen it from the report if it needs revising.
         </div>
       )}
@@ -453,7 +480,7 @@ function ComponentTab({ component: c, projectId, canService, onOpenPhoto, onChan
             <tbody>
               {c.history.map((h, i) => (
                 <tr key={`${h.visitId}-${i}`}>
-                  <Td nowrap>{fmtDate(h.submittedAt)}</Td>
+                  <Td nowrap className="max-sm:font-semibold max-sm:text-[var(--fg-primary)]">{fmtDate(h.submittedAt)}</Td>
                   <Td>
                     <StatusPill tone={COND[h.condition]?.tone || "neutral"}>
                       {COND[h.condition]?.label || h.condition}
@@ -461,8 +488,12 @@ function ComponentTab({ component: c, projectId, canService, onOpenPhoto, onChan
                   </Td>
                   <Td>{h.engineerName || "—"}</Td>
                   <Td align="right" className="tabular-nums">{h.photoCount}</Td>
-                  <Td className="max-w-[320px] truncate">
-                    <span title={h.notes || ""}>{h.notes || "—"}</span>
+                  {/* One truncated line in the table; a phone card shows the whole
+                      note, left-aligned under its label, or drops an empty one. */}
+                  <Td
+                    className={`sm:max-w-[320px] sm:truncate max-sm:flex-col max-sm:gap-1! max-sm:text-left! ${h.notes ? "" : "max-sm:hidden!"}`}
+                  >
+                    <span title={h.notes || ""} className="max-sm:ml-0!">{h.notes || "—"}</span>
                   </Td>
                 </tr>
               ))}
@@ -487,9 +518,11 @@ function ComponentTab({ component: c, projectId, canService, onOpenPhoto, onChan
 /** One cell of the provenance strip. */
 function Fact({ label, value }) {
   return (
-    <div className="bg-[var(--bg-elevated)] px-4 py-3">
+    // A phone stacks the three facts, so each is one line — label left, value
+    // right — rather than three two-line boxes.
+    <div className="bg-[var(--bg-elevated)] px-4 py-3 max-sm:flex max-sm:items-baseline max-sm:justify-between max-sm:gap-3 max-sm:py-2.5">
       <dt className="text-label">{label}</dt>
-      <dd className="text-[13px] font-medium text-[var(--fg-primary)] mt-1">{value}</dd>
+      <dd className="text-[13px] font-medium text-[var(--fg-primary)] mt-1 max-sm:mt-0 max-sm:text-right">{value}</dd>
     </div>
   );
 }
@@ -617,7 +650,7 @@ function ServiceComponentModal({ component: c, projectId, onClose, onChanged, on
         />
         <div className="flex flex-col gap-5">
           <Field label="Condition">
-            <Segmented options={CONDITION_OPTIONS} value={condition} onChange={setCondition} />
+            <Segmented options={CONDITION_OPTIONS} value={condition} onChange={setCondition} className={PHONE_SEGMENTED} />
           </Field>
 
           <Field
@@ -651,17 +684,18 @@ function ServiceComponentModal({ component: c, projectId, onClose, onChanged, on
         </div>
       </Modal.Body>
       <Modal.Footer>
-        <span className="mr-auto text-[11.5px] text-[var(--fg-muted)]">
+        {/* On a phone: the reason on its own line, both buttons on the row under it. */}
+        <span className="mr-auto text-[11.5px] text-[var(--fg-muted)] max-sm:basis-full">
           {canFile
             ? "Filing locks this component as evidence."
             : condition === "na"
               ? "Say why it is not applicable before filing."
               : "Pick a condition and add at least one photo before filing."}
         </span>
-        <Button variant="secondary" onClick={save} loading={busy} disabled={busy} iconLeft={!busy && <Save size={14} />}>
+        <Button variant="secondary" className="max-sm:grow" onClick={save} loading={busy} disabled={busy} iconLeft={!busy && <Save size={14} />}>
           Save for later
         </Button>
-        <Button variant="primary" onClick={file} loading={busy} disabled={busy || !canFile} iconLeft={!busy && <Send size={14} />}>
+        <Button variant="primary" className="max-sm:grow" onClick={file} loading={busy} disabled={busy || !canFile} iconLeft={!busy && <Send size={14} />}>
           File this component
         </Button>
       </Modal.Footer>
@@ -737,31 +771,36 @@ function DocumentsTab({ projectId, documents, categories, isAdmin, canUpload, on
                     {grouped[cat.key].map((d) => (
                       <div
                         key={d.id}
-                        className="flex items-center gap-3 p-3 rounded-xl border border-[var(--border-default)] bg-[var(--bg-elevated)] shadow-[var(--shadow-xs)] transition-[border-color,box-shadow] duration-150 hover:border-[var(--border-hover)] hover:shadow-[var(--shadow-sm)]"
+                        className="flex flex-wrap items-center gap-3 p-3 max-sm:items-start rounded-xl border border-[var(--border-default)] bg-[var(--bg-elevated)] shadow-[var(--shadow-xs)] transition-[border-color,box-shadow] duration-150 hover:border-[var(--border-hover)] hover:shadow-[var(--shadow-sm)]"
                       >
                         <ObjectTile tone="navy" size="sm">
                           <FileText size={15} />
                         </ObjectTile>
+                        {/* A phone wraps the title and file details instead of
+                            cutting both to a few characters, and puts the
+                            buttons on their own full-width line underneath. */}
                         <div className="min-w-0 flex-1">
-                          <div className="text-[13px] font-semibold text-[var(--fg-primary)] truncate font-display">{d.title}</div>
-                          <div className="text-[11.5px] text-[var(--fg-muted)] truncate">
+                          <div className="text-[13px] font-semibold text-[var(--fg-primary)] truncate max-sm:whitespace-normal max-sm:[overflow-wrap:anywhere] font-display">{d.title}</div>
+                          <div className="text-[11.5px] text-[var(--fg-muted)] truncate max-sm:whitespace-normal max-sm:[overflow-wrap:anywhere]">
                             {d.fileName || "file"} · {fmtBytes(d.bytes)} · {fmtDate(d.uploadedAt)}
                             {d.notes ? ` · ${d.notes}` : ""}
                           </div>
                         </div>
-                        <Button variant="secondary" size="sm" onClick={() => open(d)} iconLeft={<Download size={13} />}>
-                          Open
-                        </Button>
-                        {isAdmin && (
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => remove(d)}
-                            title="Delete"
-                            aria-label={`Delete ${d.title}`}
-                            iconLeft={<Trash2 size={13} />}
-                          />
-                        )}
+                        <div className="contents max-sm:flex max-sm:w-full max-sm:items-center max-sm:gap-2">
+                          <Button variant="secondary" size="sm" className="max-sm:flex-1" onClick={() => open(d)} iconLeft={<Download size={13} />}>
+                            Open
+                          </Button>
+                          {isAdmin && (
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => remove(d)}
+                              title="Delete"
+                              aria-label={`Delete ${d.title}`}
+                              iconLeft={<Trash2 size={13} />}
+                            />
+                          )}
+                        </div>
                       </div>
                     ))}
                   </div>
@@ -820,7 +859,7 @@ function UploadDocumentModal({ projectId, categories, onClose, onDone }) {
               type="file"
               accept=".pdf,.jpg,.jpeg,.png,.webp,.doc,.docx,.xls,.xlsx,application/pdf,image/*"
               onChange={(e) => setFile(e.target.files?.[0] || null)}
-              className="block w-full text-[12.5px] text-[var(--fg-secondary)] file:mr-3 file:py-1.5 file:px-3 file:rounded-full file:border file:border-[var(--border-default)] file:bg-[var(--surface)] file:text-[var(--fg-primary)] file:text-[12px] file:font-semibold"
+              className="block w-full text-[12.5px] text-[var(--fg-secondary)] max-sm:file:py-2.5 max-sm:file:px-4 file:mr-3 file:py-1.5 file:px-3 file:rounded-full file:border file:border-[var(--border-default)] file:bg-[var(--surface)] file:text-[var(--fg-primary)] file:text-[12px] file:font-semibold"
             />
           </Field>
           <Field label="Category">
@@ -839,8 +878,8 @@ function UploadDocumentModal({ projectId, categories, onClose, onDone }) {
         </div>
       </Modal.Body>
       <Modal.Footer>
-        <Button variant="secondary" onClick={onClose} disabled={busy}>Cancel</Button>
-        <Button variant="primary" onClick={submit} loading={busy} disabled={!file || busy}>Upload</Button>
+        <Button variant="secondary" className="max-sm:flex-1" onClick={onClose} disabled={busy}>Cancel</Button>
+        <Button variant="primary" className="max-sm:flex-1" onClick={submit} loading={busy} disabled={!file || busy}>Upload</Button>
       </Modal.Footer>
     </Modal>
   );

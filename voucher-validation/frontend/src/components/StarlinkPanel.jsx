@@ -85,7 +85,7 @@ function KitFact({ label, children }) {
   return (
     <div className="min-w-0">
       <p className="text-label">{label}</p>
-      <div className="text-[12.5px] text-[var(--fg-primary)] mt-1 truncate">{children}</div>
+      <div className="text-[12.5px] text-[var(--fg-primary)] mt-1 truncate max-sm:whitespace-normal max-sm:[overflow-wrap:anywhere]">{children}</div>
     </div>
   );
 }
@@ -180,6 +180,7 @@ export default function StarlinkPanel({ projectId, compact = false }) {
 
       {days.length === 0 ? (
         <EmptyState
+          className="max-sm:py-8"
           icon={Satellite}
           title={data?.error ? "Starlink data unavailable" : "No usage to show"}
           description={
@@ -246,7 +247,7 @@ export default function StarlinkPanel({ projectId, compact = false }) {
             </LegendRows>
           )}
 
-          <div className="flex items-center justify-between gap-3 mt-4 text-[11.5px] text-[var(--fg-muted)]">
+          <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 mt-4 text-[11.5px] text-[var(--fg-muted)]">
             <span className="inline-flex items-center gap-1.5">
               <Info size={12} />
               Usage is tracked in UTC and is approximate.

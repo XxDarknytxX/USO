@@ -2,7 +2,7 @@
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { lazy, Suspense } from "react";
 import AppLayout from "./components/layout/AppLayout";
-import { getAuthRole, canSeeDashboard, canSeeBilling, homePathFor } from "./hooks/useAuth";
+import { getAuthRole, canSeeDashboard, canSeeBilling, homePathFor, isAdminRole } from "./hooks/useAuth";
 
 const Login = lazy(() => import("./pages/Login"));
 const SetPassword = lazy(() => import("./pages/SetPassword"));
@@ -40,14 +40,14 @@ function Home() {
 }
 
 function AdminRoute({ children }) {
-  return getAuthRole() === "admin" ? children : <Home />;
+  return isAdminRole(getAuthRole()) ? children : <Home />;
 }
 
 // Admins and engineers work in Maintenance, viewers read it; billing accounts
 // do not reach it. What each may DO is enforced on the server by HTTP method.
 function MaintenanceRoute({ children }) {
   const role = getAuthRole();
-  return ["admin", "engineer", "viewer"].includes(role) ? children : <Home />;
+  return ["superadmin", "admin", "engineer", "viewer"].includes(role) ? children : <Home />;
 }
 
 // The monitoring pages — Dashboard and Overview. Admins, viewers and billing;

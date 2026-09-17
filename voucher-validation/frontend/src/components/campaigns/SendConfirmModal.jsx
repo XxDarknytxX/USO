@@ -89,7 +89,7 @@ export default function SendConfirmModal({
 
           <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-surface)] px-4 py-4">
             <p className="text-label">Recipients</p>
-            <p className="mt-1.5 text-[34px] font-semibold leading-none tracking-tight tabular-nums text-[var(--fg-primary)]">
+            <p className="mt-1.5 text-[34px] font-semibold leading-none tracking-tight tabular-nums text-[var(--fg-primary)] max-sm:text-[30px]">
               {confirmCount.toLocaleString()}
               <span className="ml-2 text-[14px] font-medium tracking-normal text-[var(--fg-muted)]">
                 {confirmCount === 1 ? "customer gets this email" : "customers get this email"}
@@ -135,8 +135,10 @@ export default function SendConfirmModal({
           )}
         </div>
       </Modal.Body>
-      <Modal.Footer>
-        <Button variant="ghost" onClick={onClose} disabled={sending}>
+      {/* On a phone the send button takes the rest of the row, so a long
+          "Send to 1,234 customers" is never cut short. */}
+      <Modal.Footer className="max-sm:flex-nowrap">
+        <Button variant="ghost" onClick={onClose} disabled={sending} className="shrink-0">
           Cancel
         </Button>
         <Button
@@ -145,6 +147,7 @@ export default function SendConfirmModal({
           loading={sending}
           disabled={confirmCount <= 0}
           iconLeft={!sending && <Send size={14} />}
+          className="max-sm:min-w-0 max-sm:flex-1"
         >
           {confirmCount <= 0
             ? "Nobody to send to"

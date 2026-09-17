@@ -202,8 +202,10 @@ export function makePortalConfigController(pool) {
           return send.bad(res, `Missing required fields: ${missing.join(', ')}`);
         }
 
-        // dataAllowance is optional — auto-derive from user group name if not provided
-        const resolvedDataAllowance = dataAllowance || userGroupName || name || 'Standard';
+        // dataAllowance is optional. It is customer-facing — the portal reads its
+        // first number as the data figure — so a missing one stays empty rather
+        // than borrowing the group or plan name ("7DayPass" would read as 7 MB).
+        const resolvedDataAllowance = typeof dataAllowance === 'string' ? dataAllowance.trim() : '';
 
         const [result] = await pool.query(
           `INSERT INTO portal_plan_configs

@@ -13,7 +13,7 @@
 import { useEffect, useState, useCallback, useRef, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import toast from "react-hot-toast";
-import { Globe, RefreshCw, Users, Activity, CheckCircle2, Wifi, MapPin, Network } from "lucide-react";
+import { Globe, RefreshCw, Users, Activity, CheckCircle2, Wifi, MapPin, Network, ChevronRight } from "lucide-react";
 import { networkApi } from "../services/api";
 import {
   PageShell,
@@ -212,7 +212,10 @@ export default function OverviewPage() {
           color="emerald"
           trend={s?.villagesDown ? "down" : undefined}
           trendValue={s?.villagesDown ? `${s.villagesDown} down` : undefined}
-          sub={s?.villagesDown ? "needs attention" : "all villages reporting"}
+          // Half a phone's width fits the red "2 down" or its gloss, not both.
+          sub={
+            s?.villagesDown ? <span className="max-sm:hidden">needs attention</span> : "all villages reporting"
+          }
         />
         <StatCard
           icon={<Wifi size={18} />}
@@ -242,7 +245,8 @@ export default function OverviewPage() {
           // missing. Say what is actually wrong and where to fix it.
           <StatCard
             icon={<Activity size={18} />}
-            label="Starlink data · this cycle"
+            // Two tiles share a phone's width; the cycle is implied.
+            label={<>Starlink data<span className="max-sm:hidden"> · this cycle</span></>}
             value="—"
             color="slate"
             sub="usage collection is off — enable it in Settings"
@@ -250,7 +254,8 @@ export default function OverviewPage() {
         ) : (
           <MeterCard
             icon={<Activity size={18} />}
-            label="Starlink data · this cycle"
+            // On a phone this tile keeps its glyph beside a half-width label.
+            label={<>Starlink<span className="max-sm:hidden"> data · this cycle</span></>}
             used={s?.starlinkUsedGb ?? 0}
             total={s?.starlinkAllowanceGb ?? null}
             unit="GB"
@@ -268,8 +273,16 @@ export default function OverviewPage() {
 
       <Toolbar>
         <SearchInput value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search villages…" />
-        <Segmented options={statusOptions} value={status} onChange={setStatus} size="sm" />
-        <span className="ml-auto text-[12px] text-[var(--fg-muted)] tabular-nums">
+        <Segmented
+          options={statusOptions}
+          value={status}
+          onChange={setStatus}
+          size="sm"
+          // Full width on a phone: the options share it rather than huddling left.
+          className="max-sm:[&>button]:flex-1 max-sm:[&>button]:justify-center"
+        />
+        {/* Unfiltered, the "All" pill already carries the count on a phone. */}
+        <span className={`ml-auto text-[12px] text-[var(--fg-muted)] tabular-nums${filtered ? "" : " max-sm:hidden"}`}>
           {filtered
             ? `${rows.length} of ${sites.length} villages`
             : `${sites.length} village${sites.length === 1 ? "" : "s"}`}
@@ -340,13 +353,17 @@ export default function OverviewPage() {
                   className="cursor-pointer"
                 >
                   <Td>
-                    <RecordCell
-                      tone="navy"
-                      icon={<MapPin size={15} />}
-                      title={v.name}
-                      subtitle={v.hostname || `group ${v.groupId || "—"}`}
-                      mono
-                    />
+                    {/* On a phone the row is a card; the chevron says it opens. */}
+                    <div className="max-sm:flex max-sm:w-full max-sm:items-center max-sm:justify-between max-sm:gap-3">
+                      <RecordCell
+                        tone="navy"
+                        icon={<MapPin size={15} />}
+                        title={v.name}
+                        subtitle={v.hostname || `group ${v.groupId || "—"}`}
+                        mono
+                      />
+                      <ChevronRight size={16} aria-hidden="true" className="sm:hidden shrink-0 text-[var(--fg-subtle)]" />
+                    </div>
                   </Td>
                   <Td>
                     <StateWithUptime
@@ -362,8 +379,14 @@ export default function OverviewPage() {
                       title="Share of collector samples with the gateway's WAN up"
                     />
                   </Td>
-                  <Td align="right" nowrap className="tabular-nums"><SlData sl={v.starlink} /></Td>
-                  <Td align="right" nowrap><LinkQuality sl={v.starlink} /></Td>
+                  {/* A village with no kit linked has nothing to say in either
+                      Starlink line, so its phone card leaves them out. */}
+                  <Td align="right" nowrap className={`tabular-nums${v.starlink?.configured ? "" : " max-sm:hidden!"}`}>
+                    <SlData sl={v.starlink} />
+                  </Td>
+                  <Td align="right" nowrap className={v.starlink?.configured ? undefined : "max-sm:hidden!"}>
+                    <LinkQuality sl={v.starlink} />
+                  </Td>
                   <Td align="right" nowrap className="tabular-nums">
                     {v.apsTotal ? `${v.apsOnline}/${v.apsTotal}` : "—"}
                   </Td>
@@ -413,7 +436,9 @@ function StateWithUptime({ pill, pct, title }) {
           ? "var(--warning-fg)"
           : "var(--danger-fg)";
   return (
-    <span className="flex flex-col items-start gap-1">
+    // Side by side on a phone card (pill at the right edge, uptime before it):
+    // stacked, each state cost a second line on every village.
+    <span className="flex flex-col items-start gap-1 max-sm:flex-row-reverse max-sm:items-center max-sm:gap-2">
       {pill}
       <span className="text-[11px] tabular-nums" style={{ color }} title={title}>
         {pct == null ? "no history" : `${pct}%`}
@@ -504,6 +529,12 @@ function LinkQuality({ sl }) {
     >
       {Math.round(sl.latencyMs)} ms
       {bad || warn ? <span className="ml-1.5">{bad ? "▲" : "△"}</span> : null}
+      {/* No tooltip under a thumb: the phone card states the loss (and the
+          obstruction once it matters) inline instead. */}
+      <span className="sm:hidden text-[var(--fg-muted)]">
+        {sl.dropRate != null ? ` · ${(drop * 100).toFixed(1)}% loss` : ""}
+        {obstructed > 1 ? ` · ${obstructed.toFixed(1)}% obstructed` : ""}
+      </span>
     </span>
   );
 }

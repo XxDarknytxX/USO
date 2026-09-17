@@ -1,7 +1,7 @@
 // src/routes/auth.js
 import { Router } from "express";
 import { body } from "express-validator";
-import { requireAuth, requireAdmin, requireAuthAllowing2FASetup } from "../middleware/auth.js";
+import { requireAuth, requireAdmin, requireSuperadmin, requireAuthAllowing2FASetup } from "../middleware/auth.js";
 
 export function makeAuthRouter(controller, attachScope) {
   const router = Router();
@@ -66,7 +66,8 @@ export function makeAuthRouter(controller, attachScope) {
 
   // The estate-wide switch.
   router.get("/2fa/policy", requireAuth, requireAdmin, controller.getTwoFactorPolicy);
-  router.put("/2fa/policy", requireAuth, requireAdmin, controller.setTwoFactorPolicy);
+  // Whether two-factor is required for everyone is the superadmin's decision.
+  router.put("/2fa/policy", requireAuth, requireSuperadmin, controller.setTwoFactorPolicy);
 
   // Changing your own password. Allows the setup token too: an account on a
   // temporary password under a 2FA-required policy would otherwise have no way

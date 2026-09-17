@@ -1,6 +1,6 @@
 // src/routes/billing.js
 import { Router } from "express";
-import { requireAuth, requireBillingAccess } from "../middleware/auth.js";
+import { requireAuth, requireBillingAccess, isAdminRole } from "../middleware/auth.js";
 import { computeBilling, writeTarget } from "../services/billing.js";
 
 // Administrators and billing accounts read the bill; only administrators change
@@ -17,7 +17,7 @@ export function makeBillingRouter(pool, attachScope) {
   //   villages  optional — the reader's view. Absent: the estate default.
   router.get("/", async (req, res) => {
     try {
-      const isAdmin = req.user?.role === "admin";
+      const isAdmin = isAdminRole(req.user?.role);
       let selection = null;
       if (req.query.villages !== undefined) {
         const raw = String(req.query.villages).trim();

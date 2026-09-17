@@ -31,6 +31,7 @@ import {
   hasSalesHistory, BreakdownEmpty,
   RevenueTrendPanel, RevenuePlanMix, SalesTotals, RiskTotals,
   SalesByHourPanel, SoldByPlanPanel, OutcomesPanel, PlansPurchasedPanel,
+  PHONE_CARD, usePhone, shortLabel,
 } from "../../components/MonthlyBreakdown";
 import {
   PageShell, PageHeader, KpiGrid, StatCard, Panel, Tabs, Button,
@@ -71,6 +72,8 @@ export default function SiteDashboard({ groupId, site }) {
   // One window drives every historical figure on this page.
   const mb = useMonthlyBreakdown(groupId);
   const ct = useChartTheme();
+  // A phone lays the per-package chart out sideways; see the Capacity tab.
+  const phone = usePhone();
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -205,12 +208,20 @@ export default function SiteDashboard({ groupId, site }) {
   const headerActions = (
     <>
       <MonthPicker state={mb} compact />
-      <Button variant="secondary" size="sm" iconLeft={<ArrowLeft size={14} />} onClick={() => setActiveSiteId(null)}>
+      {/* Half the row each on a phone, under the full-width window picker. */}
+      <Button
+        variant="secondary"
+        size="sm"
+        className="max-sm:flex-1"
+        iconLeft={<ArrowLeft size={14} />}
+        onClick={() => setActiveSiteId(null)}
+      >
         All villages
       </Button>
       <Button
         variant="ghost"
         size="sm"
+        className="max-sm:flex-1"
         iconLeft={<RefreshCw size={14} className={refreshing ? "animate-spin" : ""} />}
         onClick={() => load(true)}
         disabled={refreshing}
@@ -295,7 +306,13 @@ export default function SiteDashboard({ groupId, site }) {
           figure lives in the tab it belongs to. */}
       <KpiGrid cols={5}>
         <StatCard
-          label={`Revenue · ${mb.label || "month"}`}
+          // The window drops off a phone's half-width tile, where it could only
+          // show as "REVENUE · SEPTEM…"; the picker right above states it.
+          label={
+            <>
+              Revenue<span className="max-sm:hidden"> · {mb.label || "month"}</span>
+            </>
+          }
           value={fmtMoney(mb.totals.revenue)}
           icon={<DollarSign size={18} />}
           color="accent"
@@ -342,6 +359,8 @@ export default function SiteDashboard({ groupId, site }) {
               : `nothing sold · ${mb.label || "this month"}`
           }
           onClick={isAdmin ? () => openVouchers(null) : undefined}
+          // Fifth of five in a two-up grid: full width rather than an orphan.
+          className="max-lg:col-span-2"
         />
       </KpiGrid>
 
@@ -394,7 +413,8 @@ export default function SiteDashboard({ groupId, site }) {
       )}
 
       <div className="flex flex-col gap-5">
-        <Tabs tabs={tabs} value={tab} onChange={setTab} variant="underline" />
+        {/* Tighter tabs on a phone so all five fit without scrolling. */}
+        <Tabs tabs={tabs} value={tab} onChange={setTab} variant="underline" className="max-sm:[&_button]:px-2.5" />
 
         {tab === "sales" && (
           <div className="flex flex-col gap-5">
@@ -449,7 +469,7 @@ export default function SiteDashboard({ groupId, site }) {
             <div className="grid grid-cols-1 lg:grid-cols-[1fr_1.4fr] gap-5">
               <Panel title="Vouchers by status" subtitle="The whole pool for this village" icon={<Ticket size={15} />} tone="blue">
                 {statusData.length === 0 ? (
-                  <EmptyState icon={Ticket} title="No vouchers" description="This village has no vouchers yet." />
+                  <EmptyState className="max-sm:py-8" icon={Ticket} title="No vouchers" description="This village has no vouchers yet." />
                 ) : (
                   <>
                     {/* Donut with the total stated in the hole, so the chart
@@ -476,7 +496,7 @@ export default function SiteDashboard({ groupId, site }) {
 
               <Panel title="By package" subtitle="Active · Expired · Left, per plan" icon={<Ticket size={15} />} tone="teal">
                 {pkgBar.length === 0 ? (
-                  <EmptyState icon={PackageOpen} title="No packages" />
+                  <EmptyState className="max-sm:py-8" icon={PackageOpen} title="No packages" />
                 ) : (
                   <>
                     <ChartStat
@@ -484,6 +504,22 @@ export default function SiteDashboard({ groupId, site }) {
                       unit="vouchers"
                       caption={`Across ${fmtNum(pkgBar.length)} plan${pkgBar.length === 1 ? "" : "s"}`}
                     />
+                    {phone ? (
+                      // Sideways on a phone: plan names read along the axis
+                      // instead of tilted into each other.
+                      <ResponsiveContainer width="100%" height={Math.max(150, pkgBar.length * 44 + 32)}>
+                        <BarChart data={pkgBar} layout="vertical" margin={{ top: 4, right: 12, left: 0, bottom: 0 }} barCategoryGap="30%">
+                          <CartesianGrid {...gridProps(ct)} horizontal={false} vertical />
+                          <XAxis type="number" {...axisX(ct)} allowDecimals={false} />
+                          <YAxis type="category" dataKey="name" {...axisY(ct, { width: 96 })} tickFormatter={(v) => shortLabel(v, 13)} />
+                          <Tooltip content={<ChartTooltip valueFormatter={fmtNum} />} cursor={{ fill: ct.cursor }} />
+                          {/* Every segment rounded at its end, as the upright chart rounds every top. */}
+                          <Bar dataKey="Active" stackId="a" fill={STATUS_COLORS.active} radius={[0, 5, 5, 0]} maxBarSize={18} isAnimationActive={false} />
+                          <Bar dataKey="Expired" stackId="a" fill={CHART_COLORS.amber} radius={[0, 5, 5, 0]} maxBarSize={18} isAnimationActive={false} />
+                          <Bar dataKey="Left" stackId="a" fill={STATUS_COLORS.unused} radius={[0, 5, 5, 0]} maxBarSize={18} isAnimationActive={false} />
+                        </BarChart>
+                      </ResponsiveContainer>
+                    ) : (
                     <ResponsiveContainer width="100%" height={252}>
                       <BarChart data={pkgBar} margin={{ top: 4, right: 8, left: -12, bottom: 0 }} barCategoryGap={BAR_CATEGORY_GAP}>
                         <CartesianGrid {...gridProps(ct)} />
@@ -495,6 +531,7 @@ export default function SiteDashboard({ groupId, site }) {
                         <Bar dataKey="Left" stackId="a" fill={STATUS_COLORS.unused} radius={BAR_RADIUS} maxBarSize={BAR_MAX_SIZE} isAnimationActive={false} />
                       </BarChart>
                     </ResponsiveContainer>
+                    )}
                     <LegendRows>
                       <LegendRow color={STATUS_COLORS.active} label="Active" value={fmtNum(vActive)} amount={vActive} total={vTotal} />
                       <LegendRow color={CHART_COLORS.amber} label="Expired" value={fmtNum(vExpired)} amount={vExpired} total={vTotal} />
@@ -530,7 +567,7 @@ export default function SiteDashboard({ groupId, site }) {
 
             <Panel title="Clients" subtitle="Last 24 hours" icon={<Activity size={15} />} tone="navy">
               {trendPts.length === 0 ? (
-                <EmptyState icon={Activity} title="No trend data yet" description="The monitor collects a sample every ~5 minutes." />
+                <EmptyState className="max-sm:py-8" icon={Activity} title="No trend data yet" description="The monitor collects a sample every ~5 minutes." />
               ) : (
                 <>
                   <ChartStat
@@ -562,6 +599,7 @@ export default function SiteDashboard({ groupId, site }) {
               {devices.length === 0 ? (
                 <div className="p-5">
                   <EmptyState
+                    className="max-sm:py-8"
                     icon={Server}
                     title={health ? "No devices reported" : "Couldn't reach Ruijie Cloud"}
                     description={health ? "" : "The live device list is temporarily unavailable."}
@@ -583,8 +621,8 @@ export default function SiteDashboard({ groupId, site }) {
                     {devices.map((d, i) => {
                       const Icon = DEVICE_ICON[d.type] || Cpu;
                       return (
-                        <tr key={d.sn || i}>
-                          <Td>
+                        <tr key={d.sn || i} className={PHONE_CARD.row}>
+                          <Td className={PHONE_CARD.title}>
                             <RecordCell
                               tone={DEVICE_TONE[d.type] || "slate"}
                               icon={<Icon size={14} />}
@@ -593,13 +631,13 @@ export default function SiteDashboard({ groupId, site }) {
                               mono
                             />
                           </Td>
-                          <Td className="capitalize">{d.type}</Td>
-                          <Td>
+                          <Td className={`capitalize ${PHONE_CARD.statWide}`}>{d.type}</Td>
+                          <Td className={PHONE_CARD.aside}>
                             <StatusPill tone={d.online ? "success" : "danger"}>{d.online ? "Online" : "Offline"}</StatusPill>
                           </Td>
-                          <Td align="right" className="tabular-nums">{d.clientCount ?? "—"}</Td>
-                          <Td>{d.model || "—"}</Td>
-                          <Td mono muted>{d.mgmtIp || d.publicIp || "—"}</Td>
+                          <Td align="right" className={`tabular-nums ${PHONE_CARD.statWide}`}>{d.clientCount ?? "—"}</Td>
+                          <Td className={PHONE_CARD.statWide}>{d.model || "—"}</Td>
+                          <Td mono muted className={PHONE_CARD.statWide}>{d.mgmtIp || d.publicIp || "—"}</Td>
                         </tr>
                       );
                     })}

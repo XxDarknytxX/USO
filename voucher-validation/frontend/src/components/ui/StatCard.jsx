@@ -77,7 +77,7 @@ export function GlassCard({
   tint = "default", // eslint-disable-line no-unused-vars
 }) {
   useTheme(); // re-render on theme change so token-derived styles stay in step
-  const paddingSizes = { sm: "p-4", md: "p-5", lg: "p-7" };
+  const paddingSizes = { sm: "p-3.5 sm:p-4", md: "p-4 sm:p-5", lg: "p-5 sm:p-7" };
 
   return (
     <div
@@ -113,15 +113,18 @@ const STAT_TONE = {
 export function StatCard({ label, value, sub, icon, color = "accent", trend, trendValue, onClick, className }) {
   const tone = STAT_TONE[color] || "blue";
   return (
-    <GlassCard className={className} onClick={onClick} size="md">
+    <GlassCard className={cn("@container", className)} onClick={onClick} size="md">
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <p className="text-label truncate">{label}</p>
-          <p className="mt-2 text-[28px] leading-none font-semibold tracking-tight tabular-nums text-[var(--fg-primary)]">
+          <p className="mt-2 text-[22px] sm:text-[28px] leading-none font-semibold tracking-tight tabular-nums text-[var(--fg-primary)] break-words">
             {value}
           </p>
         </div>
-        {icon && <ObjectTile tone={tone}>{icon}</ObjectTile>}
+        {/* Two tiles share a phone's width, and five share a laptop's: in a
+            card that narrow the figure needs the room more than the glyph, or
+            "$116.00" splits across two lines. */}
+        {icon && <ObjectTile tone={tone} className="max-sm:hidden @max-[10.5rem]:hidden">{icon}</ObjectTile>}
       </div>
       {(sub || trend) && (
         <div className="mt-3 flex items-center gap-2 min-w-0">
@@ -138,7 +141,7 @@ export function StatCard({ label, value, sub, icon, color = "accent", trend, tre
               {trendValue}
             </span>
           )}
-          {sub && <span className="text-[12px] text-[var(--fg-muted)] truncate">{sub}</span>}
+          {sub && <span className="text-[12px] text-[var(--fg-muted)] max-sm:line-clamp-2 sm:truncate">{sub}</span>}
         </div>
       )}
     </GlassCard>
@@ -189,22 +192,26 @@ export function MeterCard({
         : "var(--success-fg)";
 
   return (
-    <GlassCard className={className} onClick={onClick} size="md">
+    <GlassCard className={cn("@container", className)} onClick={onClick} size="md">
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <p className="text-label truncate">{label}</p>
-          <p className="mt-2 text-[28px] leading-none font-semibold tracking-tight tabular-nums text-[var(--fg-primary)]">
+          <p className="mt-2 text-[22px] sm:text-[28px] leading-none font-semibold tracking-tight tabular-nums text-[var(--fg-primary)]">
             {format(used)}
-            {hasTotal && showTotal && (
-              <span className="text-[15px] font-medium text-[var(--fg-muted)]">
+            {hasTotal && showTotal ? (
+              // Half a phone's width has no room for "401.5 GB / 460.4 GB" on
+              // one line; the total drops underneath instead of wrapping mid-way.
+              <span className="whitespace-nowrap text-[15px] font-medium text-[var(--fg-muted)] max-sm:mt-1 max-sm:block max-sm:text-[12.5px]">
                 {" / "}
                 {format(total)}
+                {unit && ` ${unit}`}
               </span>
+            ) : (
+              unit && <span className="text-[15px] font-medium text-[var(--fg-muted)]"> {unit}</span>
             )}
-            {unit && <span className="text-[15px] font-medium text-[var(--fg-muted)]"> {unit}</span>}
           </p>
         </div>
-        {icon && <ObjectTile tone={tone}>{icon}</ObjectTile>}
+        {icon && <ObjectTile tone={tone} className="max-sm:hidden @max-[10.5rem]:hidden">{icon}</ObjectTile>}
       </div>
 
       {hasTotal ? (
@@ -269,22 +276,25 @@ export function Panel({
   return (
     <GlassCard className={cn("flex flex-col", className)} hover={hover} padding={false}>
       {(title || actions) && (
-        <div className="flex items-center justify-between gap-3 px-5 py-4 border-b border-[var(--border-subtle)]">
-          <div className="flex items-center gap-3 min-w-0">
+        // On a phone the actions drop below the title rather than crushing it.
+        <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2.5 px-4 py-3.5 sm:px-5 sm:py-4 border-b border-[var(--border-subtle)]">
+          <div className="flex items-center gap-3 min-w-0 flex-1 basis-[200px]">
             {icon && <ObjectTile tone={tileTone} size="sm">{icon}</ObjectTile>}
             <div className="min-w-0">
               {title && (
-                <h3 className="text-[14.5px] font-semibold text-[var(--fg-primary)] tracking-tight truncate">
+                <h3 className="text-[14.5px] font-semibold text-[var(--fg-primary)] tracking-tight sm:truncate">
                   {title}
                 </h3>
               )}
-              {subtitle && <p className="text-[12px] text-[var(--fg-muted)] mt-0.5 truncate">{subtitle}</p>}
+              {subtitle && <p className="text-[12px] text-[var(--fg-muted)] mt-0.5 sm:truncate">{subtitle}</p>}
             </div>
           </div>
-          {actions && <div className="flex items-center gap-2 shrink-0">{actions}</div>}
+          {/* Actions with a search box take the full width on a phone: a search
+              squeezed against the right edge has no room to type in. */}
+          {actions && <div className="flex flex-wrap items-center gap-2 max-w-full max-sm:[&:has(input)]:w-full">{actions}</div>}
         </div>
       )}
-      <div className={cn("flex-1 min-h-0", padding && "p-5", bodyClassName)}>{children}</div>
+      <div className={cn("flex-1 min-h-0", padding && "p-4 sm:p-5", bodyClassName)}>{children}</div>
     </GlassCard>
   );
 }

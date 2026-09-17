@@ -7,7 +7,7 @@
  * drifts. Modelled on Salesforce Lightning's page/list/table structure.
  */
 
-import { useState } from "react";
+import { useLayoutEffect, useRef, useState } from "react";
 import { Search, X, ChevronDown } from "lucide-react";
 import { ObjectTile } from "./StatCard";
 
@@ -24,22 +24,26 @@ function cn(...p) {
 export function PageShell({ children, className, width = "wide" }) {
   const max = width === "narrow" ? "max-w-[1100px]" : width === "full" ? "max-w-none" : "max-w-[1560px]";
   return (
-    <div className={cn("p-5 sm:p-6 lg:p-7", className)}>
-      <div className={cn(max, "mx-auto flex flex-col gap-5")}>{children}</div>
+    <div className={cn("px-3 py-4 sm:p-6 lg:p-7", className)}>
+      <div className={cn(max, "mx-auto flex flex-col gap-4 sm:gap-5")}>{children}</div>
     </div>
   );
 }
 
-/** A row of KPI tiles. Defaults to 4-up, collapsing sensibly. */
+/**
+ * A row of KPI tiles. Defaults to 4-up, collapsing sensibly — to TWO per row on
+ * a phone, not one: a column of single tiles pushes the actual content of every
+ * page three screens down.
+ */
 export function KpiGrid({ children, cols = 4, className }) {
   const map = {
-    2: "sm:grid-cols-2",
-    3: "sm:grid-cols-2 lg:grid-cols-3",
-    4: "sm:grid-cols-2 lg:grid-cols-4",
-    5: "sm:grid-cols-2 lg:grid-cols-5",
-    6: "sm:grid-cols-3 lg:grid-cols-6",
+    2: "grid-cols-2",
+    3: "grid-cols-2 lg:grid-cols-3",
+    4: "grid-cols-2 lg:grid-cols-4",
+    5: "grid-cols-2 lg:grid-cols-5",
+    6: "grid-cols-2 sm:grid-cols-3 lg:grid-cols-6",
   };
-  return <div className={cn("grid grid-cols-1 gap-4", map[cols] || map[4], className)}>{children}</div>;
+  return <div className={cn("grid gap-3 sm:gap-4", map[cols] || map[4], className)}>{children}</div>;
 }
 
 /**
@@ -51,7 +55,10 @@ export function Toolbar({ children, className }) {
     <div
       className={cn(
         "flex flex-wrap items-center gap-2.5 rounded-xl border border-[var(--border-default)]",
-        "bg-[var(--bg-elevated)] shadow-[var(--shadow-card)] px-4 py-3",
+        "bg-[var(--bg-elevated)] shadow-[var(--shadow-card)] px-3 py-3 sm:px-4",
+        // On a phone every control takes the full width: a row of mixed-width
+        // pills and boxes wraps into a ragged staircase otherwise.
+        "max-sm:[&>*]:w-full! max-sm:[&>*]:max-w-none!",
         className
       )}
     >
@@ -70,7 +77,7 @@ export function SearchInput({ value, onChange, placeholder = "Search…", classN
         onChange={onChange}
         placeholder={placeholder}
         className={
-          "h-9 w-full pl-9 pr-8 text-[13px] rounded-full bg-[var(--bg-surface)] " +
+          "h-10 sm:h-9 w-full pl-9 pr-8 pointer-coarse:pr-10 text-ellipsis text-[13px] rounded-full bg-[var(--bg-surface)] " +
           "border border-[var(--border-default)] text-[var(--fg-primary)] " +
           "placeholder:text-[var(--fg-muted)] focus-input"
         }
@@ -78,7 +85,7 @@ export function SearchInput({ value, onChange, placeholder = "Search…", classN
       {value && (
         <button
           onClick={() => onChange({ target: { value: "" } })}
-          className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[var(--fg-muted)] hover:text-[var(--fg-primary)]"
+          className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[var(--fg-muted)] hover:text-[var(--fg-primary)] pointer-coarse:right-1 pointer-coarse:grid pointer-coarse:h-8 pointer-coarse:w-8 pointer-coarse:place-items-center"
           aria-label="Clear search"
         >
           <X size={13} />
@@ -98,6 +105,8 @@ export function Segmented({ options = [], value, onChange, size = "md", classNam
     <div
       className={cn(
         "inline-flex items-center gap-1 p-1 rounded-full bg-[var(--bg-surface)] border border-[var(--border-default)]",
+        // Too many options for a phone scroll sideways instead of spilling out.
+        "max-w-full overflow-x-auto scrollbar-none",
         className
       )}
       role="tablist"
@@ -111,8 +120,8 @@ export function Segmented({ options = [], value, onChange, size = "md", classNam
             aria-selected={active}
             onClick={() => onChange?.(o.value)}
             className={cn(
-              "inline-flex items-center gap-1.5 rounded-full font-semibold transition-all duration-150 font-display",
-              size === "sm" ? "h-7 px-3 text-[12px]" : "h-8 px-3.5 text-[12.5px]",
+              "inline-flex shrink-0 items-center gap-1.5 rounded-full font-semibold transition-all duration-150 font-display whitespace-nowrap",
+              size === "sm" ? "h-8 sm:h-7 pointer-coarse:h-9 px-3 text-[12px]" : "h-9 sm:h-8 pointer-coarse:h-9 px-3.5 text-[12.5px]",
               active
                 ? "bg-[var(--surface)] text-[var(--fg-primary)] shadow-[var(--shadow-sm)]"
                 : "text-[var(--fg-muted)] hover:text-[var(--fg-primary)]"
@@ -191,23 +200,79 @@ export function StatusPill({ tone = "neutral", children, dot = true, className }
  * Setting overflow-y also makes this div the nearest scrollport, which is what
  * the sticky header in `.sf-table--sticky` resolves against.
  */
-export function DataTable({ children, className, maxHeight }) {
+/*
+ * `stack` (default on): on a phone each row becomes a card of "LABEL  value"
+ * lines instead of a grid the reader has to swipe sideways through. The labels
+ * are the table's own headers, copied onto every cell here, so no page has to
+ * repeat them — and a column added later is labelled automatically. Pass
+ * stack={false} for a table that really is a grid (a matrix, a comparison).
+ */
+const BLANK_CELL = /^\s*[—–-]\s*$/;
+
+export function DataTable({ children, className, maxHeight, stack = true }) {
+  const tableRef = useRef(null);
+
+  useLayoutEffect(() => {
+    const table = tableRef.current;
+    if (!stack || !table) return undefined;
+    const label = () => {
+      const heads = [...table.querySelectorAll(":scope > thead > tr:last-child > th")].map((th) =>
+        th.hasAttribute("data-stack-label")
+          ? th.getAttribute("data-stack-label")
+          : (th.textContent || "").replace(/\s+/g, " ").trim()
+      );
+      for (const row of table.querySelectorAll(":scope > tbody > tr")) {
+        let col = 0;
+        for (const cell of row.children) {
+          const text = cell.hasAttribute("colspan") && Number(cell.colSpan) > 1 ? "" : heads[col] ?? "";
+          if (cell.getAttribute("data-label") !== text) cell.setAttribute("data-label", text);
+          // A placeholder dash with nothing else in the cell: the phone card
+          // leaves the line out rather than show "EMAIL STATUS  —".
+          const blank = col > 0 && !!text && BLANK_CELL.test(cell.textContent || "") && !cell.querySelector("svg, img, input, button, select, a");
+          if (blank !== cell.hasAttribute("data-blank")) cell.toggleAttribute("data-blank", blank);
+          col += Number(cell.colSpan) || 1;
+        }
+      }
+    };
+    label();
+    // Rows come and go (paging, filtering, polling); label whatever arrives.
+    // Only structure and text are watched, so setting the attribute here does
+    // not wake the observer again.
+    const observer = new window.MutationObserver(label);
+    observer.observe(table, { childList: true, subtree: true, characterData: true });
+    return () => observer.disconnect();
+  }, [stack]);
+
   return (
     <div
-      className={cn("overflow-x-auto", maxHeight && "overflow-y-auto", className)}
+      className={cn("overflow-x-auto", maxHeight && "overflow-y-auto", stack && "sf-table-wrap--stack", className)}
       style={
         maxHeight
           ? { maxHeight: typeof maxHeight === "number" ? `${maxHeight}px` : maxHeight }
           : undefined
       }
     >
-      <table className={cn("sf-table", maxHeight && "sf-table--sticky")}>{children}</table>
+      <table ref={tableRef} className={cn("sf-table", maxHeight && "sf-table--sticky", stack && "sf-table--stack")}>
+        {children}
+      </table>
     </div>
   );
 }
 
-export function Th({ children, align = "left", className }) {
-  return <th className={cn(align === "right" && "text-right", align === "center" && "text-center", className)}>{children}</th>;
+/**
+ * `stackLabel` is the label a phone card shows for this column's cells, when it
+ * should differ from the header text — "" for none (an actions column whose
+ * header is screen-reader text only).
+ */
+export function Th({ children, align = "left", className, stackLabel }) {
+  return (
+    <th
+      className={cn(align === "right" && "text-right", align === "center" && "text-center", className)}
+      data-stack-label={stackLabel}
+    >
+      {children}
+    </th>
+  );
 }
 
 export function Td({ children, align = "left", mono = false, strong = false, muted = false, nowrap = false, className }) {

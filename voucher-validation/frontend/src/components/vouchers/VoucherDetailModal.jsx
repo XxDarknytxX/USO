@@ -10,7 +10,7 @@
 // question has a place to look. Every field and every action is still here;
 // they have addresses now.
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import toast from "react-hot-toast";
 import {
   Ticket,
@@ -56,6 +56,10 @@ export default function VoucherDetailModal({ uuid, onClose, onRefresh, readOnly 
   const [editData, setEditData] = useState({});
   const [saving, setSaving] = useState(false);
   const [confirm, setConfirm] = useState(null);
+  // Phone only: the activity list shows the latest few until asked for more,
+  // instead of a scroll box nested inside the scrolling sheet.
+  const [showAllEvents, setShowAllEvents] = useState(false);
+  const customerRef = useRef(null);
 
   useEffect(() => {
     loadDetail();
@@ -85,6 +89,13 @@ export default function VoucherDetailModal({ uuid, onClose, onRefresh, readOnly 
       comment: voucher.comment || "",
     });
     setEditing(true);
+    // On a phone, Edit is tapped in the footer while the customer fields can be
+    // a screen away inside the sheet — bring them to the thumb.
+    if (window.matchMedia?.("(max-width: 639px)").matches) {
+      window.requestAnimationFrame(() =>
+        customerRef.current?.scrollIntoView({ behavior: "smooth", block: "start" })
+      );
+    }
   }
 
   function cancelEdit() {
@@ -174,10 +185,11 @@ export default function VoucherDetailModal({ uuid, onClose, onRefresh, readOnly 
     <>
       <Modal open onClose={onClose} width="2xl">
         {/* ---- Identity: the code, what state it is in, what you can do to it ---- */}
-        <div className="relative px-7 pt-6 pb-5 border-b border-[var(--border-subtle)]">
+        <div className="relative px-7 pt-6 pb-5 max-sm:px-5 max-sm:pt-5 max-sm:pb-4 border-b border-[var(--border-subtle)]">
           <div className="flex items-start justify-between gap-4">
             <div className="flex items-start gap-4 min-w-0 flex-1">
-              <ObjectTile tone="indigo" size="lg" className="mt-0.5 shadow-[var(--shadow-xs)]">
+              {/* The tile gives way on a phone so the code has the width. */}
+              <ObjectTile tone="indigo" size="lg" className="mt-0.5 shadow-[var(--shadow-xs)] max-sm:hidden">
                 <Ticket size={20} />
               </ObjectTile>
               <div className="min-w-0">
@@ -186,7 +198,7 @@ export default function VoucherDetailModal({ uuid, onClose, onRefresh, readOnly 
                   onClick={copyCode}
                   title="Copy code"
                   className={
-                    "group inline-flex items-center gap-2 -ml-1 px-1 py-0.5 rounded-md max-w-full " +
+                    "group inline-flex items-center gap-2 -ml-1 px-1 py-0.5 rounded-md max-w-full max-sm:min-h-9 " +
                     "hover:bg-[var(--bg-surface)] focus-ring transition-colors"
                   }
                 >
@@ -208,7 +220,9 @@ export default function VoucherDetailModal({ uuid, onClose, onRefresh, readOnly 
 
             <div className="flex items-center gap-1 shrink-0">
               {!readOnly && !editing && (
-                <>
+                // Phone: these move to the footer as labelled buttons, in
+                // thumb reach — three bare glyphs here also crowded the code.
+                <span className="contents max-sm:hidden">
                   <IconButton onClick={startEdit} title="Edit" size="sm">
                     <Edit3 size={15} />
                   </IconButton>
@@ -223,7 +237,7 @@ export default function VoucherDetailModal({ uuid, onClose, onRefresh, readOnly 
                   >
                     <Trash2 size={15} />
                   </IconButton>
-                </>
+                </span>
               )}
               <IconButton onClick={onClose} title="Close" size="sm">
                 <X size={15} />
@@ -264,6 +278,7 @@ export default function VoucherDetailModal({ uuid, onClose, onRefresh, readOnly 
             </Panel>
 
             {/* ---- Customer: the only editable block on the record ---- */}
+            <div ref={customerRef} className="scroll-mt-2">
             <Panel
               title="Customer"
               subtitle={editing ? "Editing — unsaved" : "Details captured against this voucher"}
@@ -319,6 +334,7 @@ export default function VoucherDetailModal({ uuid, onClose, onRefresh, readOnly 
                 </div>
               </div>
             </Panel>
+            </div>
 
             {/* Timeline and technical sit side by side: both are reference
                 detail, and neither deserves a full-width band to itself. */}
@@ -350,9 +366,15 @@ export default function VoucherDetailModal({ uuid, onClose, onRefresh, readOnly 
                 tone="slate"
                 padding={false}
               >
-                <div className="max-h-52 overflow-y-auto divide-y divide-[var(--border-subtle)]">
-                  {events.map((evt) => (
-                    <div key={evt.id} className="flex items-start gap-2.5 px-5 py-2.5">
+                <div className="max-h-52 overflow-y-auto divide-y divide-[var(--border-subtle)] max-sm:max-h-none max-sm:overflow-visible">
+                  {events.map((evt, i) => (
+                    <div
+                      key={evt.id}
+                      className={
+                        "flex items-start gap-2.5 px-5 py-2.5 max-sm:px-4 " +
+                        (!showAllEvents && i >= PHONE_EVENTS ? "max-sm:hidden" : "")
+                      }
+                    >
                       <span className="w-1.5 h-1.5 rounded-full bg-[var(--tile-indigo)] mt-[7px] shrink-0" />
                       <div className="min-w-0 flex-1">
                         <span className="text-[12.5px] font-semibold text-[var(--fg-secondary)] capitalize">
@@ -368,13 +390,20 @@ export default function VoucherDetailModal({ uuid, onClose, onRefresh, readOnly 
                     </div>
                   ))}
                 </div>
+                {events.length > PHONE_EVENTS && (
+                  <div className="sm:hidden border-t border-[var(--border-subtle)] px-4 py-2">
+                    <Button variant="ghost" size="sm" className="w-full" onClick={() => setShowAllEvents((v) => !v)}>
+                      {showAllEvents ? "Show latest only" : `Show all ${events.length} events`}
+                    </Button>
+                  </div>
+                )}
               </Panel>
             )}
 
             {/* Raw payload stays collapsed — it is for the one support call a
                 month where the mapped fields are not enough. */}
             <Disclosure summary="Raw JSON">
-              <pre className="mt-1 px-3 py-2.5 rounded-lg bg-[var(--bg-surface)] text-[11px] text-[var(--fg-secondary)] overflow-auto max-h-56 font-mono leading-relaxed">
+              <pre className="mt-1 px-3 py-2.5 rounded-lg bg-[var(--bg-surface)] text-[11px] text-[var(--fg-secondary)] overflow-auto max-h-56 font-mono leading-relaxed max-sm:max-h-none max-sm:whitespace-pre-wrap max-sm:break-all">
                 {JSON.stringify(voucher.raw_data || voucher, null, 2)}
               </pre>
             </Disclosure>
@@ -385,13 +414,14 @@ export default function VoucherDetailModal({ uuid, onClose, onRefresh, readOnly 
         <Modal.Footer>
           {editing ? (
             <>
-              <span className="mr-auto text-[12.5px] text-[var(--fg-muted)]">Editing customer details</span>
-              <Button variant="secondary" size="sm" onClick={cancelEdit} disabled={saving}>
+              <span className="mr-auto text-[12.5px] text-[var(--fg-muted)] max-sm:hidden">Editing customer details</span>
+              <Button variant="secondary" size="sm" onClick={cancelEdit} disabled={saving} className="max-sm:flex-1">
                 Cancel
               </Button>
               <Button
                 variant="primary"
                 size="sm"
+                className="max-sm:flex-[2]"
                 onClick={saveEdit}
                 loading={saving}
                 iconLeft={!saving && <Save size={14} />}
@@ -400,9 +430,36 @@ export default function VoucherDetailModal({ uuid, onClose, onRefresh, readOnly 
               </Button>
             </>
           ) : (
-            <Button variant="secondary" size="sm" onClick={onClose}>
-              Close
-            </Button>
+            <>
+              {/* Phone: the record's actions, labelled, where the thumb is.
+                  The header keeps its close button, so Close is not repeated. */}
+              {!readOnly && (
+                <div className="sm:hidden grid grid-cols-3 gap-2 w-full">
+                  <Button variant="secondary" size="sm" onClick={startEdit} iconLeft={<Edit3 size={13} />}>
+                    Edit
+                  </Button>
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    onClick={handleToggle}
+                    iconLeft={isDisabled ? <ToggleRight size={14} /> : <ToggleLeft size={14} />}
+                  >
+                    {isDisabled ? "Enable" : "Disable"}
+                  </Button>
+                  <Button variant="danger" size="sm" onClick={handleDelete} iconLeft={<Trash2 size={13} />}>
+                    Delete
+                  </Button>
+                </div>
+              )}
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={onClose}
+                className={readOnly ? "max-sm:w-full" : "max-sm:hidden"}
+              >
+                Close
+              </Button>
+            </>
           )}
         </Modal.Footer>
       </Modal>
@@ -422,6 +479,9 @@ export default function VoucherDetailModal({ uuid, onClose, onRefresh, readOnly 
   );
 }
 
+// How many lifecycle events a phone shows before "Show all".
+const PHONE_EVENTS = 5;
+
 /* ------------ Usage tile -------------------------------------------------- */
 // The bar only turns red at 90%: red on every tile would make a healthy voucher
 // look like an incident.
@@ -433,7 +493,7 @@ function UsageTile({ icon, label, value, pct: percent }) {
         <span className="text-label truncate">{label}</span>
         <span className="text-[var(--fg-muted)] shrink-0">{icon}</span>
       </div>
-      <p className="text-[14px] font-semibold text-[var(--fg-primary)] font-mono tabular-nums leading-none">
+      <p className="text-[14px] font-semibold text-[var(--fg-primary)] font-mono tabular-nums leading-none max-sm:leading-tight">
         {value}
       </p>
       {percent !== undefined && (

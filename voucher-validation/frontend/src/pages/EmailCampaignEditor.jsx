@@ -237,7 +237,7 @@ function MergeTagBar({ target, onInsert, className }) {
           aria-label={`Insert ${m.tag} into ${FIELD_LABELS[target] || "the body"}`}
           onMouseDown={(e) => e.preventDefault()}
           onClick={() => onInsert(m.tag)}
-          className="inline-flex h-6 items-center rounded-md border border-[var(--border-default)] bg-[var(--bg-surface)] px-1.5 font-mono text-[11px] text-[var(--fg-secondary)] transition-colors hover:border-[var(--brand-soft-hover)] hover:bg-[var(--brand-soft)] hover:text-[var(--brand-fg-on-soft)] focus-ring"
+          className="inline-flex h-6 items-center rounded-md border border-[var(--border-default)] bg-[var(--bg-surface)] px-1.5 font-mono text-[11px] text-[var(--fg-secondary)] transition-colors hover:border-[var(--brand-soft-hover)] hover:bg-[var(--brand-soft)] hover:text-[var(--brand-fg-on-soft)] focus-ring pointer-coarse:h-9 pointer-coarse:px-2.5 pointer-coarse:text-[12px]"
         >
           {m.tag}
         </button>
@@ -591,7 +591,9 @@ function DraftEditor({ campaign, stats, sites, onCampaign, onRefresh, onReload }
             <Button variant="ghost" size="sm" onClick={() => requestLeave("/email-campaigns")} iconLeft={<ArrowLeft size={14} />}>
               All campaigns
             </Button>
-            <span className="px-1"><SaveState dirty={dirty} saving={saving} savedAt={savedAt} /></span>
+            {/* On a phone these three live in the sticky bar at the bottom instead,
+                in reach wherever the long form has been scrolled to. */}
+            <span className="px-1 max-sm:hidden"><SaveState dirty={dirty} saving={saving} savedAt={savedAt} /></span>
             <Button
               variant="secondary"
               size="sm"
@@ -600,6 +602,7 @@ function DraftEditor({ campaign, stats, sites, onCampaign, onRefresh, onReload }
               disabled={!dirty}
               iconLeft={<Save size={14} />}
               title="Save draft (⌘S / Ctrl+S)"
+              className="max-sm:hidden"
             >
               Save draft
             </Button>
@@ -610,6 +613,7 @@ function DraftEditor({ campaign, stats, sites, onCampaign, onRefresh, onReload }
               disabled={!!blocker || saving}
               iconLeft={<Send size={14} />}
               title={blocker || undefined}
+              className="max-sm:hidden"
             >
               {sendLabel}
             </Button>
@@ -700,7 +704,7 @@ function DraftEditor({ campaign, stats, sites, onCampaign, onRefresh, onReload }
                   ]}
                   value={form.layout}
                   onChange={(v) => setField("layout", v)}
-                  className="self-start"
+                  className="self-start max-sm:flex max-sm:w-full max-sm:[&>button]:flex-1 max-sm:[&>button]:justify-center"
                 />
                 <p className="text-[12px] leading-relaxed text-[var(--fg-muted)]">{layoutHint}</p>
               </div>
@@ -735,8 +739,12 @@ function DraftEditor({ campaign, stats, sites, onCampaign, onRefresh, onReload }
                     <span aria-hidden="true" className="leading-none text-[var(--brand)]">*</span>
                   </label>
                   {form.layout === "branded" ? (
-                    <div className="flex flex-wrap items-center gap-1" role="group" aria-label="Insert a block">
-                      <span className="mr-0.5 text-[11.5px] font-medium text-[var(--fg-muted)]">Insert</span>
+                    <div
+                      className="flex flex-wrap items-center gap-1 max-sm:grid max-sm:w-full max-sm:grid-cols-2 max-sm:gap-2"
+                      role="group"
+                      aria-label="Insert a block"
+                    >
+                      <span className="mr-0.5 text-[11.5px] font-medium text-[var(--fg-muted)] max-sm:col-span-2">Insert</span>
                       {SNIPPETS.map(({ key, label, Icon, html }) => (
                         <Button
                           key={key}
@@ -773,11 +781,12 @@ function DraftEditor({ campaign, stats, sites, onCampaign, onRefresh, onReload }
                       ? '<p style="margin:0 0 16px;">Bula {{email}}, …</p>\n\nOr use Insert above for a paragraph, button, image or divider.'
                       : "<!DOCTYPE html>\n<html>…</html>"
                   }
-                  className="min-h-[420px] resize-y font-mono! text-[12.5px]! leading-5!"
+                  className="min-h-[420px] resize-y font-mono! text-[12.5px]! leading-5! max-sm:min-h-[300px] max-sm:text-[16px]! max-sm:leading-6!"
                   ref={(el) => { fieldEls.current.bodyHtml = el; }}
                   onFocus={() => setLastField("bodyHtml")}
                 />
-                <p id="c-body-hint" className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11.5px] text-[var(--text-tertiary)]">
+                {/* Keyboard shortcuts mean nothing on a phone's on-screen keyboard. */}
+                <p id="c-body-hint" className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11.5px] text-[var(--text-tertiary)] max-sm:hidden">
                   <span><Kbd>Tab</Kbd> indents</span>
                   <span><Kbd>Esc</Kbd> then <Kbd>Tab</Kbd> leaves the editor</span>
                   <span><Kbd>⌘</Kbd>/<Kbd>Ctrl</Kbd> + <Kbd>S</Kbd> saves</span>
@@ -808,7 +817,7 @@ function DraftEditor({ campaign, stats, sites, onCampaign, onRefresh, onReload }
                     onChange={(e) => setField("bodyText", e.target.value)}
                     rows={8}
                     spellCheck
-                    className="resize-y font-mono! text-[12.5px]! leading-5!"
+                    className="resize-y font-mono! text-[12.5px]! leading-5! max-sm:text-[16px]! max-sm:leading-6!"
                     {...bind("bodyText")}
                   />
                 </Field>
@@ -823,7 +832,7 @@ function DraftEditor({ campaign, stats, sites, onCampaign, onRefresh, onReload }
             preview={preview}
             preheader={form.preheader}
             from={stats?.smtp?.from}
-            frameClassName="h-[560px] xl:h-[calc(100vh-300px)] xl:min-h-[440px]"
+            frameClassName="h-[440px] sm:h-[560px] xl:h-[calc(100vh-300px)] xl:min-h-[440px]"
           />
         </div>
 
@@ -863,6 +872,7 @@ function DraftEditor({ campaign, stats, sites, onCampaign, onRefresh, onReload }
                     commitOnBlur
                     splitOnComma
                     inputLabel="Test recipients, up to five addresses"
+                    className="pointer-coarse:min-h-11 pointer-coarse:[&_button]:-my-1.5 pointer-coarse:[&_button]:-mr-1.5 pointer-coarse:[&_button]:grid pointer-coarse:[&_button]:h-8 pointer-coarse:[&_button]:w-8 pointer-coarse:[&_button]:place-items-center"
                     placeholder="you@vodafone.com.fj, a colleague…"
                   />
                   <p className="mt-1.5 text-[11.5px] text-[var(--text-tertiary)]">
@@ -945,6 +955,40 @@ function DraftEditor({ campaign, stats, sites, onCampaign, onRefresh, onReload }
         </div>
       </div>
 
+      {/* Phone action bar. Sticky, not fixed: it rides the bottom of the screen
+          while the long form scrolls, then settles into its own place at the
+          end of the page, so it never permanently covers anything. */}
+      <div
+        className="sticky bottom-[max(0.75rem,env(safe-area-inset-bottom))] z-30 flex items-center gap-2 rounded-2xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-2.5 pl-3.5 shadow-[var(--shadow-elevated)] sm:hidden"
+        role="region"
+        aria-label="Save and send"
+      >
+        <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+          <SaveState dirty={dirty} saving={saving} savedAt={savedAt} />
+          {blocker && <span className="truncate text-[11.5px] text-[var(--fg-muted)]">{blocker}</span>}
+        </div>
+        <Button
+          variant="secondary"
+          size="sm"
+          onClick={() => save().catch(() => {})}
+          loading={saving}
+          disabled={!dirty}
+          iconLeft={<Save size={14} />}
+        >
+          Save
+        </Button>
+        <Button
+          variant="primary"
+          size="sm"
+          onClick={openSend}
+          disabled={!!blocker || saving}
+          iconLeft={<Send size={14} />}
+          aria-label={sendLabel}
+        >
+          Send
+        </Button>
+      </div>
+
       {confirming && count != null && (
         <SendConfirmModal
           campaign={campaign}
@@ -973,7 +1017,7 @@ function DraftEditor({ campaign, stats, sites, onCampaign, onRefresh, onReload }
           icon={Save}
           onClose={() => setLeaveTo(null)}
         />
-        <Modal.Footer className="flex-wrap">
+        <Modal.Footer className="flex-wrap max-sm:flex-col-reverse max-sm:items-stretch">
           <Button variant="ghost" size="sm" onClick={() => setLeaveTo(null)}>
             Stay
           </Button>

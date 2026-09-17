@@ -274,9 +274,13 @@ export default function SyncPage() {
             { value: "manual", label: "Manual" },
             { value: "auto", label: "Automatic" },
           ]}
-          className={loading ? "opacity-60" : ""}
+          className={
+            "max-sm:[&>button]:flex-1 max-sm:[&>button]:justify-center " + (loading ? "opacity-60" : "")
+          }
         />
-        <span className="text-[12.5px] text-[var(--fg-muted)] ml-auto tabular-nums">
+        {/* The panel footer already says this on a phone, one screen closer to
+            the rows it counts. */}
+        <span className="text-[12.5px] text-[var(--fg-muted)] ml-auto tabular-nums max-sm:hidden">
           {total.toLocaleString()} run{total === 1 ? "" : "s"} · page {page} of {totalPages}
         </span>
       </Toolbar>
@@ -322,25 +326,28 @@ export default function SyncPage() {
                     <Th align="right">Updated</Th>
                     <Th align="right">Archived</Th>
                     <Th>User</Th>
+                    {/* Phone-only column: hidden from sm up (header and cells),
+                        unlabelled on the card, so the counts read as one strip. */}
+                    <Th className="sm:hidden!" />
                   </tr>
                 </thead>
                 <tbody>
                   {syncLogs.map((log) => (
                     <tr key={log.id}>
-                      <Td mono nowrap>
+                      <Td mono nowrap className="max-sm:items-center!">
                         {formatDate(log.sync_started_at)}
+                        {/* Phone: the outcome rides on the title line. */}
+                        <span className="sm:hidden! max-sm:ml-auto shrink-0 font-sans">
+                          <StatusPill tone={syncTone(log.status)}>{log.status}</StatusPill>
+                        </span>
                       </Td>
                       <Td>
                         <StatusPill tone={log.sync_type === "auto" ? "info" : "neutral"}>
                           {log.sync_type === "auto" ? "Automatic" : "Manual"}
                         </StatusPill>
                       </Td>
-                      <Td>
-                        <StatusPill
-                          tone={log.status === "completed" ? "success" : log.status === "failed" ? "danger" : "warning"}
-                        >
-                          {log.status}
-                        </StatusPill>
+                      <Td className="max-sm:hidden!">
+                        <StatusPill tone={syncTone(log.status)}>{log.status}</StatusPill>
                       </Td>
                       <CountCell value={log.total_fetched} />
                       <CountCell value={log.total_processed} />
@@ -348,14 +355,26 @@ export default function SyncPage() {
                       <CountCell value={log.total_updated} tone="var(--info-fg)" />
                       <CountCell value={log.total_archived || 0} tone="var(--warning-fg)" />
                       <Td muted nowrap>
-                        {log.user_email || "—"}
+                        {/* A long operator email wraps rather than widening the card. */}
+                        <span className="max-sm:break-all">{log.user_email || "—"}</span>
                       </Td>
+                      {/* Phone-only: the five counts as one strip instead of five
+                          labelled lines per run. */}
+                      <td className="sm:hidden!">
+                        <div className="w-full grid grid-cols-5 rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-surface)] divide-x divide-[var(--border-subtle)]">
+                          <CountFigure label="Fetched" value={log.total_fetched} />
+                          <CountFigure label="Processed" value={log.total_processed} />
+                          <CountFigure label="New" value={log.total_new} tone="var(--success-fg)" />
+                          <CountFigure label="Updated" value={log.total_updated} tone="var(--info-fg)" />
+                          <CountFigure label="Archived" value={log.total_archived || 0} tone="var(--warning-fg)" />
+                        </div>
+                      </td>
                     </tr>
                   ))}
                 </tbody>
               </DataTable>
 
-              <div className="flex items-center justify-between gap-3 px-5 py-3 border-t border-[var(--border-subtle)] bg-[var(--surface-sunken)] text-[12.5px] text-[var(--fg-muted)]">
+              <div className="flex items-center justify-between gap-3 px-5 py-3 max-sm:px-4 border-t border-[var(--border-subtle)] bg-[var(--surface-sunken)] text-[12.5px] text-[var(--fg-muted)]">
                 <span className="tabular-nums">
                   {total} total · page {page} of {totalPages}
                 </span>
@@ -383,12 +402,31 @@ export default function SyncPage() {
 
 /* ------------ Local helpers ------------------------------------------------ */
 
+function syncTone(status) {
+  return status === "completed" ? "success" : status === "failed" ? "danger" : "warning";
+}
+
 /** A count column: tabular, and tinted only where the number carries meaning. */
 function CountCell({ value, tone }) {
   return (
-    <Td align="right" nowrap className="tabular-nums font-semibold">
+    <Td align="right" nowrap className="tabular-nums font-semibold max-sm:hidden!">
       <span style={tone ? { color: tone } : undefined}>{Number(value || 0).toLocaleString()}</span>
     </Td>
+  );
+}
+
+/** One figure in the phone card's count strip: the number over its label. */
+function CountFigure({ label, value, tone }) {
+  return (
+    <div className="min-w-0 px-1 py-2 text-center">
+      <div
+        className="text-[14px] font-semibold tabular-nums leading-tight text-[var(--fg-primary)] break-words"
+        style={tone ? { color: tone } : undefined}
+      >
+        {Number(value || 0).toLocaleString()}
+      </div>
+      <div className="mt-0.5 text-[10.5px] leading-tight text-[var(--fg-muted)] break-words">{label}</div>
+    </div>
   );
 }
 

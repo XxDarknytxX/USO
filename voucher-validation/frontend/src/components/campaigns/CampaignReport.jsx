@@ -21,6 +21,7 @@ import {
   ArrowLeft, RefreshCw, Pause, Play, XCircle, RotateCcw, Copy, Send, Megaphone, Inbox,
 } from "lucide-react";
 import { campaignApi } from "../../services/api";
+import { useAuth } from "../../hooks/useAuth";
 import {
   PageShell, PageHeader, Panel, Button, Segmented, SearchInput, DataTable, Th, Td, TableMessage,
   StatusPill, ConfirmDialog,
@@ -29,7 +30,7 @@ import Pagination from "../shared/Pagination";
 import EmailPreview, { useEmailPreview } from "./EmailPreview";
 import {
   CampaignStatusPill, RECIPIENT_STATUS, DeliveryBar, Callout, audienceSummary, fmtDateTime,
-  durationWords, plural,
+  durationWords, plural, useIsPhone,
 } from "./campaignUi";
 
 function cn(...p) {
@@ -50,13 +51,15 @@ function Meta({ label, children }) {
   return (
     <div className="min-w-0">
       <dt className="text-label">{label}</dt>
-      <dd className="mt-1 truncate text-[12.5px] text-[var(--fg-secondary)]">{children}</dd>
+      <dd className="mt-1 truncate text-[12.5px] text-[var(--fg-secondary)] max-sm:whitespace-normal max-sm:[overflow-wrap:anywhere]">{children}</dd>
     </div>
   );
 }
 
 export default function CampaignReport({ campaign, stats, sites, onCampaign }) {
   const navigate = useNavigate();
+  const { isSuperadmin } = useAuth();
+  const isPhone = useIsPhone();
   const totals = campaign.totals || { recipients: 0, queued: 0, sent: 0, failed: 0, skipped: 0 };
   const perMinute = Number(campaign.sendPerMinute || stats?.sendPerMinute || 0);
   const isSending = campaign.status === "sending";
@@ -199,13 +202,15 @@ export default function CampaignReport({ campaign, stats, sites, onCampaign }) {
   }
 
   const counts = rows.counts || { all: totals.recipients, ...totals };
+  // On a phone the five filters only fit without their counts; the Sent /
+  // Queued / Failed / Skipped tiles just above already show those numbers.
   const filterOptions = [
     { value: "all", label: "All", count: counts.all ?? totals.recipients },
     { value: "sent", label: "Sent", count: counts.sent ?? 0 },
     { value: "queued", label: "Queued", count: counts.queued ?? 0 },
     { value: "failed", label: "Failed", count: counts.failed ?? 0 },
     { value: "skipped", label: "Skipped", count: counts.skipped ?? 0 },
-  ];
+  ].map((o) => (isPhone ? { ...o, count: undefined } : o));
 
   const canCancel = campaign.status === "sending" || campaign.status === "paused";
 
@@ -224,7 +229,7 @@ export default function CampaignReport({ campaign, stats, sites, onCampaign }) {
         tone="pink"
         actions={
           <>
-            <Button variant="ghost" size="sm" onClick={() => navigate("/email-campaigns")} iconLeft={<ArrowLeft size={14} />}>
+            <Button variant="ghost" size="sm" onClick={() => navigate("/email-campaigns")} iconLeft={<ArrowLeft size={14} />} className="max-sm:flex-auto">
               All campaigns
             </Button>
             <Button
@@ -233,29 +238,30 @@ export default function CampaignReport({ campaign, stats, sites, onCampaign }) {
               onClick={() => { refreshCampaign(); loadRecipients(); }}
               iconLeft={<RefreshCw size={14} />}
               aria-label="Refresh"
+              className="max-sm:flex-auto"
             >
               Refresh
             </Button>
             {campaign.status === "sending" && (
-              <Button variant="secondary" size="sm" onClick={pause} loading={busy === "pause"} disabled={!!busy} iconLeft={<Pause size={14} />}>
+              <Button variant="secondary" size="sm" onClick={pause} loading={busy === "pause"} disabled={!!busy} iconLeft={<Pause size={14} />} className="max-sm:flex-auto">
                 Pause
               </Button>
             )}
             {campaign.status === "paused" && (
-              <Button variant="primary" size="sm" onClick={resume} loading={busy === "resume"} disabled={!!busy} iconLeft={<Play size={14} />}>
+              <Button variant="primary" size="sm" onClick={resume} loading={busy === "resume"} disabled={!!busy} iconLeft={<Play size={14} />} className="max-sm:flex-auto">
                 Resume
               </Button>
             )}
             {totals.failed > 0 && ["sending", "paused", "sent"].includes(campaign.status) && (
-              <Button variant="secondary" size="sm" onClick={retry} loading={busy === "retry"} disabled={!!busy} iconLeft={<RotateCcw size={14} />}>
+              <Button variant="secondary" size="sm" onClick={retry} loading={busy === "retry"} disabled={!!busy} iconLeft={<RotateCcw size={14} />} className="max-sm:flex-auto">
                 Retry {totals.failed.toLocaleString()} failed
               </Button>
             )}
-            <Button variant="secondary" size="sm" onClick={duplicate} loading={busy === "duplicate"} disabled={!!busy} iconLeft={<Copy size={14} />}>
+            <Button variant="secondary" size="sm" onClick={duplicate} loading={busy === "duplicate"} disabled={!!busy} iconLeft={<Copy size={14} />} className="max-sm:flex-auto">
               Duplicate as draft
             </Button>
             {canCancel && (
-              <Button variant="danger" size="sm" onClick={() => setConfirmCancel(true)} disabled={!!busy} iconLeft={<XCircle size={14} />}>
+              <Button variant="danger" size="sm" onClick={() => setConfirmCancel(true)} disabled={!!busy} iconLeft={<XCircle size={14} />} className="max-sm:flex-auto">
                 Cancel
               </Button>
             )}
@@ -268,7 +274,7 @@ export default function CampaignReport({ campaign, stats, sites, onCampaign }) {
           tone={campaign.status === "paused" ? "warning" : "danger"}
           title={campaign.status === "paused" ? "The sender paused this campaign" : "The sender reported a problem"}
           action={
-            campaign.status === "paused" ? (
+            campaign.status === "paused" && isSuperadmin ? (
               <Button size="sm" variant="secondary" onClick={() => navigate("/settings?tab=email")}>
                 Check Settings → Email
               </Button>
@@ -289,7 +295,7 @@ export default function CampaignReport({ campaign, stats, sites, onCampaign }) {
           >
             <div className="flex flex-wrap items-end justify-between gap-x-6 gap-y-2">
               <div className="min-w-0">
-                <p className="text-[40px] font-semibold leading-none tracking-tight tabular-nums text-[var(--fg-primary)]">
+                <p className="text-[34px] font-semibold leading-none tracking-tight tabular-nums text-[var(--fg-primary)] sm:text-[40px]">
                   {totals.sent.toLocaleString()}
                   <span className="text-[18px] font-medium text-[var(--fg-muted)]"> / {totals.recipients.toLocaleString()}</span>
                 </p>
@@ -404,16 +410,19 @@ export default function CampaignReport({ campaign, stats, sites, onCampaign }) {
                     return (
                       <tr key={r.id}>
                         <Td>
-                          <div className="flex min-w-0 max-w-[320px] flex-col">
-                            <span className="truncate font-semibold text-[var(--fg-primary)]">{r.email}</span>
-                            {r.phone && <span className="truncate font-mono text-[11.5px] text-[var(--fg-muted)]">{r.phone}</span>}
+                          <div className="flex items-start gap-3 max-sm:w-full">
+                            <div className="flex min-w-0 max-w-[320px] flex-col max-sm:max-w-none max-sm:flex-1">
+                              <span className="truncate font-semibold text-[var(--fg-primary)]">{r.email}</span>
+                              {r.phone && <span className="truncate font-mono text-[11.5px] text-[var(--fg-muted)]">{r.phone}</span>}
+                            </div>
+                            <StatusPill tone={meta.tone} className="shrink-0 sm:hidden">{meta.label}</StatusPill>
                           </div>
                         </Td>
-                        <Td nowrap><StatusPill tone={meta.tone}>{meta.label}</StatusPill></Td>
+                        <Td nowrap className="max-sm:hidden!"><StatusPill tone={meta.tone}>{meta.label}</StatusPill></Td>
                         <Td align="right" nowrap><span className="tabular-nums">{r.attempts ?? 0}</span></Td>
                         <Td>
                           {r.error ? (
-                            <span className="block min-w-[200px] max-w-[420px] break-words text-[12px] text-[var(--danger-fg)]">{r.error}</span>
+                            <span className="block min-w-[200px] max-w-[420px] break-words text-[12px] text-[var(--danger-fg)] max-sm:min-w-0">{r.error}</span>
                           ) : r.status === "sent" ? (
                             <span className="whitespace-nowrap text-[12.5px] text-[var(--fg-muted)]">{fmtDateTime(r.sentAt)}</span>
                           ) : r.status === "skipped" ? (
@@ -439,7 +448,7 @@ export default function CampaignReport({ campaign, stats, sites, onCampaign }) {
             from={stats?.smtp?.from}
             title="What was sent"
             subtitle="The saved content, rendered for a sample customer"
-            frameClassName="h-[560px] xl:h-[calc(100vh-280px)] xl:min-h-[420px]"
+            frameClassName="h-[440px] sm:h-[560px] xl:h-[calc(100vh-280px)] xl:min-h-[420px]"
           />
         </div>
       </div>

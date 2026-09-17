@@ -480,37 +480,77 @@ class RuijieService {
       || msg.includes('overdue');
   }
 
+  /**
+   * Every user group in a village, live from Ruijie. Never throws: on any
+   * failure it answers { cloudSync: false, data: [], error } so the caller can
+   * say WHY the allocation figures are missing (a code-44 throttle reads very
+   * differently from "no such group").
+   *
+   * Paged 100 at a time; a village rarely has more than one page, and the page
+   * count is capped so a misbehaving response cannot loop.
+   */
   async getUserGroups(opts = {}, _retried = false) {
+    const PAGE_SIZE = 100;
+    const MAX_PAGES = 5;
     try {
       const accessToken = await this.getAccessToken();
       const gid = opts.groupId || this.groupId;
-      const url = new URL(this.buildUrl(`/intl/usergroup/list/${gid}`));
-      url.searchParams.append('access_token', accessToken);
-      url.searchParams.append('pageIndex', '0');
-      url.searchParams.append('pageSize', '100');
+      const all = [];
+      const seen = new Set();
+      for (let page = 0; page < MAX_PAGES; page++) {
+        const url = new URL(this.buildUrl(`/intl/usergroup/list/${gid}`));
+        url.searchParams.append('access_token', accessToken);
+        url.searchParams.append('pageIndex', String(page));
+        url.searchParams.append('pageSize', String(PAGE_SIZE));
 
-      const response = await ruijieFetch(url.toString(), {
-        method: 'GET',
-        headers: { 'Content-Type': 'application/json' },
-      });
+        const response = await ruijieFetch(url.toString(), {
+          method: 'GET',
+          headers: { 'Content-Type': 'application/json' },
+        });
 
-      if (!response.ok) throw new Error(`HTTP ${response.status} ${response.statusText}`);
-      const data = await response.json();
-      const okCode = data?.code === 0 || data?.code === 200;
-      if (!okCode) {
-        if (this.isTokenExpired(data) && !_retried) {
-          console.log('Ruijie token expired (Login timeout) in getUserGroups, refreshing...');
-          this.invalidateToken();
-          return this.getUserGroups(opts, true);
+        if (!response.ok) throw new Error(`HTTP ${response.status} ${response.statusText}`);
+        const data = await response.json();
+        const okCode = data?.code === 0 || data?.code === 200;
+        if (!okCode) {
+          if (this.isTokenExpired(data) && !_retried) {
+            console.log('Ruijie token expired (Login timeout) in getUserGroups, refreshing...');
+            this.invalidateToken();
+            return this.getUserGroups(opts, true);
+          }
+          if (Number(data?.code) === 44) throw new Error('Ruijie is rate-limiting requests right now (code 44)');
+          throw new Error(data?.msg || 'Get user groups failed');
         }
-        throw new Error(data?.msg || 'Get user groups failed');
-      }
 
-      const list = data?.data ?? [];
-      return { cloudSync: true, data: list };
+        // An array, or a paged wrapper. Anything else is treated as empty
+        // rather than handed to a caller that will call .find() on it.
+        const body = data?.data;
+        const list = Array.isArray(body) ? body : Array.isArray(body?.list) ? body.list : [];
+        // One entry per group, and stop if a page brings nothing new (a server
+        // that ignores pageIndex would otherwise repeat page one five times).
+        let added = 0;
+        for (const g of list) {
+          const key = String(g?.id ?? '');
+          if (key && seen.has(key)) continue;
+          if (key) seen.add(key);
+          all.push(g);
+          added++;
+        }
+        if (list.length < PAGE_SIZE || added === 0) break;
+      }
+      return { cloudSync: true, data: all };
     } catch (error) {
-      console.error('Failed to fetch user groups:', error);
-      return { cloudSync: false, data: [] };
+      // The raw message can carry the request URL, and the URL carries the
+      // account's access token (node-fetch: "request to <url> failed"). The
+      // caller shows this reason in the browser, so it is one of a few fixed
+      // phrases; the log keeps the detail with the token blanked out.
+      const raw = String(error?.message || error || '');
+      console.error('Failed to fetch user groups:', raw.replace(/((?:access_)?token=)[^&\s]+/gi, '$1…'));
+      let reason = 'Ruijie returned an error';
+      if (/code 44/.test(raw)) reason = 'Ruijie is rate-limiting requests right now (code 44)';
+      else if (/^HTTP (\d{3})/.test(raw)) reason = `Ruijie answered HTTP ${raw.match(/^HTTP (\d{3})/)[1]}`;
+      else if (/Invalid URL/i.test(raw)) reason = 'Ruijie is not configured on this server';
+      else if (error?.type === 'system' || /ECONN|ENOTFOUND|EAI_AGAIN|ETIMEDOUT|socket hang up|network|failed, reason/i.test(raw)) reason = 'Ruijie could not be reached';
+      return { cloudSync: false, data: [], error: reason };
     }
   }
 

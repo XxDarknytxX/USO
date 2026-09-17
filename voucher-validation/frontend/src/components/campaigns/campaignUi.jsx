@@ -6,11 +6,42 @@
 // from here, so a paused campaign cannot be amber on one screen and grey on the
 // next, and "Everyone · purchasers only" is phrased the same wherever it shows.
 
+import { useEffect, useState } from "react";
 import { AlertTriangle, Info, CheckCircle2 } from "lucide-react";
 import { StatusPill } from "../ui";
 
 function cn(...p) {
   return p.filter(Boolean).join(" ");
+}
+
+/* ───────────────────────── Viewport ───────────────────────── */
+
+const PHONE_QUERY = "(max-width: 639px)";
+
+function phoneNow() {
+  try {
+    return typeof window !== "undefined" && !!window.matchMedia?.(PHONE_QUERY).matches;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * True below Tailwind's `sm` breakpoint. For the few choices CSS cannot make
+ * on its own — which preview device to open on, whether a filter has room for
+ * its counts. Layout itself stays in responsive classes.
+ */
+export function useIsPhone() {
+  const [phone, setPhone] = useState(phoneNow);
+  useEffect(() => {
+    const mq = window.matchMedia?.(PHONE_QUERY);
+    if (!mq) return undefined;
+    const onChange = () => setPhone(mq.matches);
+    onChange();
+    mq.addEventListener?.("change", onChange);
+    return () => mq.removeEventListener?.("change", onChange);
+  }, []);
+  return phone;
 }
 
 /* ───────────────────────── Status ───────────────────────── */

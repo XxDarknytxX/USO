@@ -113,7 +113,12 @@ export default function SuppressionsPanel({ onChanged }) {
             placeholder="Search address…"
             width="w-full lg:w-72"
           />
-          <form onSubmit={add} className="flex w-full min-w-0 items-center gap-2 lg:ml-auto lg:w-auto">
+          {/* On a phone the add form stacks under the search, set apart by a rule
+              so the two boxes do not read as one search. */}
+          <form
+            onSubmit={add}
+            className="flex w-full min-w-0 items-center gap-2 lg:ml-auto lg:w-auto max-sm:flex-col max-sm:items-stretch max-sm:border-t max-sm:border-[var(--border-subtle)] max-sm:pt-3"
+          >
             <label htmlFor="exclude-email" className="sr-only">Address to exclude</label>
             <Input
               id="exclude-email"
@@ -122,7 +127,7 @@ export default function SuppressionsPanel({ onChanged }) {
               onChange={(e) => setAddress(e.target.value)}
               placeholder="Exclude an address…"
               autoComplete="off"
-              className="h-9! min-w-0 lg:w-60"
+              className="h-9! min-w-0 lg:w-60 max-sm:h-10!"
             />
             <label htmlFor="exclude-note" className="sr-only">Why (optional)</label>
             <Input
@@ -132,9 +137,17 @@ export default function SuppressionsPanel({ onChanged }) {
               placeholder="Why (optional)"
               maxLength={255}
               autoComplete="off"
-              className="h-9! min-w-0 lg:w-48"
+              className="h-9! min-w-0 lg:w-48 max-sm:h-10!"
             />
-            <Button type="submit" size="md" variant="secondary" loading={adding} disabled={!address.trim()} iconLeft={<Plus size={14} />}>
+            <Button
+              type="submit"
+              size="md"
+              variant="secondary"
+              loading={adding}
+              disabled={!address.trim()}
+              iconLeft={<Plus size={14} />}
+              className="max-sm:w-full"
+            >
               Add
             </Button>
           </form>
@@ -146,7 +159,9 @@ export default function SuppressionsPanel({ onChanged }) {
               <Th>Address</Th>
               <Th>Why</Th>
               <Th>Added</Th>
-              <Th align="right" className="relative"><span className="sr-only">Remove</span></Th>
+              {/* Named by aria-label: DataTable copies header TEXT onto each cell as
+                  its phone label. On a phone the button moves beside the address. */}
+              <th className="text-right" aria-label="Remove" />
             </tr>
           </thead>
           <tbody>
@@ -171,7 +186,20 @@ export default function SuppressionsPanel({ onChanged }) {
               data.suppressions.map((s) => (
                 <tr key={s.email}>
                   <Td>
-                    <span className="block max-w-[320px] truncate font-semibold text-[var(--fg-primary)]">{s.email}</span>
+                    <div className="flex items-center gap-2 max-sm:w-full">
+                      <span className="block min-w-0 max-w-[320px] truncate font-semibold text-[var(--fg-primary)] max-sm:max-w-none max-sm:flex-1">
+                        {s.email}
+                      </span>
+                      <IconButton
+                        size="sm"
+                        onClick={() => setRemoving(s)}
+                        title={`Allow campaigns to ${s.email} again`}
+                        aria-label={`Remove ${s.email} from the list`}
+                        className="-my-1 shrink-0 sm:hidden"
+                      >
+                        <Trash2 size={15} />
+                      </IconButton>
+                    </div>
                   </Td>
                   <Td>
                     <span className="block max-w-[280px] truncate text-[var(--fg-secondary)]" title={s.note || undefined}>
@@ -179,10 +207,13 @@ export default function SuppressionsPanel({ onChanged }) {
                     </span>
                   </Td>
                   <Td muted nowrap>
-                    <span title={fmtDateTime(s.createdAt)}>{relTime(s.createdAt)}</span>
-                    {s.createdByEmail && <span className="text-[var(--fg-subtle)]"> · {s.createdByEmail}</span>}
+                    {/* One element, so a phone card keeps "when · who" together. */}
+                    <span>
+                      <span title={fmtDateTime(s.createdAt)}>{relTime(s.createdAt)}</span>
+                      {s.createdByEmail && <span className="text-[var(--fg-subtle)]"> · {s.createdByEmail}</span>}
+                    </span>
                   </Td>
-                  <Td align="right">
+                  <Td align="right" className="max-sm:hidden!">
                     <IconButton
                       size="sm"
                       onClick={() => setRemoving(s)}

@@ -29,6 +29,7 @@ import {
 
 import { campaignApi } from "../services/api";
 import { useSite } from "../hooks/useSite";
+import { useAuth } from "../hooks/useAuth";
 import {
   PageShell, PageHeader, KpiGrid, StatCard, GlassCard, ObjectTile, Tabs, Toolbar, Segmented,
   SearchInput, Panel, DataTable, Th, Td, TableMessage, Button, IconButton, EmptyState,
@@ -62,7 +63,7 @@ function SmtpCard({ stats, onOpenSettings }) {
     <GlassCard
       size="md"
       className={problem ? "border-[var(--warning-border)]" : undefined}
-      onClick={problem ? onOpenSettings : undefined}
+      onClick={problem && onOpenSettings ? onOpenSettings : undefined}
     >
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
@@ -77,15 +78,23 @@ function SmtpCard({ stats, onOpenSettings }) {
             )}
           </div>
         </div>
-        <ObjectTile tone={problem ? "orange" : "green"}><ServerCog size={18} /></ObjectTile>
+        {/* Hidden on a phone, as StatCard's tile is: two cards share the width. */}
+        <ObjectTile tone={problem ? "orange" : "green"} className="max-sm:hidden"><ServerCog size={18} /></ObjectTile>
       </div>
       <div className="mt-3 flex min-w-0 items-center gap-2">
         {problem ? (
-          <span className="inline-flex items-center gap-1 text-[12px] font-semibold text-[var(--warning-fg)]">
-            Fix in Settings → Email <ArrowRight size={12} />
-          </span>
+          onOpenSettings ? (
+            <span className="inline-flex items-center gap-1 text-[12px] font-semibold text-[var(--warning-fg)]">
+              Fix in Settings → Email <ArrowRight size={12} />
+            </span>
+          ) : (
+            <span className="text-[12px] font-semibold text-[var(--warning-fg)]">Ask the superadmin to fix this</span>
+          )
         ) : smtp ? (
-          <span className="truncate text-[12px] text-[var(--fg-muted)]" title={smtp.from || undefined}>
+          <span
+            className="text-[12px] text-[var(--fg-muted)] max-sm:line-clamp-3 max-sm:[overflow-wrap:anywhere] sm:truncate"
+            title={smtp.from || undefined}
+          >
             From <span className="font-medium text-[var(--fg-secondary)]">{smtp.from || "the default sender"}</span>
             {stats?.sendPerMinute ? ` · ${stats.sendPerMinute}/min` : ""}
           </span>
@@ -234,7 +243,10 @@ export default function EmailCampaignsPage() {
   }
 
   const problem = smtpProblem(stats?.smtp);
-  const openSettings = () => navigate("/settings?tab=email");
+  // The mail server belongs to the superadmin; an admin is told who to ask
+  // rather than sent to a tab they cannot open.
+  const { isSuperadmin } = useAuth();
+  const openSettings = isSuperadmin ? () => navigate("/settings?tab=email") : undefined;
   const nothingYet = !loading && !loadError && counts.all === 0 && !debounced;
 
   return (
@@ -262,9 +274,19 @@ export default function EmailCampaignsPage() {
       ) : (
         <KpiGrid cols={4}>
           <StatCard
-            label="Contacts with an email"
+            label={
+              <>
+                <span className="sm:hidden">Contacts</span>
+                <span className="max-sm:hidden">Contacts with an email</span>
+              </>
+            }
             value={stats ? Number(stats.contacts || 0).toLocaleString() : "—"}
-            sub="One per inbox, from M-PAiSA Mapping"
+            sub={
+              <>
+                <span className="sm:hidden">With an email, one per inbox</span>
+                <span className="max-sm:hidden">One per inbox, from M-PAiSA Mapping</span>
+              </>
+            }
             icon={<Users size={18} />}
             color="pink"
           />
@@ -292,12 +314,14 @@ export default function EmailCampaignsPage() {
           tone="warning"
           title={problem.title}
           action={
-            <Button size="sm" variant="secondary" onClick={openSettings} iconLeft={<SettingsIcon size={14} />}>
-              Open Settings → Email
-            </Button>
+            openSettings ? (
+              <Button size="sm" variant="secondary" onClick={openSettings} iconLeft={<SettingsIcon size={14} />}>
+                Open Settings → Email
+              </Button>
+            ) : null
           }
         >
-          {problem.detail} You can still write and save drafts.
+          {problem.detail} {openSettings ? "" : "Email settings are managed by the superadmin. "}You can still write and save drafts.
         </Callout>
       )}
 
@@ -321,6 +345,7 @@ export default function EmailCampaignsPage() {
                 value={filter}
                 onChange={setFilter}
                 size="sm"
+                className="max-sm:flex max-sm:w-full max-sm:[&>button]:flex-1 max-sm:[&>button]:justify-center"
               />
             </div>
             <SearchInput
@@ -361,7 +386,9 @@ export default function EmailCampaignsPage() {
                     <Th>Audience</Th>
                     <Th>Progress</Th>
                     <Th>When</Th>
-                    <Th align="right" className="relative"><span className="sr-only">Actions</span></Th>
+                    {/* Named by aria-label, not text: DataTable copies header TEXT onto
+                        each cell as its phone label, and a row of buttons needs none. */}
+                    <th className="text-right" aria-label="Actions" />
                   </tr>
                 </thead>
                 <tbody>
@@ -389,14 +416,17 @@ export default function EmailCampaignsPage() {
                       return (
                         <tr key={c.id} onClick={open} className="cursor-pointer">
                           <Td>
-                            <div className="flex min-w-[200px] max-w-[340px] flex-col">
-                              <span className="truncate font-semibold text-[var(--fg-primary)]">{c.name || "Untitled campaign"}</span>
-                              <span className="truncate text-[12px] text-[var(--fg-muted)]">
-                                {c.subject || <span className="italic">No subject yet</span>}
-                              </span>
+                            <div className="flex items-start gap-3 max-sm:w-full">
+                              <div className="flex min-w-[200px] max-w-[340px] flex-col max-sm:min-w-0 max-sm:max-w-none max-sm:flex-1">
+                                <span className="truncate font-semibold text-[var(--fg-primary)]">{c.name || "Untitled campaign"}</span>
+                                <span className="truncate text-[12px] text-[var(--fg-muted)]">
+                                  {c.subject || <span className="italic">No subject yet</span>}
+                                </span>
+                              </div>
+                              <CampaignStatusPill status={c.status} className="shrink-0 sm:hidden" />
                             </div>
                           </Td>
-                          <Td nowrap><CampaignStatusPill status={c.status} /></Td>
+                          <Td nowrap className="max-sm:hidden!"><CampaignStatusPill status={c.status} /></Td>
                           <Td>
                             <span className="block max-w-[220px] truncate text-[12.5px]" title={audienceSummary(c.audience, sites)}>
                               {audienceSummary(c.audience, sites)}
@@ -409,10 +439,11 @@ export default function EmailCampaignsPage() {
                             </span>
                           </Td>
                           <td className="text-right" onClick={(e) => e.stopPropagation()}>
-                            <div className="inline-flex items-center justify-end gap-1">
+                            <div className="inline-flex items-center justify-end gap-1 max-sm:mt-1 max-sm:flex max-sm:w-full max-sm:gap-2">
                               <Button
                                 size="xs"
                                 variant="secondary"
+                                className="max-sm:flex-1"
                                 onClick={open}
                                 iconLeft={c.status === "draft" ? <PenLine size={12} /> : <BarChart3 size={12} />}
                               >

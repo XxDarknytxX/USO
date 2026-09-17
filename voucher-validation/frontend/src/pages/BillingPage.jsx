@@ -142,14 +142,17 @@ function ScopeStrip({ data, isAdmin, view }) {
   return (
     <div className={`flex flex-col gap-2 rounded-xl border px-4 py-3 text-[12.5px] ${toneClass}`}>
       <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
-        <span className="flex min-w-0 flex-1 items-start gap-2">
+        {/* On a phone the sentence gets the whole width and the buttons drop
+            beneath it, lined up with the text; squeezed beside them it wraps
+            to three words a line. */}
+        <span className="flex min-w-0 flex-1 items-start gap-2 max-sm:basis-full">
           {icon}
           <span className="flex min-w-0 flex-col gap-0.5">
             <span className={tone === "neutral" ? "text-[var(--fg-primary)]" : "font-medium"}>{headline}</span>
             {sub && <span className="text-[12px] text-[var(--fg-muted)]">{sub}</span>}
           </span>
         </span>
-        <span className="flex flex-wrap items-center gap-1.5">
+        <span className="flex flex-wrap items-center gap-1.5 max-sm:pl-2.5">
           {excluded.length > 0 && (
             <Button
               variant="ghost"
@@ -167,7 +170,7 @@ function ScopeStrip({ data, isAdmin, view }) {
       {open && excluded.length > 0 && (
         <ul className="flex flex-col gap-1 border-t border-[var(--border-subtle)] pt-2 text-[12px] text-[var(--fg-secondary)]">
           {Object.entries(byReason).map(([reason, list]) => (
-            <li key={reason} className="flex flex-wrap gap-x-1.5">
+            <li key={reason} className="flex flex-wrap gap-x-1.5 max-sm:flex-col">
               <span className="font-medium text-[var(--fg-primary)]">{REASONS[reason] || reason}:</span>
               <span>{joinNames(list.map((x) => x.name), 12)}</span>
             </li>
@@ -227,7 +230,7 @@ function TargetControl({ target, onSaved, canEdit }) {
 
   if (!editing || !canEdit) {
     return (
-      <span className="inline-flex items-center gap-2 text-[12.5px] text-[var(--fg-secondary)]">
+      <span className="inline-flex items-center gap-2 text-[12.5px] text-[var(--fg-secondary)] max-sm:flex-wrap max-sm:gap-y-1">
         Target
         <span className="font-semibold tabular-nums text-[var(--fg-primary)]">{money(target)}</span>
         <span className="text-[var(--fg-muted)]">per village / month</span>
@@ -240,15 +243,15 @@ function TargetControl({ target, onSaved, canEdit }) {
     );
   }
   return (
-    <span className="inline-flex items-center gap-1.5">
-      <span className="text-[12.5px] text-[var(--fg-secondary)]">Target $</span>
+    <span className="inline-flex items-center gap-1.5 max-sm:flex-wrap">
+      <span className="text-[12.5px] text-[var(--fg-secondary)] max-sm:whitespace-nowrap">Target $</span>
       <Input
         value={value}
         onChange={(e) => setValue(e.target.value)}
         onKeyDown={(e) => { if (e.key === "Enter") save(); if (e.key === "Escape") setEditing(false); }}
         inputMode="decimal"
         autoFocus
-        className="h-8 w-24 tabular-nums"
+        className="h-8 w-24 tabular-nums max-sm:h-9 max-sm:w-24"
       />
       <Button variant="primary" size="xs" onClick={save} loading={busy} iconLeft={<Check size={11} />}>Save</Button>
       <Button variant="ghost" size="xs" onClick={() => setEditing(false)} disabled={busy} iconLeft={<X size={11} />}>Cancel</Button>
@@ -380,8 +383,8 @@ export default function BillingPage() {
         <div className="flex flex-wrap items-center justify-between gap-3">
           <TargetControl target={data.target} onSaved={load} canEdit={isAdmin} />
           {data.inProgress && (
-            <span className="inline-flex items-center gap-1.5 rounded-full border border-[var(--warning-border)] bg-[var(--warning-soft)] px-3 py-1 text-[12px] font-medium text-[var(--warning-fg)]">
-              <AlertTriangle size={12} />
+            <span className="inline-flex items-center gap-1.5 rounded-full border border-[var(--warning-border)] bg-[var(--warning-soft)] px-3 py-1 text-[12px] font-medium text-[var(--warning-fg)] max-sm:items-start max-sm:rounded-xl max-sm:py-2">
+              <AlertTriangle size={12} className="shrink-0 max-sm:mt-0.5" />
               Month in progress — {data.daysElapsed} of {data.daysInMonth} days. Shortfalls will shrink as it fills in.
             </span>
           )}
@@ -432,7 +435,9 @@ export default function BillingPage() {
           </KpiGrid>
 
           {/* The two lists side by side, each scrolling within itself so the
-              page stays one screen however many villages there are. */}
+              page stays one screen however many villages there are. On a
+              phone they stack and flow with the page instead: a scroll box
+              inside a scrolling page is a trap for a thumb. */}
           <div className="grid grid-cols-1 items-start gap-5 lg:grid-cols-2">
             <Panel
               title="Below target"
@@ -445,7 +450,7 @@ export default function BillingPage() {
                 <EmptyState icon={Check} title="Every village met its target" description={`Nothing is short for ${monthLabel}.`} />
               ) : (
                 <>
-                  <div className="max-h-[520px] overflow-y-auto">
+                  <div className="sm:max-h-[520px] sm:overflow-y-auto">
                     <DataTable>
                       <thead>
                         <tr>
@@ -458,13 +463,13 @@ export default function BillingPage() {
                         {data.under.map((r) => (
                           <tr key={r.projectId}>
                             <Td>
-                              <span className="flex min-w-0 flex-col gap-1.5">
+                              <span className="flex w-full min-w-0 flex-col gap-1.5">
                                 <VillageCell name={r.name} hostname={r.hostname} />
                                 <Progress pct={r.pctOfTarget} tone="danger" />
                               </span>
                             </Td>
                             <Td align="right" nowrap className="tabular-nums">
-                              <span className="flex flex-col items-end">
+                              <span className="flex flex-col items-end max-sm:flex-row-reverse max-sm:items-baseline max-sm:gap-2">
                                 <span>{money(r.revenue)}</span>
                                 <span className="text-[11px] text-[var(--fg-muted)]">{r.pctOfTarget}% of target</span>
                               </span>
@@ -498,7 +503,7 @@ export default function BillingPage() {
                 <EmptyState icon={TrendingUp} title="No village reached its target" description={`Nothing above target for ${monthLabel}.`} />
               ) : (
                 <>
-                  <div className="max-h-[520px] overflow-y-auto">
+                  <div className="sm:max-h-[520px] sm:overflow-y-auto">
                     <DataTable>
                       <thead>
                         <tr>
@@ -512,7 +517,7 @@ export default function BillingPage() {
                           <tr key={r.projectId}>
                             <Td><VillageCell name={r.name} hostname={r.hostname} /></Td>
                             <Td align="right" nowrap className="tabular-nums">
-                              <span className="flex flex-col items-end">
+                              <span className="flex flex-col items-end max-sm:flex-row-reverse max-sm:items-baseline max-sm:gap-2">
                                 <span>{money(r.revenue)}</span>
                                 <span className="text-[11px] text-[var(--fg-muted)]">{r.pctOfTarget}% of target</span>
                               </span>

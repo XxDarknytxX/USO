@@ -22,6 +22,7 @@ import {
   Panel, Segmented, EmptyState, SkeletonCard,
   ChartTooltip, ChartGradient, useChartTheme, axisX, axisY, gridProps,
 } from "./ui";
+import { usePhone } from "./MonthlyBreakdown";
 
 const RANGES = [
   { value: "A", label: "15m" },
@@ -57,6 +58,7 @@ export default function StarlinkTelemetry({ projectId, className, compact = fals
   const [range, setRange] = useState("B");
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
+  const phone = usePhone();
 
   const load = useCallback(async () => {
     if (!projectId) return;
@@ -93,6 +95,7 @@ export default function StarlinkTelemetry({ projectId, className, compact = fals
     return (
       <Panel title="Link quality" subtitle="Starlink telemetry" tone="violet" className={className}>
         <EmptyState
+          className="max-sm:py-8"
           icon={SignalHigh}
           title="No Starlink kit linked"
           description={data.reason || "Add this village's kit id under Network to see its link quality."}
@@ -120,11 +123,12 @@ export default function StarlinkTelemetry({ projectId, className, compact = fals
     >
       {empty ? (
         <EmptyState
+          className="max-sm:py-8"
           icon={SignalHigh}
           title="Nothing reported in this window"
           description={
             data?.telemetryEnabled === false
-              ? "Telemetry collection is switched off — an admin can enable it in Settings."
+              ? "Telemetry collection is switched off — the superadmin can enable it in Settings."
               : "The dish has not reported in this period. Try a longer window, or check whether it is online."
           }
         />
@@ -133,9 +137,15 @@ export default function StarlinkTelemetry({ projectId, className, compact = fals
         // -file cards would make this column twice the height of the usage
         // panel beside it. In the half-width slot the gutters and plots tighten
         // instead of the layout changing shape.
-        <div className={`grid grid-cols-1 ${compact ? "sm:grid-cols-2 gap-3" : "lg:grid-cols-2 gap-5"}`}>
+        //
+        // A phone keeps two across as well, as reading tiles: the figure, its
+        // range and a sparkline. Six full charts stacked one under another ran
+        // over a thousand pixels, and the axes they would need do not fit in
+        // half a phone's width — the window is in the subtitle, the range in
+        // min/avg/max, and a tap on the line still gives the exact reading.
+        <div className={`grid grid-cols-1 ${compact ? "sm:grid-cols-2 gap-3" : "lg:grid-cols-2 gap-5"} max-sm:grid-cols-2 max-sm:gap-2.5`}>
           {SERIES.map((s) => (
-            <MetricChart key={s.key} spec={s} points={points} stats={data?.stats?.[s.key]} compact={compact} />
+            <MetricChart key={s.key} spec={s} points={points} stats={data?.stats?.[s.key]} compact={compact} spark={phone} />
           ))}
         </div>
       )}
@@ -144,7 +154,7 @@ export default function StarlinkTelemetry({ projectId, className, compact = fals
 }
 
 /** One measure: its headline reading, its range, and its shape over time. */
-function MetricChart({ spec, points, stats, compact = false }) {
+function MetricChart({ spec, points, stats, compact = false, spark = false }) {
   const ct = useChartTheme();
   const gradId = `tel-${spec.key}`;
 
@@ -162,15 +172,15 @@ function MetricChart({ spec, points, stats, compact = false }) {
       : "var(--fg-primary)";
 
   return (
-    <div className={`rounded-xl border border-[var(--border-default)] bg-[var(--bg-surface)] ${compact ? "p-3" : "p-4"}`}>
-      <div className="flex items-start justify-between gap-3">
+    <div className={`min-w-0 rounded-xl border border-[var(--border-default)] bg-[var(--bg-surface)] ${compact ? "p-3" : "p-4"} max-sm:p-3 max-sm:flex max-sm:flex-col`}>
+      <div className="flex items-start justify-between gap-3 max-sm:flex-col max-sm:gap-1.5">
         <span className="flex items-center gap-2 min-w-0">
           <spec.Icon size={14} style={{ color: spec.color }} className="shrink-0" />
           <span className="text-[12.5px] font-semibold font-display text-[var(--fg-primary)] truncate">
             {spec.label}
           </span>
         </span>
-        <span className="text-[17px] leading-none font-semibold tabular-nums shrink-0" style={{ color: tone }}>
+        <span className="text-[17px] leading-none font-semibold tabular-nums shrink-0 max-sm:text-[19px]" style={{ color: tone }}>
           {fmt(stats?.last, spec.decimals)}
           <span className="ml-1 text-[11px] font-medium text-[var(--fg-muted)]">{spec.unit}</span>
         </span>
@@ -179,22 +189,28 @@ function MetricChart({ spec, points, stats, compact = false }) {
       {/* min / avg / max, because a single current reading cannot tell you
           whether 40ms is normal for this site or the best it has managed all
           day. */}
-      <div className="mt-1.5 flex items-center gap-3 text-[11px] text-[var(--fg-muted)] tabular-nums">
+      <div className="mt-1.5 flex items-center gap-3 max-sm:flex-wrap max-sm:gap-x-2 max-sm:gap-y-0 text-[11px] text-[var(--fg-muted)] tabular-nums">
         <span>min {fmt(stats?.min, spec.decimals)}</span>
         <span>avg {fmt(stats?.avg, spec.decimals)}</span>
         <span>max {fmt(stats?.max, spec.decimals)}</span>
       </div>
 
-      <div className={compact ? "mt-2.5 h-[92px]" : "mt-3 h-[120px]"}>
+      {/* mt-auto on a phone: tiles side by side share a height, and a range
+          that wraps in one must not leave its sparkline sitting higher. */}
+      <div className={`${compact ? "mt-2.5 h-[92px]" : "mt-3 h-[120px]"} max-sm:h-[52px] max-sm:mt-auto max-sm:pt-2.5`}>
         <ResponsiveContainer width="100%" height="100%">
-          <AreaChart data={points} margin={{ top: 4, right: 4, bottom: 0, left: -18 }}>
+          <AreaChart
+            data={points}
+            margin={spark ? { top: 4, right: 2, bottom: 2, left: 2 } : { top: 4, right: 4, bottom: 0, left: -18 }}
+          >
             <defs>
               <ChartGradient id={gradId} color={spec.color} />
             </defs>
-            <CartesianGrid {...gridProps(ct)} vertical={false} />
-            <XAxis dataKey="label" {...axisX(ct)} minTickGap={compact ? 64 : 40} />
+            {!spark && <CartesianGrid {...gridProps(ct)} vertical={false} />}
+            <XAxis dataKey="label" {...axisX(ct)} minTickGap={compact ? 64 : 40} hide={spark} />
             <YAxis
               {...axisY(ct)}
+              hide={spark}
               width={44}
               // Percentages are pinned to 0–100 so a village at 0.2%
               // obstruction does not get a chart that makes it look alarming by

@@ -16,6 +16,7 @@ import {
   DOC_CATEGORIES, DOC_CATEGORY_KEYS, ALLOWED_DOC_MIME, MAX_DOC_BYTES,
   saveDocument, saveDocumentStream, streamDocument, deleteDocument, resolveDocument,
 } from "../services/maintenanceStore.js";
+import { isAdminRole } from "../middleware/auth.js";
 
 const send = {
   ok: (res, data = {}) => res.json(data),
@@ -29,7 +30,7 @@ const send = {
 // The servicing cadence. Used to derive "next due" and the overdue flag.
 const SERVICE_INTERVAL_MONTHS = 6;
 
-const isAdmin = (req) => req.user?.role === "admin";
+const isAdmin = (req) => isAdminRole(req.user?.role);
 
 /* ── Village scope ─────────────────────────────────────────────────────────
    Maintenance is limited to the villages an admin assigned the account, the
@@ -53,7 +54,7 @@ const isAdmin = (req) => req.user?.role === "admin";
  */
 const scopeOf = (req) =>
   req.scope ||
-  (req.user?.role === "admin"
+  (isAdminRole(req.user?.role)
     ? { isViewer: false, projectIds: null }
     : { isViewer: true, projectIds: [] });
 

@@ -16,19 +16,19 @@
 // voucher_claims), never from Ruijie or Starlink, so changing the window is
 // cheap and cannot contribute to any upstream rate limit.
 
-import { useMemo } from "react";
+import { useMemo, useState, useSyncExternalStore } from "react";
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
   PieChart, Pie, Cell,
 } from "recharts";
 import {
   BarChart3, DollarSign, Ticket,
-  Users, Wifi, AlertTriangle, Clock, MapPin,
+  Users, Wifi, AlertTriangle, Clock, MapPin, ChevronRight,
 } from "lucide-react";
 
 import { rangeLabel } from "../hooks/useMonthlyBreakdown";
 import {
-  Panel, StatCard, EmptyState, Badge, KpiGrid,
+  Panel, StatCard, EmptyState, Badge, KpiGrid, Button,
   DataTable, Th, Td,
   SkeletonKpis, SkeletonCard,
   CHART_COLORS, CHART_SERIES, ChartTooltip, ChartGradient, useChartTheme,
@@ -39,6 +39,103 @@ import {
 const money = (n) =>
   "$" + Number(n || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const num = (n) => Number(n || 0).toLocaleString();
+
+/* ───────────────────────── Phone helpers ─────────────────────────
+ * Shared by both dashboards and the plan table, which all compose these panels.
+ *
+ * Below 640px DataTable stacks every row into a card of "LABEL  value" lines.
+ * For the dashboards' wide tables that is eight or nine lines a row — a village
+ * list thirty-one rows long becomes seventeen thousand pixels. PHONE_CARD turns
+ * the card into a six-track grid instead: the row's subject and its headline
+ * figure on the first line, the other figures as small label-over-value tiles
+ * two or three across. Desktop is untouched — every class is max-sm.
+ *
+ * The `!` is needed because the stacked-table rules are deliberately unlayered
+ * and would otherwise win over these utilities. */
+
+const PHONE_STAT =
+  "max-sm:flex-col! max-sm:justify-start! max-sm:gap-1! max-sm:text-left! " +
+  "max-sm:[&>*]:ml-0! max-sm:before:max-w-none! max-sm:before:pt-0!";
+
+export const PHONE_CARD = {
+  /** On the <tr>. */
+  row: "max-sm:grid! max-sm:grid-cols-6 max-sm:gap-x-3! max-sm:gap-y-3!",
+  /** The first cell: the row's subject, beside the aside. */
+  title: "max-sm:col-span-4 max-sm:self-center",
+  /** A first cell with no aside beside it (a totals row). */
+  titleFull: "max-sm:col-span-6",
+  /** The headline figure or state, top-right, unlabelled. */
+  aside:
+    "max-sm:col-start-5 max-sm:col-span-2 max-sm:row-start-1 max-sm:self-center " +
+    "max-sm:justify-end! max-sm:before:hidden!",
+  /** A label-over-value tile, three to a line. */
+  stat: "max-sm:col-span-2 " + PHONE_STAT,
+  /** A label-over-value tile, two to a line (for wider values such as IPs). */
+  statWide: "max-sm:col-span-3 " + PHONE_STAT,
+  /** The tile styling alone, for a row that sets its own grid tracks. */
+  cell: PHONE_STAT,
+  /** A cell whose figure already appears elsewhere in the phone card. */
+  hide: "max-sm:hidden!",
+};
+
+/** How many rows a long list shows on a phone before "Show all". */
+export const PHONE_ROWS = 6;
+
+/**
+ * The row class for row `i` of a list capped at PHONE_ROWS on a phone. Only
+ * phones are capped: desktop keeps its contained scroll box.
+ */
+export function phoneRowClass(i, expanded) {
+  return !expanded && i >= PHONE_ROWS ? "max-sm:hidden!" : PHONE_CARD.row;
+}
+
+/**
+ * The "Show all" control under a capped list. Phones only. The desktop tables
+ * scroll inside a fixed box; on a phone that box is removed (a scroll area
+ * inside a scrolling page traps the thumb), so without a cap a long list would
+ * push everything below it several screens down.
+ */
+export function PhoneMore({ total, expanded, onToggle, noun = "rows" }) {
+  if (total <= PHONE_ROWS) return null;
+  return (
+    <div className="sm:hidden px-4 py-3 border-t border-[var(--border-subtle)]">
+      <Button variant="secondary" size="sm" className="w-full" onClick={onToggle}>
+        {expanded ? `Show fewer ${noun}` : `Show all ${num(total)} ${noun}`}
+      </Button>
+    </div>
+  );
+}
+
+/** A tappable card's cue on a phone, where there is no hover to reveal it. */
+export function PhoneChevron({ className = "" }) {
+  return (
+    <ChevronRight
+      size={15}
+      aria-hidden="true"
+      className={`sm:hidden shrink-0 text-[var(--fg-subtle)] ${className}`}
+    />
+  );
+}
+
+const PHONE_QUERY = "(max-width: 639px)";
+function subscribePhone(onChange) {
+  const mq = window.matchMedia(PHONE_QUERY);
+  mq.addEventListener("change", onChange);
+  return () => mq.removeEventListener("change", onChange);
+}
+/**
+ * True below 640px. Only for what CSS cannot reach — a chart's axis layout is a
+ * prop, not a style.
+ */
+export function usePhone() {
+  return useSyncExternalStore(subscribePhone, () => window.matchMedia(PHONE_QUERY).matches, () => false);
+}
+
+/** A category name short enough for a phone chart's axis; the tooltip has it whole. */
+export const shortLabel = (s, max = 14) => {
+  const t = String(s ?? "");
+  return t.length > max ? t.slice(0, max - 1) + "…" : t;
+};
 
 /** Event types worth naming; anything else is shown raw. */
 const OUTCOME_LABEL = {
@@ -80,6 +177,7 @@ export function hasSalesHistory(state) {
 export function BreakdownEmpty() {
   return (
     <EmptyState
+      className="max-sm:py-8"
       icon={BarChart3}
       title="No sales recorded yet"
       description="Once a customer completes a purchase, the window appears here."
@@ -147,7 +245,7 @@ export function RevenuePlanMix({ state, limit = 6, className }) {
   return (
     <Panel title="Revenue by plan" subtitle={rangeLabel(state.month)} icon={<Ticket size={15} />} tone="violet" className={className}>
       {byPlan.length === 0 ? (
-        <EmptyState icon={Ticket} title="No sales in this window" />
+        <EmptyState className="max-sm:py-8" icon={Ticket} title="No sales in this window" />
       ) : (
         <>
           <div className="relative mx-auto" style={{ width: 196, height: 196 }}>
@@ -264,7 +362,7 @@ export function SoldByPlanPanel({ state, className }) {
   return (
     <Panel title="Vouchers sold by plan" subtitle="From the claim ledger" icon={<Ticket size={15} />} tone="blue" className={className}>
       {soldByPlan.length === 0 ? (
-        <EmptyState icon={Ticket} title="No vouchers claimed in this window" />
+        <EmptyState className="max-sm:py-8" icon={Ticket} title="No vouchers claimed in this window" />
       ) : (
         <>
           <ChartStat value={num(total)} unit="sold" caption={`Across ${num(soldByPlan.length)} plan${soldByPlan.length === 1 ? "" : "s"}`} />
@@ -297,6 +395,7 @@ export function SoldByPlanPanel({ state, className }) {
  */
 export function PlansPurchasedPanel({ state, onOpenPlan, className }) {
   const byPlan = state.data?.byPlan || [];
+  const [showAll, setShowAll] = useState(false);
   if (isCold(state)) return <SkeletonCard height="h-80" className={className} />;
 
   const totalMb = byPlan.reduce((a, p) => a + Number(p.purchasedMb || 0), 0);
@@ -321,6 +420,7 @@ export function PlansPurchasedPanel({ state, onOpenPlan, className }) {
       {byPlan.length === 0 ? (
         <div className="p-5">
           <EmptyState
+            className="max-sm:py-8"
             icon={Ticket}
             title="No plans purchased in this window"
             description="Nothing was sold here in the selected period. Widen the window to see earlier sales."
@@ -339,18 +439,23 @@ export function PlansPurchasedPanel({ state, onOpenPlan, className }) {
               </tr>
             </thead>
             <tbody>
-              {byPlan.map((p) => (
+              {byPlan.map((p, i) => (
                 <tr
                   key={p.name}
                   onClick={onOpenPlan ? () => onOpenPlan(p) : undefined}
-                  className={onOpenPlan ? "cursor-pointer" : undefined}
+                  className={[onOpenPlan ? "cursor-pointer" : "", phoneRowClass(i, showAll)].join(" ")}
                   title={onOpenPlan ? `Open the ${p.name} vouchers` : undefined}
                 >
-                  <Td strong>{p.name}</Td>
-                  <Td align="right" className="tabular-nums">{num(p.count)}</Td>
-                  <Td align="right" strong className="tabular-nums">{money(p.revenue)}</Td>
-                  <Td align="right" className="tabular-nums">{gb(p.purchasedMb)}</Td>
-                  <Td align="right" className="tabular-nums">
+                  <Td strong className={PHONE_CARD.title}>
+                    <span className="inline-flex items-center gap-1 min-w-0">
+                      <span className="min-w-0">{p.name}</span>
+                      {onOpenPlan && <PhoneChevron />}
+                    </span>
+                  </Td>
+                  <Td align="right" className={`tabular-nums ${PHONE_CARD.stat}`}>{num(p.count)}</Td>
+                  <Td align="right" strong className={`tabular-nums ${PHONE_CARD.aside}`}>{money(p.revenue)}</Td>
+                  <Td align="right" className={`tabular-nums ${PHONE_CARD.stat}`}>{gb(p.purchasedMb)}</Td>
+                  <Td align="right" className={`tabular-nums ${PHONE_CARD.stat}`}>
                     {/* Zero used across sold vouchers is usually the gateway not
                         reporting flow rather than nobody connecting. */}
                     {p.usedMb ? gb(p.usedMb) : <span className="text-[var(--fg-subtle)]">—</span>}
@@ -359,6 +464,7 @@ export function PlansPurchasedPanel({ state, onOpenPlan, className }) {
               ))}
             </tbody>
           </DataTable>
+          <PhoneMore total={byPlan.length} expanded={showAll} onToggle={() => setShowAll((v) => !v)} noun="plans" />
           {unpriced > 0 && (
             <p className="px-5 py-3 border-t border-[var(--border-subtle)] text-[12px] text-[var(--fg-muted)]">
               {num(unpriced)} sale{unpriced === 1 ? "" : "s"} could not be matched to a voucher, so their
@@ -379,7 +485,7 @@ export function RevenueByVillagePanel({ state, className }) {
   return (
     <Panel title="Revenue by village" subtitle="Top 8 for the window" icon={<MapPin size={15} />} tone="navy" className={className}>
       {byVillage.length === 0 ? (
-        <EmptyState icon={MapPin} title="No sales in this window" />
+        <EmptyState className="max-sm:py-8" icon={MapPin} title="No sales in this window" />
       ) : (
         <ResponsiveContainer width="100%" height={288}>
           <BarChart data={byVillage.slice(0, 8)} layout="vertical" margin={{ top: 4, right: 16, left: 8, bottom: 0 }} barCategoryGap={BAR_CATEGORY_GAP}>
@@ -404,7 +510,7 @@ export function OutcomesPanel({ state, className }) {
   return (
     <Panel title="What happened" subtitle={`Every recorded event · ${windowLabel}`} icon={<Users size={15} />} tone="slate" className={className}>
       {outcomes.length === 0 ? (
-        <EmptyState icon={Users} title="No activity in this window" />
+        <EmptyState className="max-sm:py-8" icon={Users} title="No activity in this window" />
       ) : (
         <div className="space-y-2.5 max-h-[288px] overflow-y-auto scrollbar-none pr-1">
           {outcomes.slice(0, 12).map((o) => (
@@ -428,6 +534,7 @@ export function VillageRevenuePanel({ state, className }) {
   const byVillage = state.data?.byVillage || [];
   const windowLabel = rangeLabel(state.month);
   const villageTotal = useMemo(() => byVillage.reduce((a, v) => a + v.revenue, 0), [byVillage]);
+  const [showAll, setShowAll] = useState(false);
 
   if (isCold(state)) return <SkeletonCard height="h-80" className={className} />;
   return (
@@ -445,7 +552,7 @@ export function VillageRevenuePanel({ state, className }) {
           more. Max-height, so a window with only three villages shrinks to fit
           instead of leaving them stranded in an empty well. */}
       {byVillage.length === 0 ? (
-        <div className="p-5"><EmptyState icon={MapPin} title="No sales in this window" /></div>
+        <div className="p-5"><EmptyState className="max-sm:py-8" icon={MapPin} title="No sales in this window" /></div>
       ) : (
         <DataTable maxHeight={320}>
           <thead>
@@ -458,13 +565,13 @@ export function VillageRevenuePanel({ state, className }) {
             </tr>
           </thead>
           <tbody>
-            {byVillage.map((v) => (
-              <tr key={v.name}>
-                <Td strong>{v.name}</Td>
-                <Td align="right" strong className="tabular-nums">{money(v.revenue)}</Td>
-                <Td align="right" className="tabular-nums">{num(v.count)}</Td>
-                <Td align="right" className="tabular-nums">{money(v.count ? v.revenue / v.count : 0)}</Td>
-                <Td align="right">
+            {byVillage.map((v, i) => (
+              <tr key={v.name} className={phoneRowClass(i, showAll)}>
+                <Td strong className={PHONE_CARD.title}>{v.name}</Td>
+                <Td align="right" strong className={`tabular-nums ${PHONE_CARD.aside}`}>{money(v.revenue)}</Td>
+                <Td align="right" className={`tabular-nums ${PHONE_CARD.stat}`}>{num(v.count)}</Td>
+                <Td align="right" className={`tabular-nums ${PHONE_CARD.stat}`}>{money(v.count ? v.revenue / v.count : 0)}</Td>
+                <Td align="right" className={PHONE_CARD.stat}>
                   <Badge tone="neutral">{villageTotal ? Math.round((v.revenue / villageTotal) * 100) : 0}%</Badge>
                 </Td>
               </tr>
@@ -472,6 +579,7 @@ export function VillageRevenuePanel({ state, className }) {
           </tbody>
         </DataTable>
       )}
+      <PhoneMore total={byVillage.length} expanded={showAll} onToggle={() => setShowAll((v) => !v)} noun="villages" />
     </Panel>
   );
 }

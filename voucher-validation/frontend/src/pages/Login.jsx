@@ -67,7 +67,7 @@ function CredentialRow({ icon: Icon, label, trailing, children, focused }) {
         </span>
         {children}
       </span>
-      {trailing && <span className="flex items-center pr-3">{trailing}</span>}
+      {trailing && <span className="flex items-center pr-3 pointer-coarse:pr-1.5">{trailing}</span>}
     </div>
   );
 }
@@ -165,7 +165,9 @@ export default function Login() {
   }
 
   return (
-    <div className="min-h-screen grid lg:grid-cols-[1.05fr_1fr] bg-[var(--bg-base)] text-[var(--fg-primary)]">
+    // dvh below lg: a phone's 100vh includes the browser bar, which would push
+    // a centred form down and make an empty page scroll.
+    <div className="min-h-screen max-lg:min-h-dvh grid lg:grid-cols-[1.05fr_1fr] bg-[var(--bg-base)] text-[var(--fg-primary)]">
       {/* ============================ Brand panel ============================ */}
       <aside className="relative overflow-hidden hidden lg:flex flex-col justify-between p-12 xl:p-16 text-white">
         <div
@@ -226,7 +228,9 @@ export default function Login() {
       </aside>
 
       {/* ============================= Form panel ============================ */}
-      <main className="relative flex flex-col justify-center px-6 py-12 sm:px-10 lg:px-14 xl:px-20">
+      {/* A phone puts the form near the top rather than centred, so the Sign
+          in button stays above the on-screen keyboard. */}
+      <main className="relative flex flex-col justify-center px-6 py-12 max-sm:justify-start max-sm:px-5 max-sm:pt-10 max-sm:pb-8 sm:px-10 lg:px-14 xl:px-20">
         {/* Faint engineering grid — the form sits on a surface rather than in a
             void, without competing with anything on it. */}
         <div
@@ -243,7 +247,7 @@ export default function Login() {
 
         <div className="relative w-full max-w-[404px] mx-auto">
           {/* Compact brand lockup for narrow screens, where the panel is hidden */}
-          <div className="lg:hidden flex items-center gap-3 mb-10">
+          <div className="lg:hidden flex items-center gap-3 mb-10 max-sm:mb-8">
             <span className="h-11 w-11 rounded-[14px] bg-[var(--brand-soft)] flex items-center justify-center">
               <VodafoneLogo size={26} />
             </span>
@@ -260,7 +264,7 @@ export default function Login() {
                 Operations console
               </span>
             </div>
-            <h1 className="font-display font-extrabold text-[32px] leading-[1.1] tracking-[-0.028em] text-[var(--fg-primary)]">
+            <h1 className="font-display font-extrabold text-[28px] sm:text-[32px] leading-[1.1] tracking-[-0.028em] text-[var(--fg-primary)]">
               Sign in
             </h1>
             <p className="text-[13.5px] leading-relaxed text-[var(--fg-secondary)] mt-2.5">
@@ -304,7 +308,7 @@ export default function Login() {
                     type="button"
                     onClick={() => setShowPassword((v) => !v)}
                     tabIndex={-1}
-                    className="rounded-lg p-1.5 text-[var(--fg-muted)] transition-colors hover:bg-[var(--surface-hover)] hover:text-[var(--fg-primary)]"
+                    className="rounded-lg p-1.5 text-[var(--fg-muted)] transition-colors hover:bg-[var(--surface-hover)] hover:text-[var(--fg-primary)] pointer-coarse:grid pointer-coarse:h-10 pointer-coarse:w-10 pointer-coarse:place-items-center pointer-coarse:p-0"
                     aria-label={showPassword ? "Hide password" : "Show password"}
                   >
                     {showPassword ? <EyeOff size={15} /> : <Eye size={15} />}

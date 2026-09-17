@@ -34,13 +34,15 @@ export async function getPool() {
     `ALTER TABLE users ADD COLUMN role ENUM('admin','viewer') NOT NULL DEFAULT 'viewer' AFTER password_hash`,
     // 'engineer' = field contractor: files maintenance reports, nothing else.
     // 'billing'  = the monthly bill, plus the dashboard and overview behind it.
+    // 'superadmin' = an admin who also owns the estate default, credentials,
+    //                schedules and security policy.
     // MODIFY (not ADD) so it also widens an enum created by the line above.
     //
     // WIDEN THIS LINE — never add a second MODIFY after it. Migrations run on
     // every start, in order: an older, narrower MODIFY left above a newer one
     // would try to drop a role that accounts already hold, which fails the
     // start under strict SQL mode and silently blanks those roles without it.
-    `ALTER TABLE users MODIFY COLUMN role ENUM('admin','viewer','engineer','billing') NOT NULL DEFAULT 'viewer'`,
+    `ALTER TABLE users MODIFY COLUMN role ENUM('admin','viewer','engineer','billing','superadmin') NOT NULL DEFAULT 'viewer'`,
 
     // TWO-FACTOR AUTHENTICATION.
     // The secret is stored the moment setup begins but 2FA is NOT enabled until
@@ -822,6 +824,34 @@ export async function getPool() {
     }
   } catch (e) {
     console.log('Password links backfill note:', e.message);
+  }
+
+  // The first superadmin. ONCE, guarded by a marker, and only for an account
+  // that already exists at that moment. Not on every boot: an admin can create
+  // accounts, so a standing "promote this address on start-up" would let any
+  // admin create the account under that address and wait for a restart. If the
+  // account does not exist yet, create it first and run
+  //   node scripts/set-superadmin.mjs <email>
+  // on the server.
+  try {
+    const [[done]] = await pool.query(
+      "SELECT setting_value FROM app_settings WHERE setting_key = 'superadmin_bootstrap_done'"
+    );
+    if (!done) {
+      const email = (process.env.SUPERADMIN_EMAIL || 'kritish.singh@vodafone.com.fj').trim().toLowerCase();
+      const [r] = await pool.query("UPDATE users SET role = 'superadmin' WHERE LOWER(email) = ?", [email]);
+      await pool.query(
+        `INSERT INTO app_settings (setting_key, setting_value, setting_type, description)
+         VALUES ('superadmin_bootstrap_done', ?, 'string', 'The first superadmin was assigned (one-time).')
+         ON DUPLICATE KEY UPDATE setting_value = VALUES(setting_value)`,
+        [r.affectedRows ? email : `no account for ${email}`]
+      );
+      console.log(r.affectedRows
+        ? `Superadmin: ${email}`
+        : `Superadmin: no account for ${email} yet — create it, then run scripts/set-superadmin.mjs ${email}`);
+    }
+  } catch (e) {
+    console.log('Superadmin bootstrap note:', e.message);
   }
 
   return pool;
