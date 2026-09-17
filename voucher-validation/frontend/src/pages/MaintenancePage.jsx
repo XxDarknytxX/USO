@@ -15,8 +15,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import toast from "react-hot-toast";
 import {
-  Wrench, RefreshCw, ClipboardCheck, AlertTriangle, Lock, Trash2, ListChecks,
-  MapPin, CircleDashed, CalendarClock,
+  AlertTriangle, CalendarClock, CircleDashed, ClipboardCheck, FileText, ListChecks, Lock, MapPin, RefreshCw, Trash2, Wrench,
 } from "lucide-react";
 import { maintenanceApi } from "../services/api";
 import { useAuth } from "../hooks/useAuth";
@@ -87,6 +86,31 @@ function dueLabel(site) {
   if (d === 0) return "Due today";
   if (d < 31) return `Due in ${d} day${d === 1 ? "" : "s"}`;
   return `Due ${fmtDate(site.nextDue)}`;
+}
+
+/**
+ * The site paperwork a village has, as a pill that opens it. A handover pack is
+ * called out by name: "never serviced" and "nothing on file at all" are
+ * different states, and the schedule is where that question gets asked.
+ */
+function DocsCell({ site, onOpen }) {
+  if (!site.docCount) return <span className="text-[var(--fg-muted)]">None</span>;
+  const label = site.handoverCount
+    ? `Handover${site.docCount > 1 ? ` +${site.docCount - 1}` : ""}`
+    : `${site.docCount} document${site.docCount === 1 ? "" : "s"}`;
+  return (
+    <button
+      type="button"
+      onClick={onOpen}
+      title={`${site.docCount} document${site.docCount === 1 ? "" : "s"} on file${site.lastDocAt ? ` · newest ${fmtDate(site.lastDocAt)}` : ""} — open them`}
+      className="rounded-full focus-ring pointer-coarse:min-h-8"
+    >
+      <StatusPill tone={site.handoverCount ? "success" : "info"} dot={false}>
+        <FileText size={11} />
+        {label}
+      </StatusPill>
+    </button>
+  );
 }
 
 /** Condition as a pill, or an em dash when nothing has been filed. */
@@ -318,13 +342,14 @@ export default function MaintenancePage() {
                   <Th>Last serviced</Th>
                   <Th>Engineer</Th>
                   <Th>Condition</Th>
+                  <Th>Documents</Th>
                   <Th>Next due</Th>
                   <Th align="right">Action</Th>
                 </tr>
               </thead>
               <tbody>
                 {loading ? (
-                  <TableMessage colSpan={6}>Loading…</TableMessage>
+                  <TableMessage colSpan={7}>Loading…</TableMessage>
                 ) : (
                   sites.map((s) => (
                     <tr key={s.projectId}>
@@ -346,6 +371,12 @@ export default function MaintenancePage() {
                       </Td>
                       <Td className={cx("max-sm:order-2", !s.lastEngineer && PHONE_HIDE)}>{s.lastEngineer || "—"}</Td>
                       <Td className={cx("max-sm:order-1", !s.lastCondition && PHONE_HIDE)}><ConditionPill value={s.lastCondition} /></Td>
+                      <Td className="max-sm:order-1">
+                        <DocsCell
+                          site={s}
+                          onOpen={() => navigate(`/maintenance/village/${s.projectId}?tab=documents`)}
+                        />
+                      </Td>
                       <Td nowrap>
                         <span
                           className={

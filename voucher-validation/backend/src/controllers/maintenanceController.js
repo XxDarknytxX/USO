@@ -130,13 +130,24 @@ export function makeMaintenanceController(pool) {
                   v.id            AS last_visit_id,
                   v.visit_date    AS last_visit_date,
                   v.engineer_name AS last_engineer,
-                  v.overall_condition AS last_condition
+                  v.overall_condition AS last_condition,
+                  COALESCE(d.doc_count, 0)      AS doc_count,
+                  COALESCE(d.handover_count, 0) AS handover_count,
+                  d.last_doc_at                 AS last_doc_at
              FROM network_projects p
              LEFT JOIN maintenance_visits v
                     ON v.id = (
                          SELECT id FROM maintenance_visits
                           WHERE project_id = p.id AND status = 'submitted'
                           ORDER BY visit_date DESC, id DESC LIMIT 1)
+             LEFT JOIN (
+                    SELECT project_id,
+                           COUNT(*)                                  AS doc_count,
+                           SUM(category = 'handover')                AS handover_count,
+                           MAX(uploaded_at)                          AS last_doc_at
+                      FROM maintenance_documents
+                     GROUP BY project_id) d
+                    ON d.project_id = p.id
             WHERE p.is_active = 1${sc ? ` AND ${sc.clause}` : ""}
             ORDER BY p.sort_order, p.name`,
           sc ? sc.params : []
@@ -166,6 +177,12 @@ export function makeMaintenanceController(pool) {
             // as "fine" just because there is no date to compare against.
             overdue: r.last_visit_date == null || (daysUntilDue != null && daysUntilDue < 0),
             neverServiced: r.last_visit_date == null,
+            // The paperwork on file for the village. A village nobody has
+            // serviced can still have been handed over, and the schedule is
+            // where someone asks "is there anything on this site at all".
+            docCount: Number(r.doc_count) || 0,
+            handoverCount: Number(r.handover_count) || 0,
+            lastDocAt: r.last_doc_at,
           };
         });
         return send.ok(res, {

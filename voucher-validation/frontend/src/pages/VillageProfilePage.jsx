@@ -9,7 +9,7 @@
 // condition beside it.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useParams, useNavigate } from "react-router-dom";
+import { useParams, useNavigate, useSearchParams } from "react-router-dom";
 import toast from "react-hot-toast";
 import {
   ArrowLeft, RefreshCw, FileText, Upload, Download, Trash2, Camera,
@@ -93,7 +93,9 @@ export default function VillageProfilePage() {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState("");
-  const [tab, setTab] = useState("overview");
+  // ?tab=documents — how the schedule's Documents pill arrives here.
+  const [params, setParams] = useSearchParams();
+  const [tab, setTab] = useState(() => params.get("tab") || "overview");
   const [lightbox, setLightbox] = useState(null);
   const [uploadOpen, setUploadOpen] = useState(false);
   const tabsRef = useRef(null);
@@ -105,6 +107,9 @@ export default function VillageProfilePage() {
   // a phone, bring the strip back to the top.
   const selectTab = useCallback((next) => {
     setTab(next);
+    // Kept in the URL, so a refresh stays on the tab and the schedule's
+    // Documents pill can link straight to the paperwork.
+    setParams(next === "overview" ? {} : { tab: next }, { replace: true });
     const el = tabsRef.current;
     if (!el || !window.matchMedia?.("(max-width: 639px)").matches) return;
     window.requestAnimationFrame(() => {
@@ -112,7 +117,7 @@ export default function VillageProfilePage() {
       const top = scroller ? scroller.getBoundingClientRect().top : 0;
       if (el.getBoundingClientRect().top < top) el.scrollIntoView({ block: "start", behavior: "smooth" });
     });
-  }, []);
+  }, [setParams]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -144,6 +149,16 @@ export default function VillageProfilePage() {
   // The strip uses a short label: eight full names ("Power (solar / battery /
   // PSU)") overrun the content width and clip the last tab. The full name is
   // never lost — it heads the card the tab opens, and the overview grid.
+  // What the Site documents tile states, and what the service tile mentions.
+  const docStats = {
+    total: data?.documents?.length || 0,
+    handover: (data?.documents || []).some((d) => d.category === "handover"),
+    newest: (data?.documents || []).reduce(
+      (max, d) => (!max || new Date(d.uploadedAt) > new Date(max) ? d.uploadedAt : max),
+      null
+    ),
+  };
+
   const tabs = [
     { value: "overview", label: "Overview" },
     ...components.map((c) => ({
@@ -176,13 +191,15 @@ export default function VillageProfilePage() {
 
       {/* Service standing, stated once at the top rather than inferred from the tabs. */}
       {svc && (
-        <KpiGrid>
+        <KpiGrid cols={5}>
           <StatCard
             label="Service status"
             value={svc.neverServiced ? "Never serviced" : svc.overdue ? "Overdue" : "In window"}
             sub={
               svc.neverServiced
-                ? "no report has ever been filed"
+                ? docStats.handover
+                  ? "handover pack on file, no report yet"
+                  : "no report has ever been filed"
                 : svc.overallCondition
                   ? `last overall: ${COND[svc.overallCondition]?.label || svc.overallCondition}`
                   : `${svc.intervalMonths}-month cycle`
@@ -203,6 +220,23 @@ export default function VillageProfilePage() {
             sub={`every ${svc.intervalMonths} months`}
             icon={<CalendarClock size={18} />}
             color="indigo"
+          />
+          {/* Paperwork stands beside the service standing: a village nobody has
+              serviced can still have been handed over, and "never serviced"
+              was reading as "nothing exists for this site". */}
+          <StatCard
+            label="Site documents"
+            value={docStats.total ? String(docStats.total) : "None"}
+            sub={
+              docStats.total
+                ? docStats.handover
+                  ? `handover pack on file · newest ${fmtDate(docStats.newest)}`
+                  : `no handover pack · newest ${fmtDate(docStats.newest)}`
+                : "nothing filed for this village"
+            }
+            icon={<FileText size={18} />}
+            color={docStats.handover ? "green" : docStats.total ? "navy" : "orange"}
+            onClick={() => selectTab("documents")}
           />
           <StatCard
             label="Components inspected"
@@ -773,19 +807,29 @@ function DocumentsTab({ projectId, documents, categories, isAdmin, canUpload, on
                         key={d.id}
                         className="flex flex-wrap items-center gap-3 p-3 max-sm:items-start rounded-xl border border-[var(--border-default)] bg-[var(--bg-elevated)] shadow-[var(--shadow-xs)] transition-[border-color,box-shadow] duration-150 hover:border-[var(--border-hover)] hover:shadow-[var(--shadow-sm)]"
                       >
-                        <ObjectTile tone="navy" size="sm">
-                          <FileText size={15} />
-                        </ObjectTile>
-                        {/* A phone wraps the title and file details instead of
+                        {/* The document itself opens the document: the Open
+                            button stays for the obvious affordance, but nobody
+                            should have to find it to read the file.
+                            A phone wraps the title and file details instead of
                             cutting both to a few characters, and puts the
                             buttons on their own full-width line underneath. */}
-                        <div className="min-w-0 flex-1">
-                          <div className="text-[13px] font-semibold text-[var(--fg-primary)] truncate max-sm:whitespace-normal max-sm:[overflow-wrap:anywhere] font-display">{d.title}</div>
-                          <div className="text-[11.5px] text-[var(--fg-muted)] truncate max-sm:whitespace-normal max-sm:[overflow-wrap:anywhere]">
-                            {d.fileName || "file"} · {fmtBytes(d.bytes)} · {fmtDate(d.uploadedAt)}
-                            {d.notes ? ` · ${d.notes}` : ""}
-                          </div>
-                        </div>
+                        <button
+                          type="button"
+                          onClick={() => open(d)}
+                          title={`Open ${d.title}`}
+                          className="flex min-w-0 flex-1 items-center gap-3 rounded-lg text-left focus-ring max-sm:items-start"
+                        >
+                          <ObjectTile tone="navy" size="sm">
+                            <FileText size={15} />
+                          </ObjectTile>
+                          <span className="min-w-0 flex-1">
+                            <span className="block text-[13px] font-semibold text-[var(--fg-primary)] truncate max-sm:whitespace-normal max-sm:[overflow-wrap:anywhere] font-display">{d.title}</span>
+                            <span className="block text-[11.5px] text-[var(--fg-muted)] truncate max-sm:whitespace-normal max-sm:[overflow-wrap:anywhere]">
+                              {d.fileName || "file"} · {fmtBytes(d.bytes)} · {fmtDate(d.uploadedAt)}
+                              {d.notes ? ` · ${d.notes}` : ""}
+                            </span>
+                          </span>
+                        </button>
                         <div className="contents max-sm:flex max-sm:w-full max-sm:items-center max-sm:gap-2">
                           <Button variant="secondary" size="sm" className="max-sm:flex-1" onClick={() => open(d)} iconLeft={<Download size={13} />}>
                             Open
