@@ -955,11 +955,15 @@ function DraftEditor({ campaign, stats, sites, onCampaign, onRefresh, onReload }
         </div>
       </div>
 
+      {/* Room for the bar to hover over at the end of the form, so the last
+          field is never behind it. */}
+      <div aria-hidden="true" className="sm:hidden h-16 shrink-0" />
+
       {/* Phone action bar. Sticky, not fixed: it rides the bottom of the screen
           while the long form scrolls, then settles into its own place at the
           end of the page, so it never permanently covers anything. */}
       <div
-        className="sticky bottom-[max(0.75rem,env(safe-area-inset-bottom))] z-30 flex items-center gap-2 rounded-2xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-2.5 pl-3.5 shadow-[var(--shadow-elevated)] sm:hidden"
+        className="sticky bottom-[calc(var(--phone-nav)+0.75rem)] z-30 flex items-center gap-2 rounded-2xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-2.5 pl-3.5 shadow-[var(--shadow-elevated)] sm:hidden"
         role="region"
         aria-label="Save and send"
       >

@@ -596,6 +596,18 @@ body {
   }
 }
 
+/* How much of the bottom of the screen the phone's navigation bar owns. Zero
+   everywhere else, so a sticky footer can always sit at
+   calc(var(--phone-nav) + <its own gap>) and be right on every device. */
+:root {
+  --phone-nav: 0px;
+}
+@media (max-width: 639px) {
+  :root {
+    --phone-nav: calc(4.25rem + env(safe-area-inset-bottom));
+  }
+}
+
 /* Tables become cards on a phone (DataTable adds .sf-table--stack and copies
    each header into its cells' data-label). A row is a card; each cell is a
    "LABEL  value" line; the first cell is the card's title. A table that is

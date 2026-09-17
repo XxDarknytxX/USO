@@ -17,6 +17,7 @@ function cn(...parts) {
 }
 
 import { ObjectTile } from "./StatCard";
+import { usePublishPageTitle } from "../layout/pageTitle";
 
 export default function PageHeader({
   title,
@@ -29,12 +30,19 @@ export default function PageHeader({
   media = null,
   gradient = false, // eslint-disable-line no-unused-vars -- kept for API compatibility
 }) {
+  // The phone's app bar carries the name of the screen, so the hero does not
+  // repeat it: it keeps the sentence that explains the page and the buttons
+  // that act on it, and gives the rest of the screen back to the content.
+  usePublishPageTitle(title);
+  const phoneEmpty = !subtitle && !actions && !media;
+
   return (
     <div
       className={cn(
         "relative overflow-hidden rounded-xl border border-[var(--border-default)]",
         "bg-[var(--bg-elevated)] shadow-[var(--shadow-card)]",
-        "px-5 py-4 sm:px-6 sm:py-5",
+        "px-5 py-4 sm:px-6 sm:py-5 max-sm:px-4 max-sm:py-3.5",
+        phoneEmpty && "max-sm:hidden",
         className
       )}
     >
@@ -51,19 +59,21 @@ export default function PageHeader({
       />
 
       <div className="relative flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-        <div className="flex items-start gap-4 min-w-0">
+        <div className="flex items-start gap-4 min-w-0 max-sm:gap-0">
           {icon && (
-            <ObjectTile tone={tone} size="lg" className="mt-0.5 shadow-[var(--shadow-xs)]">
+            <ObjectTile tone={tone} size="lg" className="mt-0.5 shadow-[var(--shadow-xs)] max-sm:hidden">
               {icon}
             </ObjectTile>
           )}
           <div className="min-w-0">
-            {eyebrow && <p className="text-label mb-1">{eyebrow}</p>}
-            <h1 className="text-[22px] sm:text-[26px] font-semibold tracking-[-0.022em] leading-tight text-[var(--fg-primary)]">
+            {eyebrow && <p className="text-label mb-1 max-sm:hidden">{eyebrow}</p>}
+            {/* Still the page's heading for a screen reader; the phone just
+                reads it from the bar instead of showing it twice. */}
+            <h1 className="text-[22px] sm:text-[26px] font-semibold tracking-[-0.022em] leading-tight text-[var(--fg-primary)] max-sm:sr-only">
               {title}
             </h1>
             {subtitle && (
-              <p className="text-[13.5px] text-[var(--fg-secondary)] mt-1 leading-relaxed max-w-3xl">
+              <p className="text-[13.5px] text-[var(--fg-secondary)] mt-1 leading-relaxed max-w-3xl max-sm:mt-0 max-sm:text-[12.5px]">
                 {subtitle}
               </p>
             )}

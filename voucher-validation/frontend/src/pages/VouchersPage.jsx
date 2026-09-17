@@ -785,7 +785,7 @@ export default function VouchersPage() {
             animate={{ y: 0, opacity: 1 }}
             exit={{ y: 16, opacity: 0 }}
             transition={{ duration: 0.15 }}
-            className="sm:hidden sticky bottom-[max(0.75rem,env(safe-area-inset-bottom))] z-30 rounded-2xl border border-[var(--border-default)] bg-[var(--bg-elevated)] shadow-[var(--shadow-elevated)] p-3"
+            className="sm:hidden sticky bottom-[calc(var(--phone-nav)+0.75rem)] z-30 rounded-2xl border border-[var(--border-default)] bg-[var(--bg-elevated)] shadow-[var(--shadow-elevated)] p-3"
             role="region"
             aria-label="Bulk actions"
           >

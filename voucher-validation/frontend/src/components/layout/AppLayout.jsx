@@ -12,7 +12,7 @@ import {
   LayoutDashboard, Gauge, Network, Ticket, Receipt, History, RefreshCw, Globe,
   FileText, GitBranch, Users, Settings, Menu, X, ChevronLeft, ChevronRight,
   ChevronDown, LogOut, Shield, Eye, LifeBuoy, UserCircle, Wallet,
-  Wrench, Sun, Moon, Server, Megaphone, ShieldCheck,
+  Wrench, Sun, Moon, Server, Megaphone, ShieldCheck, MoreHorizontal,
 } from "lucide-react";
 
 import { useAuth } from "../../hooks/useAuth";
@@ -21,6 +21,7 @@ import { SiteProvider, useSite } from "../../hooks/useSite";
 import VodafoneLogo from "../ui/VodafoneLogo";
 import FloatingBlobs from "../ui/FloatingBlobs";
 import SiteSwitcher from "./SiteSwitcher";
+import { PageTitleContext } from "./pageTitle";
 
 const SIDEBAR_EXPANDED = 260;
 const SIDEBAR_COLLAPSED = 72;
@@ -39,20 +40,22 @@ const navSections = [
       // and the answer is not. Field engineers are maintenance-only, and the
       // API refuses them the data behind these two. Network stays admin-only:
       // it is where villages are added and edited, not where they are read.
-      { to: "/dashboard", label: "Dashboard", Icon: LayoutDashboard, end: true, roles: ["viewer", "billing"] },
-      { to: "/overview", label: "Overview", Icon: Gauge, roles: ["viewer", "billing"] },
+      // `phone` marks a destination the phone's bottom bar carries. Four is the
+      // most a thumb can hit comfortably; everything else lives behind More.
+      { to: "/dashboard", label: "Dashboard", Icon: LayoutDashboard, end: true, roles: ["viewer", "billing"], phone: true },
+      { to: "/overview", label: "Overview", Icon: Gauge, roles: ["viewer", "billing"], phone: ["viewer", "billing"] },
       { to: "/network", label: "Network", Icon: Network },
       // Viewers read the maintenance record; engineers and admins also file it.
       // Not billing accounts.
-      { to: "/maintenance", label: "Maintenance", Icon: Wrench, roles: ["viewer", "engineer"] },
+      { to: "/maintenance", label: "Maintenance", Icon: Wrench, roles: ["viewer", "engineer"], phone: true },
     ],
   },
   {
     title: "Vouchers",
     items: [
-      { to: "/vouchers", label: "Vouchers", Icon: Ticket },
+      { to: "/vouchers", label: "Vouchers", Icon: Ticket, phone: true },
       // Admins and billing accounts.
-      { to: "/billing", label: "Billing", Icon: Receipt, roles: ["billing"] },
+      { to: "/billing", label: "Billing", Icon: Receipt, roles: ["billing"], phone: true },
       // Admin only: no `roles`, so the role filter drops it for everyone else.
       { to: "/activity", label: "Activity", Icon: History },
     ],
@@ -98,6 +101,8 @@ function Shell() {
   const { theme, toggle: toggleTheme } = useTheme();
 
   const [mobileOpen, setMobileOpen] = useState(false);
+  // What the page on screen calls itself ("Nakavu"), published by PageHeader.
+  const [publishedTitle, setPublishedTitle] = useState(null);
   const [collapsed, setCollapsed] = useState(() => localStorage.getItem("vv:sidebarCollapsed") === "1");
   const [showUserMenu, setShowUserMenu] = useState(false);
   const userMenuRef = useRef(null);
@@ -130,6 +135,15 @@ function Shell() {
     }))
     .filter((s) => s.items.length > 0);
 
+  // The phone's bottom bar: this account's marked destinations, in nav order,
+  // capped at four. `phone: true` means every role that sees the item; a list
+  // names the roles it is a primary for (Overview matters to a viewer, but an
+  // admin has better uses for the space).
+  const phoneNav = sections
+    .flatMap((s) => s.items)
+    .filter((it) => (Array.isArray(it.phone) ? it.phone.includes(role) : it.phone))
+    .slice(0, 4);
+
   function toggleCollapsed() {
     setCollapsed((prev) => {
       localStorage.setItem("vv:sidebarCollapsed", prev ? "0" : "1");
@@ -138,6 +152,16 @@ function Shell() {
   }
 
   useEffect(() => { setMobileOpen(false); }, [location.pathname]);
+
+  // What the phone header calls the current screen. The nav's own label for the
+  // best-matching route, so it always agrees with the bar underneath.
+  const pageTitle =
+    publishedTitle ||
+    navSections
+      .flatMap((s) => s.items)
+      .concat([{ to: "/profile", label: "Profile" }])
+      .filter((it) => location.pathname === it.to || location.pathname.startsWith(it.to + "/"))
+      .sort((a, b) => b.to.length - a.to.length)[0]?.label || "USO Operations";
 
   useEffect(() => {
     function onDoc(e) {
@@ -164,6 +188,7 @@ function Shell() {
   return (
     // h-dvh, not h-screen: on a phone 100vh includes the space behind the
     // browser's own toolbars, which hid the bottom of every page under them.
+    <PageTitleContext.Provider value={setPublishedTitle}>
     <div className="relative flex h-dvh overflow-hidden app-canvas text-[var(--fg-primary)]">
       <FloatingBlobs variant="minimal" />
 
@@ -309,9 +334,12 @@ function Shell() {
         <header className="h-14 sm:h-16 flex-shrink-0 z-20 bg-[var(--bg-elevated)] border-b border-[var(--border-default)]">
           <div className="h-full flex items-center justify-between gap-3 px-3 sm:gap-4 sm:px-6">
             <div className="flex items-center gap-3 min-w-0">
+              {/* Tablets keep the hamburger; a phone opens the same drawer from
+                  More in the bottom bar, so the header keeps its width for the
+                  name of the page. */}
               <button
                 onClick={() => setMobileOpen(true)}
-                className="lg:hidden p-2.5 rounded-lg text-[var(--fg-muted)] border border-[var(--border-default)] hover:text-[var(--fg-primary)] hover:bg-[var(--bg-surface)] hover:border-[var(--border-hover)] transition-all duration-150"
+                className="hidden sm:block lg:hidden p-2.5 rounded-lg text-[var(--fg-muted)] border border-[var(--border-default)] hover:text-[var(--fg-primary)] hover:bg-[var(--bg-surface)] hover:border-[var(--border-hover)] transition-all duration-150"
                 aria-label="Open menu"
               >
                 <Menu size={18} />
@@ -322,7 +350,7 @@ function Shell() {
               {/* A phone has no sidebar on screen, so the bar says where you are. */}
               <span className="flex min-w-0 items-center gap-2 sm:hidden">
                 <VodafoneLogo size={24} className="shrink-0" />
-                <span className="truncate text-[14px] font-semibold text-[var(--fg-primary)]">USO Operations</span>
+                <span className="truncate text-[15px] font-semibold text-[var(--fg-primary)]">{pageTitle}</span>
               </span>
             </div>
 
@@ -392,7 +420,9 @@ function Shell() {
             loading, and that "all villages" response can land after the scoped one
             and clobber it — the page then shows data across every scope. This gate
             fires only during the one-time context load after a full reload. */}
-        <main className="flex-1 overflow-y-auto overflow-x-hidden">
+        {/* The phone's bottom bar floats over this column, so the scroller ends
+            above it — content must never sit under the bar or the home bar. */}
+        <main className="flex-1 overflow-y-auto overflow-x-hidden max-sm:pb-[calc(var(--phone-nav)+1rem)]">
           {siteLoading ? (
             <div className="h-full flex flex-col items-center justify-center gap-3 text-[var(--fg-muted)]">
               <div
@@ -406,6 +436,71 @@ function Shell() {
           )}
         </main>
       </div>
+
+      {/* ===== PHONE BOTTOM BAR =====
+          A console reached from a phone is reached one-handed, so the four
+          destinations this account actually opens sit under the thumb and the
+          rest stay one tap away behind More. Tablets and desktops keep the
+          sidebar and never render this. */}
+      {phoneNav.length > 0 && (
+        <nav
+          aria-label="Sections"
+          className={cn(
+            "sm:hidden fixed inset-x-0 bottom-0 z-30 flex items-stretch",
+            "border-t border-[var(--border-default)] bg-[var(--bg-elevated)]/95 backdrop-blur-md",
+            "pb-[env(safe-area-inset-bottom)] shadow-[0_-4px_16px_rgba(0,0,0,0.06)]"
+          )}
+        >
+          {phoneNav.map(({ to, label, Icon, end }) => (
+            <NavLink
+              key={to}
+              to={to}
+              end={end}
+              className={({ isActive }) =>
+                cn(
+                  "flex-1 min-w-0 flex flex-col items-center justify-center gap-1 h-[4.25rem] px-1",
+                  "transition-colors duration-150",
+                  isActive ? "text-[var(--brand-fg-on-soft)]" : "text-[var(--fg-muted)]"
+                )
+              }
+            >
+              {({ isActive }) => (
+                <>
+                  <span
+                    className={cn(
+                      "flex h-7 w-12 items-center justify-center rounded-full transition-colors duration-150",
+                      isActive ? "bg-[var(--brand-soft)] text-[var(--brand)]" : "text-[var(--fg-muted)]"
+                    )}
+                  >
+                    <Icon size={18} />
+                  </span>
+                  <span className="max-w-full truncate text-[10.5px] font-semibold tracking-tight">{label}</span>
+                </>
+              )}
+            </NavLink>
+          ))}
+          <button
+            type="button"
+            onClick={() => setMobileOpen(true)}
+            aria-label="More sections"
+            aria-expanded={mobileOpen}
+            className={cn(
+              "flex-1 min-w-0 flex flex-col items-center justify-center gap-1 h-[4.25rem] px-1 transition-colors duration-150",
+              mobileOpen ? "text-[var(--brand-fg-on-soft)]" : "text-[var(--fg-muted)]"
+            )}
+          >
+            <span
+              className={cn(
+                "flex h-7 w-12 items-center justify-center rounded-full transition-colors duration-150",
+                mobileOpen ? "bg-[var(--brand-soft)] text-[var(--brand)]" : ""
+              )}
+            >
+              <MoreHorizontal size={18} />
+            </span>
+            <span className="text-[10.5px] font-semibold tracking-tight">More</span>
+          </button>
+        </nav>
+      )}
 
       <Toaster
         position="top-right"
@@ -426,5 +521,6 @@ function Shell() {
         }}
       />
     </div>
+    </PageTitleContext.Provider>
   );
 }
