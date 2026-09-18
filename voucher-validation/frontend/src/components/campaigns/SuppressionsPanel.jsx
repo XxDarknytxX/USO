@@ -8,7 +8,7 @@
 // Removing one is confirmed, because it quietly puts that inbox back into every
 // future "everyone" campaign.
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import toast from "react-hot-toast";
 import { MailX, Plus, Trash2, RefreshCw } from "lucide-react";
 import { campaignApi } from "../../services/api";
@@ -16,6 +16,7 @@ import {
   Panel, SearchInput, DataTable, Th, Td, TableMessage, Button, IconButton, Input, ConfirmDialog,
 } from "../ui";
 import Pagination from "../shared/Pagination";
+import { PHONE_CARD, PhoneMore, phoneRowClass } from "../ui/phone";
 import { relTime, fmtDateTime, plural } from "./campaignUi";
 
 const PAGE_SIZE = 50;
@@ -32,8 +33,15 @@ export default function SuppressionsPanel({ onChanged }) {
   const [address, setAddress] = useState("");
   const [note, setNote] = useState("");
   const [adding, setAdding] = useState(false);
+  // Phone only: the add form waits behind a button (see the header below).
+  const [addOpen, setAddOpen] = useState(false);
+  const addressRef = useRef(null);
+  const openRef = useRef(null);
   const [removing, setRemoving] = useState(null); // the row being confirmed
   const [removeBusy, setRemoveBusy] = useState(false);
+  // Phone: a page of fifty addresses is capped until asked for. Desktop keeps
+  // the whole page — its table scrolls inside the panel.
+  const [showAll, setShowAll] = useState(false);
 
   useEffect(() => {
     const t = setTimeout(() => {
@@ -59,6 +67,10 @@ export default function SuppressionsPanel({ onChanged }) {
 
   useEffect(() => { load(); }, [load]);
 
+  // A different search or page is a different list, so the phone cap starts
+  // again rather than carrying "showing all" over to fifty new rows.
+  useEffect(() => { setShowAll(false); }, [debounced, page]);
+
   async function add(e) {
     e.preventDefault();
     const email = address.trim();
@@ -72,6 +84,7 @@ export default function SuppressionsPanel({ onChanged }) {
       toast.success(`${email} won't receive campaigns`);
       setAddress("");
       setNote("");
+      setAddOpen(false);
       load();
       onChanged?.();
     } catch (err) {
@@ -113,14 +126,41 @@ export default function SuppressionsPanel({ onChanged }) {
             placeholder="Search address…"
             width="w-full lg:w-72"
           />
-          {/* On a phone the add form stacks under the search, set apart by a rule
-              so the two boxes do not read as one search. */}
+          {/* Two more boxes and a button stacked under the search is most of a
+              phone screen before a single excluded address is visible, so on a
+              phone the form waits behind one button. Opening it puts the form in
+              the button's place, and the way back out is a Cancel beside Add at
+              the foot of the form — read top to bottom it is fields, then what
+              to do with them. A rule sets adding apart from searching, above the
+              button and then above the form. All of it is phone-only: the button
+              is sm:hidden and the Cancel row is display:contents from sm up. */}
+          {!addOpen && (
+            <div className="sm:hidden border-t border-[var(--border-subtle)] pt-3">
+              <Button
+                ref={openRef}
+                variant="secondary"
+                size="md"
+                className="w-full"
+                onClick={() => {
+                  setAddOpen(true);
+                  requestAnimationFrame(() => addressRef.current?.focus());
+                }}
+                iconLeft={<Plus size={14} />}
+              >
+                Exclude an address
+              </Button>
+            </div>
+          )}
           <form
             onSubmit={add}
-            className="flex w-full min-w-0 items-center gap-2 lg:ml-auto lg:w-auto max-sm:flex-col max-sm:items-stretch max-sm:border-t max-sm:border-[var(--border-subtle)] max-sm:pt-3"
+            className={
+              "flex w-full min-w-0 items-center gap-2 lg:ml-auto lg:w-auto max-sm:flex-col max-sm:items-stretch " +
+              (addOpen ? "max-sm:border-t max-sm:border-[var(--border-subtle)] max-sm:pt-3" : "max-sm:hidden")
+            }
           >
             <label htmlFor="exclude-email" className="sr-only">Address to exclude</label>
             <Input
+              ref={addressRef}
               id="exclude-email"
               type="email"
               value={address}
@@ -139,17 +179,30 @@ export default function SuppressionsPanel({ onChanged }) {
               autoComplete="off"
               className="h-9! min-w-0 lg:w-48 max-sm:h-10!"
             />
-            <Button
-              type="submit"
-              size="md"
-              variant="secondary"
-              loading={adding}
-              disabled={!address.trim()}
-              iconLeft={<Plus size={14} />}
-              className="max-sm:w-full"
-            >
-              Add
-            </Button>
+            <div className="flex gap-2 sm:contents">
+              <Button
+                variant="ghost"
+                size="md"
+                className="sm:hidden flex-1"
+                onClick={() => {
+                  setAddOpen(false);
+                  requestAnimationFrame(() => openRef.current?.focus());
+                }}
+              >
+                Cancel
+              </Button>
+              <Button
+                type="submit"
+                size="md"
+                variant="secondary"
+                loading={adding}
+                disabled={!address.trim()}
+                iconLeft={<Plus size={14} />}
+                className="max-sm:flex-1"
+              >
+                Add
+              </Button>
+            </div>
           </form>
         </div>
 
@@ -183,37 +236,29 @@ export default function SuppressionsPanel({ onChanged }) {
                   : "No addresses are excluded. Add one above to leave it out of every campaign."}
               </TableMessage>
             ) : (
-              data.suppressions.map((s) => (
-                <tr key={s.email}>
-                  <Td>
-                    <div className="flex items-center gap-2 max-sm:w-full">
-                      <span className="block min-w-0 max-w-[320px] truncate font-semibold text-[var(--fg-primary)] max-sm:max-w-none max-sm:flex-1">
-                        {s.email}
-                      </span>
-                      <IconButton
-                        size="sm"
-                        onClick={() => setRemoving(s)}
-                        title={`Allow campaigns to ${s.email} again`}
-                        aria-label={`Remove ${s.email} from the list`}
-                        className="-my-1 shrink-0 sm:hidden"
-                      >
-                        <Trash2 size={15} />
-                      </IconButton>
-                    </div>
+              data.suppressions.map((s, i) => (
+                <tr key={s.email} className={phoneRowClass(i, showAll)}>
+                  <Td className={PHONE_CARD.title}>
+                    <span className="block min-w-0 max-w-[320px] truncate font-semibold text-[var(--fg-primary)] max-sm:max-w-none">
+                      {s.email}
+                    </span>
                   </Td>
-                  <Td>
+                  <Td className={`max-sm:col-span-6 ${PHONE_CARD.cell}`}>
                     <span className="block max-w-[280px] truncate text-[var(--fg-secondary)]" title={s.note || undefined}>
                       {s.note || <span className="text-[var(--fg-subtle)]">—</span>}
                     </span>
                   </Td>
-                  <Td muted nowrap>
+                  <Td muted nowrap className="max-sm:col-span-6 max-sm:justify-start! max-sm:before:hidden! max-sm:[&>*]:ml-0!">
                     {/* One element, so a phone card keeps "when · who" together. */}
                     <span>
                       <span title={fmtDateTime(s.createdAt)}>{relTime(s.createdAt)}</span>
                       {s.createdByEmail && <span className="text-[var(--fg-subtle)]"> · {s.createdByEmail}</span>}
                     </span>
                   </Td>
-                  <Td align="right" className="max-sm:hidden!">
+                  {/* The remove button moves to the card's top right rather than
+                      sitting inside the address line, so the address has the
+                      whole width to wrap into. */}
+                  <Td align="right" className={PHONE_CARD.aside}>
                     <IconButton
                       size="sm"
                       onClick={() => setRemoving(s)}
@@ -228,6 +273,12 @@ export default function SuppressionsPanel({ onChanged }) {
             )}
           </tbody>
         </DataTable>
+        <PhoneMore
+          total={data.suppressions.length}
+          expanded={showAll}
+          onToggle={() => setShowAll((v) => !v)}
+          noun="addresses"
+        />
         <Pagination page={page} totalPages={data.totalPages} total={data.total} onPageChange={setPage} />
         {!loading && !error && data.totalPages <= 1 && data.total > 0 && (
           <p className="border-t border-[var(--border-subtle)] bg-[var(--surface-sunken)] px-5 py-2.5 text-[12px] text-[var(--fg-muted)]">

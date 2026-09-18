@@ -38,6 +38,14 @@ import { networkApi } from "../services/api";
 import { useAuth } from "../hooks/useAuth";
 import { useSite } from "../hooks/useSite";
 import StarlinkPanel from "../components/StarlinkPanel";
+import { usePublishPageTitle } from "../components/layout/pageTitle";
+import {
+  PHONE_ROWS,
+  PhoneFacts,
+  PhoneList,
+  PhoneMore,
+  usePhone,
+} from "../components/ui/phone";
 import {
   Modal,
   Field,
@@ -185,9 +193,10 @@ export default function NetworkPage() {
       )}
 
       {loading ? (
-        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3 sm:gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3 sm:gap-4 max-sm:gap-2">
           {Array.from({ length: 6 }).map((_, i) => (
-            <div key={i} className="h-[132px] rounded-xl skeleton" />
+            // A phone shows the village as a row, so the placeholder is one too.
+            <div key={i} className="h-[132px] max-sm:h-[62px] rounded-xl skeleton" />
           ))}
         </div>
       ) : projects.length === 0 ? (
@@ -227,7 +236,7 @@ export default function NetworkPage() {
           />
         </Panel>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3 sm:gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3 sm:gap-4 max-sm:gap-2">
           {visible.map((p) => (
             <ProjectCard
               key={p.id}
@@ -286,41 +295,66 @@ export default function NetworkPage() {
 }
 
 /* ------------ Project card ------------------------------------------------ */
-// The whole card is one button so the card is reachable from the keyboard; the
-// admin controls sit outside it, because a button inside a button is invalid
-// markup and swallows the click.
+// Desktop: a record card, the whole surface one button so it is reachable from
+// the keyboard, with the admin controls revealed on hover.
+//
+// Phone: the same village as a list row. The card layout wasted a third of the
+// screen on a group id nobody reads on a phone, and — worse — the admin buttons
+// were drawn ON TOP of the full-card button, so a thumb near them hit whichever
+// the browser picked. The row now opens from its own region and the buttons are
+// its siblings, side by side, overlapping nothing.
 function ProjectCard({ project, isAdmin, onOpen, onEdit, onDelete }) {
   return (
-    <GlassCard padding={false} className="group relative">
+    <GlassCard
+      padding={false}
+      // GlassCard stacks its children; on a phone they sit in one row instead.
+      className="group relative max-sm:[&>div]:flex-row max-sm:[&>div]:items-center"
+    >
       <button
         onClick={onOpen}
-        className="w-full text-left p-4 sm:p-5 focus-ring rounded-xl"
+        className="w-full text-left p-4 sm:p-5 focus-ring rounded-xl max-sm:w-auto max-sm:min-w-0 max-sm:flex-1 max-sm:px-3 max-sm:py-2.5"
         aria-label={`Open ${project.name}`}
       >
-        <div className="flex items-start gap-3">
-          <ObjectTile tone="navy" size="md">
+        <div className="flex items-start gap-3 max-sm:items-center max-sm:gap-2.5">
+          <ObjectTile tone="navy" size="md" className="max-sm:h-9 max-sm:w-9 max-sm:rounded-[10px]">
             <MapPin size={18} />
           </ObjectTile>
           <div className="min-w-0 flex-1">
-            <h3 className="font-display text-[15px] font-bold tracking-tight text-[var(--fg-primary)] truncate">
+            <h3 className="font-display text-[15px] font-bold tracking-tight text-[var(--fg-primary)] truncate max-sm:text-[14.5px]">
               {project.name}
             </h3>
-            <p className="text-[12px] text-[var(--fg-muted)] font-mono truncate mt-0.5">
-              {project.hostname || "no portal hostname"}
+            <p className="flex items-center gap-1.5 text-[12px] text-[var(--fg-muted)] font-mono mt-0.5 max-sm:mt-0 max-sm:text-[11.5px] min-w-0">
+              {/* The state pill below is desktop-only, so the phone row carries
+                  the state as a dot — and names it when it is the unusual one. */}
+              <span
+                className="sm:hidden h-1.5 w-1.5 rounded-full shrink-0"
+                style={{ background: project.isActive ? "var(--success-fg)" : "var(--fg-subtle)" }}
+              >
+                <span className="sr-only">{project.isActive ? "Active" : "Paused"}</span>
+              </span>
+              {!project.isActive && <span className="sm:hidden shrink-0 font-sans">Paused ·</span>}
+              <span className="truncate">{project.hostname || "no portal hostname"}</span>
             </p>
           </div>
           <ChevronRight
             size={16}
-            className="text-[var(--fg-muted)] group-hover:text-[var(--brand)] transition-colors shrink-0 mt-1"
+            className={
+              "text-[var(--fg-muted)] group-hover:text-[var(--brand)] transition-colors shrink-0 mt-1 max-sm:mt-0" +
+              // An admin row ends in Edit and Remove; a third glyph beside them
+              // only steals the width the hostname needs.
+              (isAdmin ? " max-sm:hidden" : "")
+            }
           />
         </div>
 
-        {/* On a touch screen the admin buttons sit at the right of this row,
-            so it keeps their width clear. */}
+        {/* Hidden on a phone, where the row carries its state as a dot. On a
+            touch screen wide enough to keep the card — a tablet — the admin
+            buttons are pinned over the end of this row, so it still has to
+            leave their width clear. */}
         <div
           className={
-            "flex flex-wrap items-center gap-2 mt-3 pt-3 sm:mt-4 sm:pt-3.5 border-t border-[var(--border-subtle)]" +
-            (isAdmin ? " max-sm:pr-[84px] pointer-coarse:pr-[84px]" : "")
+            "flex flex-wrap items-center gap-2 mt-3 pt-3 sm:mt-4 sm:pt-3.5 border-t border-[var(--border-subtle)] max-sm:hidden" +
+            (isAdmin ? " pointer-coarse:pr-[84px]" : "")
           }
         >
           <StatusPill tone={project.isActive ? "success" : "neutral"}>
@@ -333,13 +367,13 @@ function ProjectCard({ project, isAdmin, onOpen, onEdit, onDelete }) {
       </button>
 
       {isAdmin && (
-        // Hover-revealed for a mouse. A finger cannot hover, so on a phone or
-        // any touch screen they are always shown, moved down beside the
-        // status pills where they no longer sit over the chevron.
+        // Hover-revealed for a mouse. A finger cannot hover, so on a touch
+        // screen they are always shown: on a phone as the row's trailing
+        // controls, on a touch laptop still inside the card.
         <div
           className={
             "absolute top-3.5 right-3.5 flex items-center gap-1 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity " +
-            "max-sm:opacity-100 max-sm:top-auto max-sm:bottom-2.5 max-sm:right-3 " +
+            "max-sm:static max-sm:shrink-0 max-sm:opacity-100 max-sm:pr-2 " +
             "pointer-coarse:opacity-100 pointer-coarse:top-auto pointer-coarse:bottom-2.5 pointer-coarse:right-3 " +
             // The card's padding grows at sm; stay centred on the pill row.
             "sm:pointer-coarse:bottom-3.5 sm:pointer-coarse:right-4"
@@ -590,6 +624,22 @@ function ProjectDetail({ project, onBack }) {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [view, setView] = useState("topology");
+  const phone = usePhone();
+
+  // On a phone the app bar is the only place this screen is named, and the
+  // name that matters is the village's. PageHeader publishes its own title,
+  // but this one is an element rather than a string (the hostname, allowed to
+  // break mid-word), so the bar fell back to the nav label and every village
+  // read "Network".
+  usePublishPageTitle(project.name);
+
+  // Stable identity on purpose. PageHeader republishes whenever its `title`
+  // prop changes, and a fresh element on every render would clear the name
+  // above the moment the health data arrived.
+  const headerTitle = useMemo(
+    () => <span className="[overflow-wrap:anywhere]">{project.hostname || project.name}</span>,
+    [project.hostname, project.name]
+  );
 
   const load = useCallback(
     async (isRefresh = false) => {
@@ -620,17 +670,43 @@ function ProjectDetail({ project, onBack }) {
   const topo = data?.topology;
   const devices = data?.devices || [];
 
+  // The Topology/Devices switcher. In the panel header a phone leaves it about
+  // 190px beside the title; on its own row under the header it takes the full
+  // width and each option an even share of it.
+  const viewSwitcher = (
+    <Segmented
+      size="sm"
+      value={view}
+      onChange={setView}
+      className={phone ? "w-full [&>button]:flex-1 [&>button]:justify-center" : undefined}
+      options={[
+        { value: "topology", label: "Topology" },
+        { value: "devices", label: "Devices", count: devices.length },
+      ]}
+    />
+  );
+
   return (
     <PageShell>
       <PageHeader
         eyebrow={`Network · ${project.name}`}
         // A hostname is one unbroken word; let it wrap rather than run out of
         // the header on a narrow screen.
-        title={<span className="[overflow-wrap:anywhere]">{project.hostname || project.name}</span>}
+        title={headerTitle}
         subtitle={
-          data?.collectedAt
-            ? `Access points, gateway, and internet health · updated ${relTime(data.collectedAt)}`
-            : "Access points, gateway, and internet health."
+          // The phone keeps only the part that changes; the app bar above
+          // already says which village this is.
+          <>
+            <span className="max-sm:hidden">Access points, gateway, and internet health</span>
+            {data?.collectedAt ? (
+              <>
+                <span className="max-sm:hidden"> · </span>
+                <span>updated {relTime(data.collectedAt)}</span>
+              </>
+            ) : (
+              <span className="max-sm:hidden">.</span>
+            )}
+          </>
         }
         icon={<Globe size={22} />}
         tone="navy"
@@ -654,11 +730,13 @@ function ProjectDetail({ project, onBack }) {
 
       {loading ? (
         <>
-          <KpiGrid cols={5}>
+          <KpiGrid cols={5} className="max-sm:hidden">
             {Array.from({ length: 5 }).map((_, i) => (
               <div key={i} className={`h-[104px] rounded-xl skeleton${i === 0 ? " max-lg:col-span-2" : ""}`} />
             ))}
           </KpiGrid>
+          {/* One summary card on a phone, so the placeholder is one too. */}
+          <div className="sm:hidden h-[118px] rounded-xl skeleton" />
           <div className="h-80 rounded-xl skeleton" />
         </>
       ) : (
@@ -679,7 +757,12 @@ function ProjectDetail({ project, onBack }) {
               them restates another. Below desktop the grid is two-up, so
               Internet — the headline — takes the full first row and the other
               four pair off, instead of Clients being left alone at the end. */}
-          <KpiGrid cols={5}>
+          {/* The five tiles are a laptop's summary. On a phone they were three
+              rows of chrome — and "Internet / Up" does not need a 28px figure —
+              so the same five readings become one card above the diagram. */}
+          <SiteSummaryPhone summary={s} internet={internet} />
+
+          <KpiGrid cols={5} className="max-sm:hidden">
             <StatTile
               className="max-lg:col-span-2"
               icon={<Cloud size={18} />}
@@ -728,18 +811,16 @@ function ProjectDetail({ project, onBack }) {
             icon={<Network size={15} />}
             tone="navy"
             padding={view === "topology"}
-            actions={
-              <Segmented
-                size="sm"
-                value={view}
-                onChange={setView}
-                options={[
-                  { value: "topology", label: "Topology" },
-                  { value: "devices", label: "Devices", count: devices.length },
-                ]}
-              />
-            }
+            actions={phone ? null : viewSwitcher}
           >
+            {/* On a phone the switcher is a row of its own under the header
+                rather than a third thing crushed into it. The devices view is
+                unpadded, so this row carries its own gutter there. */}
+            {phone && (
+              <div className={view === "topology" ? "mb-3" : "px-4 py-3 border-b border-[var(--border-subtle)]"}>
+                {viewSwitcher}
+              </div>
+            )}
             {view === "topology" ? (
               <Topology internet={internet} topo={topo} />
             ) : (
@@ -778,6 +859,70 @@ function StatTile({ icon, label, value, sub, tone = "neutral", className }) {
   );
 }
 
+/* ------------ Site summary (phone) ---------------------------------------- */
+/**
+ * The five KPI tiles as one card: the internet's state as a line of text, and
+ * the four counts as a strip of figures under it.
+ *
+ * Phone only — the tiles are better on a laptop, where five of them fit on one
+ * row and the extra size is free. Here they cost three screens of scrolling
+ * before the diagram everyone opens this page for.
+ */
+function SiteSummaryPhone({ summary: s, internet }) {
+  const up = internet?.up;
+  const dot = up == null ? "var(--fg-subtle)" : up ? "var(--success-fg)" : "var(--danger-fg)";
+  const counts = [
+    {
+      label: "Gateway",
+      value: `${s?.gatewayOnline ?? 0}/${s?.gatewayTotal ?? 0}`,
+      bad: !!s?.gatewayTotal && s.gatewayOnline !== s.gatewayTotal,
+    },
+    {
+      label: "APs",
+      value: `${s?.apOnline ?? 0}/${s?.apTotal ?? 0}`,
+      bad: !!s?.apTotal && s.apOnline !== s.apTotal,
+    },
+    {
+      label: "Devices",
+      value: `${s?.onlineDevices ?? 0}/${s?.totalDevices ?? 0}`,
+      bad: !!s?.totalDevices && s.offlineDevices > 0,
+    },
+    { label: "Clients", value: (s?.clients ?? 0).toLocaleString(), bad: false },
+  ];
+
+  return (
+    <div className="sm:hidden rounded-xl border border-[var(--border-default)] bg-[var(--bg-elevated)] shadow-[var(--shadow-card)]">
+      <div className="flex items-center gap-2 px-4 py-3 border-b border-[var(--border-subtle)]">
+        <span className="h-2 w-2 rounded-full shrink-0" style={{ background: dot }} />
+        <span className="font-display text-[13.5px] font-semibold text-[var(--fg-primary)]">
+          {up == null ? "Internet unknown" : up ? "Internet up" : "Internet down"}
+        </span>
+        <span className="ml-auto font-mono text-[11.5px] text-[var(--fg-muted)] truncate">
+          {internet?.publicIp || "no public IP"}
+        </span>
+      </div>
+      <div className="grid grid-cols-4">
+        {counts.map((c, i) => (
+          <div
+            key={c.label}
+            className={"px-2 py-2.5 text-center" + (i > 0 ? " border-l border-[var(--border-subtle)]" : "")}
+          >
+            <p className="text-label">{c.label}</p>
+            <p
+              className="mt-1 text-[17px] leading-none font-semibold tabular-nums"
+              // Colour only when something is off: a card where every figure is
+              // coloured says nothing about which one needs attention.
+              style={{ color: c.bad ? "var(--warning-fg)" : "var(--fg-primary)" }}
+            >
+              {c.value}
+            </p>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 /* ------------ Topology (Internet → Gateway → APs) ------------------------ */
 // Drawn as labelled tiers rather than an undifferentiated stack of boxes: with
 // no captions, a row of nine identical cards gave no clue whether you were
@@ -788,7 +933,7 @@ function Topology({ internet, topo }) {
   const switches = topo?.switches || [];
 
   return (
-    <div className="flex flex-col items-center py-2">
+    <div className="flex flex-col items-center py-2 max-sm:py-0">
       <Tier label="Internet">
         <TopoNode
           icon={<Cloud size={18} />}
@@ -800,7 +945,7 @@ function Topology({ internet, topo }) {
 
       <Connector />
 
-      <Tier label="Gateway" count={gateways.length || null} compact={gateways.length > 1}>
+      <Tier label="Gateway" count={gateways.length || null} pair={gateways.length > 1}>
         {gateways.length > 0 ? (
           gateways.map((g) => (
             <TopoNode
@@ -809,7 +954,6 @@ function Topology({ internet, topo }) {
               label={g.name}
               sub={g.model}
               state={g.online ? "up" : "down"}
-              compact={gateways.length > 1}
             />
           ))
         ) : (
@@ -819,7 +963,7 @@ function Topology({ internet, topo }) {
 
       <Connector />
 
-      <Tier label="Access points" count={aps.length || null} compact={aps.length > 1}>
+      <Tier label="Access points" count={aps.length || null} pair={aps.length > 1}>
         {aps.length > 0 ? (
           aps.map((ap) => (
             <TopoNode
@@ -829,7 +973,6 @@ function Topology({ internet, topo }) {
               sub={`${ap.clientCount} client${ap.clientCount !== 1 ? "s" : ""}`}
               state={ap.online ? "up" : "down"}
               small
-              compact={aps.length > 1}
             />
           ))
         ) : (
@@ -841,7 +984,7 @@ function Topology({ internet, topo }) {
       {switches.length > 0 && (
         <>
           <Connector />
-          <Tier label="Switches" count={switches.length} compact={switches.length > 1}>
+          <Tier label="Switches" count={switches.length} pair={switches.length > 1}>
             {switches.map((sw) => (
               <TopoNode
                 key={sw.sn}
@@ -850,7 +993,6 @@ function Topology({ internet, topo }) {
                 sub={sw.model}
                 state={sw.online ? "up" : "down"}
                 small
-                compact={switches.length > 1}
               />
             ))}
           </Tier>
@@ -860,20 +1002,22 @@ function Topology({ internet, topo }) {
   );
 }
 
-// `compact`: a tier of several nodes becomes a two-column grid of row-shaped
-// nodes on a phone. Centred cards two to a row made nine access points a
-// thousand pixels tall, and cut every name longer than a dozen characters.
-function Tier({ label, count, compact = false, children }) {
+// A phone reads the diagram as sections of a list: the tier's caption sits at
+// the left edge above its devices, a lone device takes the full width, and
+// several pair off two to a row. Centred cards a hundred pixels wide left a
+// third of the screen empty and cut every name longer than a dozen characters.
+function Tier({ label, count, pair = false, children }) {
   return (
-    <div className="w-full flex flex-col items-center gap-2.5">
+    <div className="w-full flex flex-col items-center gap-2.5 max-sm:items-stretch max-sm:gap-2">
       <p className="text-label">
         {label}
         {count != null && ` · ${count}`}
       </p>
       <div
         className={
-          "flex flex-wrap items-start justify-center gap-3 max-w-3xl" +
-          (compact ? " max-sm:grid max-sm:grid-cols-2 max-sm:items-stretch max-sm:gap-2 max-sm:w-full" : "")
+          "flex flex-wrap items-start justify-center gap-3 max-w-3xl " +
+          "max-sm:grid max-sm:items-stretch max-sm:gap-2 max-sm:w-full max-sm:max-w-none " +
+          (pair ? "max-sm:grid-cols-2" : "max-sm:grid-cols-1")
         }
       >
         {children}
@@ -882,40 +1026,45 @@ function Tier({ label, count, compact = false, children }) {
   );
 }
 
+// On a phone the tiers are left-aligned sections, so the thread between them
+// runs down the left under the device tiles rather than down a centre nothing
+// else lines up with.
 function Connector() {
-  return <div className="w-px h-7 my-2 bg-gradient-to-b from-transparent via-[var(--border-strong)] to-transparent" />;
+  return (
+    <div className="w-px h-7 my-2 max-sm:h-4 max-sm:my-1 max-sm:self-start max-sm:ml-[26px] bg-gradient-to-b from-transparent via-[var(--border-strong)] to-transparent" />
+  );
 }
 
 const TOPO_TONE = { up: "green", down: "red", unknown: "slate" };
 const TOPO_DOT = { up: "var(--success-fg)", down: "var(--danger-fg)", unknown: "var(--fg-subtle)" };
 
-function TopoNode({ icon, label, sub, state = "unknown", small, muted, compact = false }) {
+function TopoNode({ icon, label, sub, state = "unknown", small, muted }) {
   return (
     <div
       className={
         "flex flex-col items-center gap-2 rounded-xl px-3 py-3 min-w-[104px] max-w-[136px] " +
         "bg-[var(--bg-elevated)] border " +
-        // Phone: in a grid cell, a row (tile | name over state) filling the
-        // cell; on its own, a card wide enough for a device name.
-        (compact
-          ? "max-sm:flex-row max-sm:gap-2.5 max-sm:min-w-0 max-sm:max-w-none max-sm:px-2.5 max-sm:py-2.5 "
-          : "max-sm:max-w-[240px] ") +
+        // Phone: a row — tile, then the name over its state — filling its cell.
+        "max-sm:flex-row max-sm:w-full max-sm:gap-2.5 max-sm:min-w-0 max-sm:max-w-none max-sm:px-2.5 max-sm:py-2.5 max-sm:h-full " +
         (muted
           ? "border-dashed border-[var(--border-subtle)] opacity-75"
           : "border-[var(--border-default)] shadow-[var(--shadow-xs)]")
       }
     >
-      <ObjectTile tone={TOPO_TONE[state] || "slate"} size={small ? "sm" : "md"}>
+      <ObjectTile tone={TOPO_TONE[state] || "slate"} size={small ? "sm" : "md"} className="max-sm:self-center">
         {icon}
       </ObjectTile>
-      <span className={"flex flex-col items-center gap-2 w-full min-w-0" + (compact ? " max-sm:items-start max-sm:gap-1" : "")}>
+      {/* Two of these sit side by side on a phone and share a height. Stretched
+          and spread, the state line lands at the foot of both, so a name that
+          wraps to two lines no longer pushes its neighbour's state out of line
+          with it. */}
+      <span className="flex flex-col items-center gap-2 w-full min-w-0 max-sm:items-start max-sm:gap-1 max-sm:self-stretch max-sm:justify-between">
         {/* One truncated line on desktop. On a phone a cut-off device name is
             the one thing an engineer came to read, so it gets two lines. */}
         <span
           className={
             "font-display text-[12.5px] font-semibold text-[var(--fg-primary)] text-center leading-tight truncate w-full " +
-            "max-sm:whitespace-normal max-sm:line-clamp-2 max-sm:[overflow-wrap:anywhere]" +
-            (compact ? " max-sm:text-left" : "")
+            "max-sm:text-left max-sm:whitespace-normal max-sm:line-clamp-2 max-sm:[overflow-wrap:anywhere]"
           }
         >
           {label}
@@ -931,6 +1080,10 @@ function TopoNode({ icon, label, sub, state = "unknown", small, muted, compact =
 
 /* ------------ Device table ------------------------------------------------ */
 const TYPE_LABEL = { gateway: "Gateway", ap: "Access point", switch: "Switch", other: "Device" };
+// The phone row's facts line. "AP" is the word the rest of the console already
+// uses for one ("APs 7/9"), and the ten characters it saves are what keep an
+// access point's model, IP and client count on the one line at 375px.
+const PHONE_TYPE_LABEL = { ...TYPE_LABEL, ap: "AP" };
 const TYPE_TONE = { gateway: "indigo", ap: "blue", switch: "teal", other: "slate" };
 
 function DeviceIcon({ type }) {
@@ -942,12 +1095,11 @@ function DeviceIcon({ type }) {
 
 /**
  * Ruijie firmware strings are long and comma-joined
- * ("AP_3.0(1)B11P204,Release(10222207)"). On a phone card each comma-separated
- * part is an inline-block, so the line breaks between parts rather than
- * mid-token. On desktop the parts are plain inline spans in a nowrap cell and
- * read exactly as the raw string. (Not <wbr>: Chrome breaks at it even under
- * white-space: nowrap.) One wrapper, because the stacked card lays out a
- * cell's direct children as separate flex items.
+ * ("AP_3.0(1)B11P204,Release(10222207)"). Each comma-separated part is its own
+ * inline-block below 640px, so a narrow window breaks the string between parts
+ * rather than mid-token; in the desktop table's nowrap cell the parts are plain
+ * inline spans and read exactly as the raw string. (Not <wbr>: Chrome breaks at
+ * it even under white-space: nowrap.)
  */
 function Firmware({ value }) {
   if (value == null || value === "") return null;
@@ -964,7 +1116,54 @@ function Firmware({ value }) {
   );
 }
 
+/**
+ * One device on a phone: what it is called and whether it is up, then
+ * everything else as a line of facts.
+ *
+ * Not the stacked table card. That card gave each column its own labelled tile
+ * — MODEL, MGMT IP, CLIENTS, FIRMWARE — which came to 191px a device, so four
+ * of them filled the screen and eleven ran the better part of a metre. The
+ * figures here are the same figures; what goes is the furniture around them.
+ */
+function DeviceRow({ device: d }) {
+  return (
+    <div className="flex items-start gap-2.5 px-4 py-2.5">
+      <ObjectTile tone={TYPE_TONE[d.type] || "slate"} size="sm" className="mt-0.5">
+        <DeviceIcon type={d.type} />
+      </ObjectTile>
+      <div className="min-w-0 flex-1">
+        <div className="flex items-center gap-2">
+          <span className="min-w-0 flex-1 truncate font-display text-[13px] font-semibold text-[var(--fg-primary)]">
+            {d.name}
+          </span>
+          <StatusPill tone={d.online ? "success" : "danger"}>{d.online ? "Online" : "Offline"}</StatusPill>
+        </div>
+        <PhoneFacts
+          className="mt-0.5"
+          items={[
+            { v: PHONE_TYPE_LABEL[d.type] || "Device" },
+            d.model && { v: d.model },
+            d.mgmtIp && { v: d.mgmtIp },
+            d.type === "ap" && { v: d.clientCount ?? 0, l: "clients" },
+          ]}
+        />
+        {/* The two reference strings an engineer quotes when they raise a
+            ticket. Small and last. Together they never fit one line on a
+            phone, so each has its own rather than the pair breaking wherever
+            the width ran out; a firmware string longer than the line still
+            wraps rather than being cut. */}
+        <p className="mt-0.5 font-mono text-[11px] leading-[1.45] text-[var(--fg-subtle)] [overflow-wrap:anywhere]">
+          <span className="block">{d.sn}</span>
+          {d.firmware && <span className="block">{d.firmware}</span>}
+        </p>
+      </div>
+    </div>
+  );
+}
+
 function DeviceTable({ devices }) {
+  const [showAll, setShowAll] = useState(false);
+
   if (devices.length === 0) {
     return (
       <EmptyState
@@ -976,57 +1175,59 @@ function DeviceTable({ devices }) {
   }
 
   return (
-    <DataTable>
-      <thead>
-        <tr>
-          <Th>Device</Th>
-          <Th>Type</Th>
-          <Th>Status</Th>
-          <Th>Model</Th>
-          <Th>Mgmt IP</Th>
-          <Th align="right">Clients</Th>
-          <Th>Firmware</Th>
-        </tr>
-      </thead>
-      <tbody>
-        {devices.map((d) => (
-          <tr key={d.sn}>
-            {/* Phone card: the state rides in the title row and the type in
-                the subtitle, so the card's lines are the device's facts. */}
-            <Td>
-              <div className="max-sm:flex max-sm:w-full max-sm:items-start max-sm:justify-between max-sm:gap-3">
+    <>
+      <PhoneList>
+        {devices.slice(0, showAll ? devices.length : PHONE_ROWS).map((d) => (
+          <DeviceRow key={d.sn} device={d} />
+        ))}
+      </PhoneList>
+
+      <DataTable className="max-sm:hidden!">
+        <thead>
+          <tr>
+            <Th>Device</Th>
+            <Th>Type</Th>
+            <Th>Status</Th>
+            <Th>Model</Th>
+            <Th>Mgmt IP</Th>
+            <Th align="right">Clients</Th>
+            <Th>Firmware</Th>
+          </tr>
+        </thead>
+        <tbody>
+          {devices.map((d) => (
+            <tr key={d.sn}>
+              <Td>
                 <RecordCell
                   tone={TYPE_TONE[d.type] || "slate"}
                   icon={<DeviceIcon type={d.type} />}
                   title={d.name}
-                  subtitle={
-                    <>
-                      <span className="sm:hidden font-sans">{TYPE_LABEL[d.type] || "Device"} · </span>
-                      {d.sn}
-                    </>
-                  }
+                  subtitle={d.sn}
                   mono
                 />
-                <StatusPill tone={d.online ? "success" : "danger"} className="sm:hidden shrink-0 mt-1">
-                  {d.online ? "Online" : "Offline"}
-                </StatusPill>
-              </div>
-            </Td>
-            <Td className="max-sm:hidden!">{TYPE_LABEL[d.type] || "Device"}</Td>
-            <Td className="max-sm:hidden!">
-              <StatusPill tone={d.online ? "success" : "danger"}>{d.online ? "Online" : "Offline"}</StatusPill>
-            </Td>
-            <Td mono nowrap>{d.model}</Td>
-            <Td mono nowrap>{d.mgmtIp}</Td>
-            <Td align="right" nowrap className={`tabular-nums${d.type === "ap" ? "" : " max-sm:hidden!"}`}>
-              {d.type === "ap" ? d.clientCount : "—"}
-            </Td>
-            <Td mono muted nowrap>
-              <Firmware value={d.firmware} />
-            </Td>
-          </tr>
-        ))}
-      </tbody>
-    </DataTable>
+              </Td>
+              <Td>{TYPE_LABEL[d.type] || "Device"}</Td>
+              <Td>
+                <StatusPill tone={d.online ? "success" : "danger"}>{d.online ? "Online" : "Offline"}</StatusPill>
+              </Td>
+              <Td mono nowrap>{d.model}</Td>
+              <Td mono nowrap>{d.mgmtIp}</Td>
+              <Td align="right" nowrap className="tabular-nums">
+                {d.type === "ap" ? d.clientCount : "—"}
+              </Td>
+              <Td mono muted nowrap>
+                <Firmware value={d.firmware} />
+              </Td>
+            </tr>
+          ))}
+        </tbody>
+      </DataTable>
+      <PhoneMore
+        total={devices.length}
+        expanded={showAll}
+        onToggle={() => setShowAll((v) => !v)}
+        noun="devices"
+      />
+    </>
   );
 }

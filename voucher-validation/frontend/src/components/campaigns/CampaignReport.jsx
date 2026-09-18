@@ -23,15 +23,16 @@ import {
 import { campaignApi } from "../../services/api";
 import { useAuth } from "../../hooks/useAuth";
 import {
-  PageShell, PageHeader, Panel, Button, Segmented, SearchInput, DataTable, Th, Td, TableMessage,
-  StatusPill, ConfirmDialog,
+  PageShell, PageHeader, Panel, Button, IconButton, Segmented, SearchInput, DataTable, Th, Td,
+  TableMessage, StatusPill, ConfirmDialog,
 } from "../ui";
 import Pagination from "../shared/Pagination";
 import EmailPreview, { useEmailPreview } from "./EmailPreview";
 import {
-  CampaignStatusPill, RECIPIENT_STATUS, DeliveryBar, Callout, audienceSummary, fmtDateTime,
-  durationWords, plural, useIsPhone,
+  CampaignStatusPill, RECIPIENT_STATUS, DeliveryBar, Callout, PHONE_WIDE, PHONE_HEADER_FILL,
+  audienceSummary, fmtDateTime, durationWords, plural, useIsPhone,
 } from "./campaignUi";
+import { PHONE_CARD, PhoneMore, phoneRowClass } from "../ui/phone";
 
 function cn(...p) {
   return p.filter(Boolean).join(" ");
@@ -47,9 +48,9 @@ const COUNT_TILES = [
   { key: "skipped", label: "Skipped", dot: "var(--fg-subtle)" },
 ];
 
-function Meta({ label, children }) {
+function Meta({ label, children, className }) {
   return (
-    <div className="min-w-0">
+    <div className={cn("min-w-0", className)}>
       <dt className="text-label">{label}</dt>
       <dd className="mt-1 truncate text-[12.5px] text-[var(--fg-secondary)] max-sm:whitespace-normal max-sm:[overflow-wrap:anywhere]">{children}</dd>
     </div>
@@ -72,6 +73,9 @@ export default function CampaignReport({ campaign, stats, sites, onCampaign }) {
   const [rows, setRows] = useState({ recipients: [], total: 0, totalPages: 1, counts: null });
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
+  // Phone: a page of fifty addresses is capped until asked for. Desktop keeps
+  // the whole page — its table scrolls inside the panel.
+  const [showAll, setShowAll] = useState(false);
 
   useEffect(() => {
     const t = setTimeout(() => {
@@ -109,6 +113,10 @@ export default function CampaignReport({ campaign, stats, sites, onCampaign }) {
   );
 
   useEffect(() => { loadRecipients(); }, [loadRecipients]);
+
+  // A different filter, search or page is a different list, so the phone cap
+  // starts again rather than carrying "showing all" over to fifty new rows.
+  useEffect(() => { setShowAll(false); }, [filter, debounced, page]);
 
   /* ── polling while it sends ── */
   const refreshCampaign = useCallback(async () => {
@@ -224,21 +232,57 @@ export default function CampaignReport({ campaign, stats, sites, onCampaign }) {
             <CampaignStatusPill status={campaign.status} />
           </span>
         }
-        subtitle={campaign.subject}
+        subtitle={
+          <>
+            {/* The phone's app bar can only carry a plain string, and this
+                page's heading is a name beside a status pill — so on a phone
+                both are said here instead, above the subject line. */}
+            <span className="sm:hidden mb-1.5 flex flex-wrap items-center gap-2">
+              <span className="text-[14px] font-semibold text-[var(--fg-primary)]">
+                {campaign.name || "Untitled campaign"}
+              </span>
+              <CampaignStatusPill status={campaign.status} />
+            </span>
+            {campaign.subject}
+          </>
+        }
         icon={<Megaphone size={22} />}
         tone="pink"
         actions={
           <>
-            <Button variant="ghost" size="sm" onClick={() => navigate("/email-campaigns")} iconLeft={<ArrowLeft size={14} />} className="max-sm:flex-auto">
+            {/* Up to six buttons sit here. On a phone the two that only move
+                you around keep their icon and lose their word, so the ones that
+                act on the campaign stay readable on one or two rows. */}
+            <IconButton
+              variant="ghost"
+              size="md"
+              className="sm:hidden"
+              onClick={() => navigate("/email-campaigns")}
+              aria-label="All campaigns"
+              title="All campaigns"
+            >
+              <ArrowLeft size={17} />
+            </IconButton>
+            <Button variant="ghost" size="sm" onClick={() => navigate("/email-campaigns")} iconLeft={<ArrowLeft size={14} />} className="max-sm:hidden">
               All campaigns
             </Button>
+            <IconButton
+              variant="secondary"
+              size="md"
+              className="sm:hidden"
+              onClick={() => { refreshCampaign(); loadRecipients(); }}
+              aria-label="Refresh"
+              title="Refresh"
+            >
+              <RefreshCw size={16} />
+            </IconButton>
             <Button
               variant="secondary"
               size="sm"
               onClick={() => { refreshCampaign(); loadRecipients(); }}
               iconLeft={<RefreshCw size={14} />}
               aria-label="Refresh"
-              className="max-sm:flex-auto"
+              className="max-sm:hidden"
             >
               Refresh
             </Button>
@@ -258,7 +302,8 @@ export default function CampaignReport({ campaign, stats, sites, onCampaign }) {
               </Button>
             )}
             <Button variant="secondary" size="sm" onClick={duplicate} loading={busy === "duplicate"} disabled={!!busy} iconLeft={<Copy size={14} />} className="max-sm:flex-auto">
-              Duplicate as draft
+              <span className="max-sm:hidden">Duplicate as draft</span>
+              <span className="sm:hidden">Duplicate</span>
             </Button>
             {canCancel && (
               <Button variant="danger" size="sm" onClick={() => setConfirmCancel(true)} disabled={!!busy} iconLeft={<XCircle size={14} />} className="max-sm:flex-auto">
@@ -267,6 +312,7 @@ export default function CampaignReport({ campaign, stats, sites, onCampaign }) {
             )}
           </>
         }
+        className={PHONE_HEADER_FILL}
       />
 
       {campaign.lastError && (
@@ -285,13 +331,21 @@ export default function CampaignReport({ campaign, stats, sites, onCampaign }) {
         </Callout>
       )}
 
+      {/* Two columns: Delivery over Deliveries on the left, the email on the
+          right (below both until xl). On a phone the left column dissolves
+          (`contents`) so the email can sit between the figures and the list of
+          addresses instead of after all of them: its panels and the preview
+          become three grid items, put in order by the max-sm:order-* classes.
+          Every class doing that is max-sm, so from 640px up the markup and the
+          order are exactly the desktop's. */}
       <div className="grid grid-cols-1 items-start gap-5 xl:grid-cols-[minmax(0,1fr)_minmax(0,560px)]">
-        <div className="flex min-w-0 flex-col gap-5">
+        <div className="flex min-w-0 flex-col gap-5 max-sm:contents">
           <Panel
             title="Delivery"
             subtitle={audienceSummary(campaign.audience, sites)}
             icon={<Send size={15} />}
             tone="pink"
+            className="max-sm:order-1"
           >
             <div className="flex flex-wrap items-end justify-between gap-x-6 gap-y-2">
               <div className="min-w-0">
@@ -340,8 +394,10 @@ export default function CampaignReport({ campaign, stats, sites, onCampaign }) {
               })}
             </div>
 
-            <dl className="mt-5 grid grid-cols-1 gap-4 border-t border-[var(--border-subtle)] pt-4 sm:grid-cols-3">
-              <Meta label="Started">
+            <dl className="mt-5 grid grid-cols-2 gap-4 border-t border-[var(--border-subtle)] pt-4 sm:grid-cols-3">
+              {/* Started carries a timestamp AND who pressed Send, so on a phone
+                  it takes the whole row and the other two pair up beneath it. */}
+              <Meta label="Started" className="max-sm:col-span-2">
                 {campaign.startedAt ? (
                   <span title={fmtDateTime(campaign.startedAt)}>
                     {fmtDateTime(campaign.startedAt)}
@@ -362,6 +418,7 @@ export default function CampaignReport({ campaign, stats, sites, onCampaign }) {
             icon={<Inbox size={15} />}
             tone="pink"
             padding={false}
+            className="max-sm:order-3"
           >
             <div className="flex flex-wrap items-center gap-2.5 border-b border-[var(--border-subtle)] px-4 py-3 sm:px-5">
               <div className="max-w-full overflow-x-auto scrollbar-none">
@@ -405,22 +462,27 @@ export default function CampaignReport({ campaign, stats, sites, onCampaign }) {
                     {debounced ? "No recipient matches that search." : filter === "all" ? "No recipients recorded." : `Nothing ${filter}.`}
                   </TableMessage>
                 ) : (
-                  rows.recipients.map((r) => {
+                  rows.recipients.map((r, i) => {
                     const meta = RECIPIENT_STATUS[r.status] || { label: r.status, tone: "neutral" };
+                    // A phone card: who it was for and how it went on the first
+                    // line, then what happened across the full width. Attempts
+                    // is only worth a tile when the sender had to try twice.
+                    const retried = Number(r.attempts || 0) > 1;
                     return (
-                      <tr key={r.id}>
-                        <Td>
+                      <tr key={r.id} className={phoneRowClass(i, showAll)}>
+                        <Td className={PHONE_CARD.title}>
                           <div className="flex items-start gap-3 max-sm:w-full">
                             <div className="flex min-w-0 max-w-[320px] flex-col max-sm:max-w-none max-sm:flex-1">
                               <span className="truncate font-semibold text-[var(--fg-primary)]">{r.email}</span>
                               {r.phone && <span className="truncate font-mono text-[11.5px] text-[var(--fg-muted)]">{r.phone}</span>}
                             </div>
-                            <StatusPill tone={meta.tone} className="shrink-0 sm:hidden">{meta.label}</StatusPill>
                           </div>
                         </Td>
-                        <Td nowrap className="max-sm:hidden!"><StatusPill tone={meta.tone}>{meta.label}</StatusPill></Td>
-                        <Td align="right" nowrap><span className="tabular-nums">{r.attempts ?? 0}</span></Td>
-                        <Td>
+                        <Td nowrap className={PHONE_CARD.aside}><StatusPill tone={meta.tone}>{meta.label}</StatusPill></Td>
+                        <Td align="right" nowrap className={retried ? PHONE_CARD.stat : PHONE_CARD.hide}>
+                          <span className="tabular-nums">{r.attempts ?? 0}</span>
+                        </Td>
+                        <Td className={PHONE_WIDE}>
                           {r.error ? (
                             <span className="block min-w-[200px] max-w-[420px] break-words text-[12px] text-[var(--danger-fg)] max-sm:min-w-0">{r.error}</span>
                           ) : r.status === "sent" ? (
@@ -437,11 +499,17 @@ export default function CampaignReport({ campaign, stats, sites, onCampaign }) {
                 )}
               </tbody>
             </DataTable>
+            <PhoneMore
+              total={rows.recipients.length}
+              expanded={showAll}
+              onToggle={() => setShowAll((v) => !v)}
+              noun="deliveries"
+            />
             <Pagination page={page} totalPages={rows.totalPages} total={rows.total} onPageChange={setPage} />
           </Panel>
         </div>
 
-        <div className="min-w-0 xl:sticky xl:top-5">
+        <div className="min-w-0 xl:sticky xl:top-5 max-sm:order-2">
           <EmailPreview
             preview={preview}
             preheader={campaign.preheader}

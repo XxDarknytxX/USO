@@ -19,6 +19,7 @@ import {
   Panel, Button, EmptyState, SearchInput, DataTable, Th, Td, TableMessage,
 } from "./ui";
 import Pagination from "./shared/Pagination";
+import { PHONE_CARD, PhoneMore, phoneRowClass } from "./ui/phone";
 
 const PAGE_SIZE = 25;
 
@@ -54,6 +55,7 @@ export default function UnmappedTransactions() {
   const [debounced, setDebounced] = useState("");
   const [loading, setLoading] = useState(true);
   const [exporting, setExporting] = useState(false);
+  const [showAll, setShowAll] = useState(false); // phone: the page of 25 is capped until asked
 
   useEffect(() => {
     const t = setTimeout(() => {
@@ -179,21 +181,30 @@ export default function UnmappedTransactions() {
               </td>
             </tr>
           ) : (
-            rows.map((r) => (
-              <tr key={r.phone}>
-                <Td nowrap>
+            rows.map((r, i) => (
+              // A phone card of two lines: the number with what it has spent
+              // beside it — the figure that decides whether this one is worth
+              // chasing — then how often and how recently, as small tiles.
+              <tr key={r.phone} className={phoneRowClass(i, showAll)}>
+                <Td nowrap className={PHONE_CARD.title}>
                   <span className="font-mono text-[13px] font-semibold text-[var(--fg-primary)]">
                     {r.phone}
                   </span>
                 </Td>
-                <Td align="right" className="tabular-nums">{r.transactions.toLocaleString()}</Td>
-                <Td align="right" strong className="tabular-nums">{fmtMoney(r.totalAmount)}</Td>
-                <Td nowrap>{fmtDate(r.lastAt)}</Td>
+                <Td align="right" className={`tabular-nums ${PHONE_CARD.stat}`}>{r.transactions.toLocaleString()}</Td>
+                <Td align="right" strong className={`tabular-nums ${PHONE_CARD.aside}`}>{fmtMoney(r.totalAmount)}</Td>
+                <Td nowrap className={`max-sm:col-span-4 ${PHONE_CARD.cell}`}>{fmtDate(r.lastAt)}</Td>
               </tr>
             ))
           )}
         </tbody>
       </DataTable>
+      <PhoneMore
+        total={rows.length}
+        expanded={showAll}
+        onToggle={() => setShowAll((v) => !v)}
+        noun="numbers"
+      />
       <Pagination page={page} totalPages={totalPages} total={total} onPageChange={setPage} />
     </Panel>
   );

@@ -45,7 +45,7 @@ import AudienceEditor, { useAudienceCount } from "../components/campaigns/Audien
 import SendConfirmModal from "../components/campaigns/SendConfirmModal";
 import CampaignReport from "../components/campaigns/CampaignReport";
 import {
-  Callout, MERGE_TAGS, audienceSummary, relTime, plural, smtpProblem,
+  Callout, MERGE_TAGS, PHONE_HEADER_BARE, audienceSummary, relTime, plural, smtpProblem,
 } from "../components/campaigns/campaignUi";
 
 function cn(...p) {
@@ -131,6 +131,17 @@ const RAW_STARTER = `<!DOCTYPE html>
 </body>
 </html>
 `;
+
+/* A phone does not scroll a five-panel form; it moves between four screens, in
+   the order the work happens. Every panel stays MOUNTED and is only hidden, so
+   a switch never takes back what was typed, never re-fetches the preview or the
+   recipient count, and keeps the caret bindings the merge-tag chips rely on. */
+const STEPS = [
+  { value: "write", label: "Write" },
+  { value: "audience", label: "Audience" },
+  { value: "preview", label: "Preview" },
+  { value: "send", label: "Send" },
+];
 
 const FIELD_LABELS = {
   subject: "Subject",
@@ -473,6 +484,15 @@ function DraftEditor({ campaign, stats, sites, onCampaign, onRefresh, onReload }
     escArmed.current = false;
   };
 
+  /* ── which screen a phone is on ── */
+  const [step, setStep] = useState("write");
+  const stepsRef = useRef(null);
+  // Changing step is changing screen: start it at the top, the way a tab does.
+  const goStep = (v) => {
+    setStep(v);
+    stepsRef.current?.scrollIntoView({ block: "start" });
+  };
+
   /* ── preview, audience ── */
   const preview = useEmailPreview(form);
   const countState = useAudienceCount(form.audience);
@@ -583,12 +603,14 @@ function DraftEditor({ campaign, stats, sites, onCampaign, onRefresh, onReload }
       <PageHeader
         eyebrow="Email campaign · Draft"
         title={form.name.trim() || "Untitled campaign"}
-        subtitle="Write it, choose who gets it, send yourself a test, then send."
+        // On a phone the step bar below says the same thing, in the order it
+        // happens; the sentence is desktop context.
+        subtitle={<span className="max-sm:hidden">Write it, choose who gets it, send yourself a test, then send.</span>}
         icon={<Megaphone size={22} />}
         tone="pink"
         actions={
           <>
-            <Button variant="ghost" size="sm" onClick={() => requestLeave("/email-campaigns")} iconLeft={<ArrowLeft size={14} />}>
+            <Button variant="ghost" size="sm" onClick={() => requestLeave("/email-campaigns")} iconLeft={<ArrowLeft size={14} />} className="max-sm:flex-1">
               All campaigns
             </Button>
             {/* On a phone these three live in the sticky bar at the bottom instead,
@@ -619,6 +641,7 @@ function DraftEditor({ campaign, stats, sites, onCampaign, onRefresh, onReload }
             </Button>
           </>
         }
+        className={PHONE_HEADER_BARE}
       />
 
       {smtpIssue && (
@@ -635,13 +658,23 @@ function DraftEditor({ campaign, stats, sites, onCampaign, onRefresh, onReload }
         </Callout>
       )}
 
+      <div ref={stepsRef} className="sm:hidden">
+        <Segmented
+          size="sm"
+          options={STEPS}
+          value={step}
+          onChange={goStep}
+          className="flex w-full [&>button]:flex-1 [&>button]:justify-center"
+        />
+      </div>
+
       {/* Three grid children rather than two columns, so that on a phone the
           preview lands right after the content it previews instead of below
           the audience picker. On wide screens the preview takes the right
           column across both rows and stays in view while the form scrolls. */}
       <div className="grid grid-cols-1 items-start gap-5 xl:grid-cols-[minmax(0,1fr)_minmax(0,600px)]">
         {/* ── 1 · Details + content ── */}
-        <div className="flex min-w-0 flex-col gap-5 xl:col-start-1 xl:row-start-1">
+        <div className={cn("flex min-w-0 flex-col gap-5 xl:col-start-1 xl:row-start-1", step !== "write" && "max-sm:hidden")}>
           <Panel title="Details" subtitle="What the inbox shows before anyone opens it" icon={<Type size={15} />} tone="pink">
             <div className="flex flex-col gap-4">
               <Field label="Campaign name" htmlFor="c-name" hint="Internal — only admins see this.">
@@ -827,7 +860,7 @@ function DraftEditor({ campaign, stats, sites, onCampaign, onRefresh, onReload }
         </div>
 
         {/* ── Preview ── */}
-        <div className="min-w-0 xl:sticky xl:top-5 xl:col-start-2 xl:row-span-2 xl:row-start-1">
+        <div className={cn("min-w-0 xl:sticky xl:top-5 xl:col-start-2 xl:row-span-2 xl:row-start-1", step !== "preview" && "max-sm:hidden")}>
           <EmailPreview
             preview={preview}
             preheader={form.preheader}
@@ -837,8 +870,19 @@ function DraftEditor({ campaign, stats, sites, onCampaign, onRefresh, onReload }
         </div>
 
         {/* ── 2 · Audience + test + send ── */}
-        <div className="flex min-w-0 flex-col gap-5 xl:col-start-1 xl:row-start-2">
-          <Panel title="Audience" subtitle={audienceText} icon={<Users size={15} />} tone="pink">
+        <div
+          className={cn(
+            "flex min-w-0 flex-col gap-5 xl:col-start-1 xl:row-start-2",
+            step !== "audience" && step !== "send" && "max-sm:hidden"
+          )}
+        >
+          <Panel
+            title="Audience"
+            subtitle={audienceText}
+            icon={<Users size={15} />}
+            tone="pink"
+            className={cn(step !== "audience" && "max-sm:hidden")}
+          >
             <AudienceEditor
               audience={form.audience}
               onChange={(audience) => setField("audience", audience)}
@@ -849,7 +893,14 @@ function DraftEditor({ campaign, stats, sites, onCampaign, onRefresh, onReload }
             />
           </Panel>
 
-          <Panel title="Test and send" subtitle="See it in a real inbox, then send it" icon={<Send size={15} />} tone="pink" padding={false}>
+          <Panel
+            title="Test and send"
+            subtitle="See it in a real inbox, then send it"
+            icon={<Send size={15} />}
+            tone="pink"
+            padding={false}
+            className={cn(step !== "send" && "max-sm:hidden")}
+          >
             <div className="flex flex-col gap-3 px-5 py-5">
               <div className="flex items-center gap-2">
                 <FlaskConical size={15} className="text-[var(--fg-muted)]" />
@@ -981,6 +1032,9 @@ function DraftEditor({ campaign, stats, sites, onCampaign, onRefresh, onReload }
         >
           Save
         </Button>
+        {/* The Send step carries its own full-width "Send to N customers"
+            under the checklist; two Send buttons a hundred pixels apart only
+            makes someone wonder which one counts. */}
         <Button
           variant="primary"
           size="sm"
@@ -988,6 +1042,7 @@ function DraftEditor({ campaign, stats, sites, onCampaign, onRefresh, onReload }
           disabled={!!blocker || saving}
           iconLeft={<Send size={14} />}
           aria-label={sendLabel}
+          className={cn(step === "send" && "max-sm:hidden")}
         >
           Send
         </Button>

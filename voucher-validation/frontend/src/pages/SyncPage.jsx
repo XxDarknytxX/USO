@@ -194,10 +194,37 @@ export default function SyncPage() {
         }
       />
 
+      {/* Phone: the four tiles are one run's four numbers, and as separate cards
+          they were two rows of mostly zeroes before you could see the history.
+          One card says the same thing: did it work, when, and what it moved. */}
+      <div className="sm:hidden rounded-xl border border-[var(--border-default)] bg-[var(--bg-elevated)] shadow-[var(--shadow-card)] px-4 py-3.5">
+        <div className="flex items-center justify-between gap-3">
+          <span className="text-label">Last sync</span>
+          {lastSync && <StatusPill tone={syncTone(lastStatus)}>{lastStatus}</StatusPill>}
+        </div>
+        <p className="mt-1.5 text-[22px] font-semibold leading-none tracking-tight text-[var(--fg-primary)]">
+          {lastSync ? relativeTime(lastSync.sync_started_at) : "Never"}
+        </p>
+        <p className="mt-1.5 text-[12.5px] text-[var(--fg-muted)]">
+          {lastSync
+            ? `${lastSync.sync_type === "auto" ? "Automatic" : "Manual"} · ${shortStamp(lastSync.sync_started_at)}`
+            : "Run a sync to populate this log"}
+        </p>
+        {lastSync && (
+          <div className="mt-3 flex flex-wrap gap-x-3 gap-y-1 border-t border-[var(--border-subtle)] pt-2.5 text-[12px] text-[var(--fg-muted)]">
+            <CountWord n={lastSync.total_fetched} word="fetched" />
+            <CountWord n={lastSync.total_processed} word="processed" />
+            <CountWord n={lastSync.total_new} word="new" tone="var(--success-fg)" />
+            <CountWord n={lastSync.total_updated} word="updated" tone="var(--info-fg)" />
+            <CountWord n={lastSync.total_archived} word="archived" tone="var(--warning-fg)" />
+          </div>
+        )}
+      </div>
+
       {/* The last run, which is the only thing anyone opens this page to check.
           The headline is the age of the run; the exact timestamp and outcome stay
           on the sub-line, because "did it work" is read before "when". */}
-      <KpiGrid cols={4}>
+      <KpiGrid cols={4} className="max-sm:hidden">
         <StatCard
           label="Last sync"
           value={lastSync ? relativeTime(lastSync.sync_started_at) : "Never"}
@@ -314,7 +341,31 @@ export default function SyncPage() {
             />
           ) : (
             <>
-              <DataTable>
+              {/* Phone list. The stacked table gave every run two labelled lines
+                  for "Automatic" and "System" and a five-column strip of
+                  zeroes — 340px each, for a log you scan for the one red row.
+                  A run is a time, an outcome, and what it moved. */}
+              <div className="sm:hidden divide-y divide-[var(--border-subtle)]">
+                {syncLogs.map((log) => (
+                  <div key={log.id} className="px-4 py-3">
+                    <div className="flex items-center gap-2">
+                      <span className="text-[13.5px] font-semibold tabular-nums text-[var(--fg-primary)]">
+                        {shortStamp(log.sync_started_at)}
+                      </span>
+                      <span className="ml-auto shrink-0">
+                        <StatusPill tone={syncTone(log.status)}>{log.status}</StatusPill>
+                      </span>
+                    </div>
+                    <p className="mt-1 text-[12px] text-[var(--fg-muted)]">
+                      {log.sync_type === "auto" ? "Automatic" : `Manual · ${log.user_email || "—"}`}
+                      {" · "}
+                      {runSummary(log)}
+                    </p>
+                  </div>
+                ))}
+              </div>
+
+              <DataTable className="max-sm:hidden!">
                 <thead>
                   <tr>
                     <Th>Date</Th>
@@ -326,27 +377,20 @@ export default function SyncPage() {
                     <Th align="right">Updated</Th>
                     <Th align="right">Archived</Th>
                     <Th>User</Th>
-                    {/* Phone-only column: hidden from sm up (header and cells),
-                        unlabelled on the card, so the counts read as one strip. */}
-                    <Th className="sm:hidden!" />
                   </tr>
                 </thead>
                 <tbody>
                   {syncLogs.map((log) => (
                     <tr key={log.id}>
-                      <Td mono nowrap className="max-sm:items-center!">
+                      <Td mono nowrap>
                         {formatDate(log.sync_started_at)}
-                        {/* Phone: the outcome rides on the title line. */}
-                        <span className="sm:hidden! max-sm:ml-auto shrink-0 font-sans">
-                          <StatusPill tone={syncTone(log.status)}>{log.status}</StatusPill>
-                        </span>
                       </Td>
                       <Td>
                         <StatusPill tone={log.sync_type === "auto" ? "info" : "neutral"}>
                           {log.sync_type === "auto" ? "Automatic" : "Manual"}
                         </StatusPill>
                       </Td>
-                      <Td className="max-sm:hidden!">
+                      <Td>
                         <StatusPill tone={syncTone(log.status)}>{log.status}</StatusPill>
                       </Td>
                       <CountCell value={log.total_fetched} />
@@ -355,20 +399,8 @@ export default function SyncPage() {
                       <CountCell value={log.total_updated} tone="var(--info-fg)" />
                       <CountCell value={log.total_archived || 0} tone="var(--warning-fg)" />
                       <Td muted nowrap>
-                        {/* A long operator email wraps rather than widening the card. */}
-                        <span className="max-sm:break-all">{log.user_email || "—"}</span>
+                        {log.user_email || "—"}
                       </Td>
-                      {/* Phone-only: the five counts as one strip instead of five
-                          labelled lines per run. */}
-                      <td className="sm:hidden!">
-                        <div className="w-full grid grid-cols-5 rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-surface)] divide-x divide-[var(--border-subtle)]">
-                          <CountFigure label="Fetched" value={log.total_fetched} />
-                          <CountFigure label="Processed" value={log.total_processed} />
-                          <CountFigure label="New" value={log.total_new} tone="var(--success-fg)" />
-                          <CountFigure label="Updated" value={log.total_updated} tone="var(--info-fg)" />
-                          <CountFigure label="Archived" value={log.total_archived || 0} tone="var(--warning-fg)" />
-                        </div>
-                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -415,18 +447,46 @@ function CountCell({ value, tone }) {
   );
 }
 
-/** One figure in the phone card's count strip: the number over its label. */
-function CountFigure({ label, value, tone }) {
+/** "12 new" — one of the last run's counts, as words rather than a column. */
+function CountWord({ n, word, tone }) {
+  const value = Number(n || 0);
   return (
-    <div className="min-w-0 px-1 py-2 text-center">
-      <div
-        className="text-[14px] font-semibold tabular-nums leading-tight text-[var(--fg-primary)] break-words"
-        style={tone ? { color: tone } : undefined}
+    <span className="whitespace-nowrap">
+      <span
+        className="font-semibold tabular-nums text-[var(--fg-primary)]"
+        style={tone && value > 0 ? { color: tone } : undefined}
       >
-        {Number(value || 0).toLocaleString()}
-      </div>
-      <div className="mt-0.5 text-[10.5px] leading-tight text-[var(--fg-muted)] break-words">{label}</div>
-    </div>
+        {value.toLocaleString()}
+      </span>{" "}
+      {word}
+    </span>
+  );
+}
+
+/**
+ * What a run did, in one phrase. A row of five zeroes is the commonest outcome
+ * of a scheduled sync and it does not deserve five columns — it deserves two
+ * words. Only the counts that are not zero get named.
+ */
+function runSummary(log) {
+  const parts = [
+    [Number(log.total_new || 0), "new"],
+    [Number(log.total_updated || 0), "updated"],
+    [Number(log.total_archived || 0), "archived"],
+  ].filter(([n]) => n > 0);
+  if (parts.length) return parts.map(([n, word]) => `${n.toLocaleString()} ${word}`).join(", ");
+  const fetched = Number(log.total_fetched || 0);
+  return fetched ? `${fetched.toLocaleString()} fetched, no changes` : "No changes";
+}
+
+/** "Sep 18, 10:25 am" — a timestamp a phone row has room for. */
+function shortStamp(value) {
+  const d = new Date(value);
+  if (isNaN(d.getTime())) return "—";
+  return (
+    d.toLocaleDateString(undefined, { day: "numeric", month: "short" }) +
+    ", " +
+    d.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" })
   );
 }
 

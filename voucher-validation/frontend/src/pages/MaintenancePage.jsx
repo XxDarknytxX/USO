@@ -15,7 +15,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import toast from "react-hot-toast";
 import {
-  AlertTriangle, CalendarClock, CircleDashed, ClipboardCheck, FileText, ListChecks, Lock, MapPin, RefreshCw, Trash2, Wrench,
+  AlertTriangle, CalendarClock, ChevronRight, CircleDashed, ClipboardCheck, FileText, ListChecks, Lock, MapPin, RefreshCw, Trash2, Wrench,
 } from "lucide-react";
 import { maintenanceApi } from "../services/api";
 import { useAuth } from "../hooks/useAuth";
@@ -25,6 +25,7 @@ import {
   DataTable, Th, Td, TableMessage, RecordCell, StatusPill,
   Button, EmptyState, Select,
 } from "../components/ui";
+import { usePhone, PhoneMore, PHONE_ROWS } from "../components/ui/phone";
 import VisitEditor from "../components/maintenance/VisitEditor";
 
 const fmtDate = (d) =>
@@ -33,35 +34,106 @@ const fmtDate = (d) =>
 const cx = (...p) => p.filter(Boolean).join(" ");
 
 /*
- * Phone cards. Below 640px DataTable turns each row into a card of labelled
- * lines; these tune that card and do nothing on a wider screen. The `!` is
- * needed because the stacking CSS is unlayered and would otherwise win.
- *  • PHONE_HIDE — a line that only says "—", or repeats the card's title.
- *  • PHONE_ACTIONS — the row's buttons: no "ACTION" label, full width, for a thumb.
- *  • PHONE_BLOCK — prose (notes): label above, text left-aligned below it,
- *    rather than a ragged right-aligned paragraph.
+ * Phone cards.
+ *
+ * Below 640px DataTable turns each row into a card of "LABEL  value" lines.
+ * That is right for a list of figures and wrong for these three: a schedule row
+ * read on a phone is one question ("is this village due, and what state was it
+ * in") and the labelled form spent seven lines and a full-width button not
+ * answering it. So a phone builds the card by hand instead — a tappable title
+ * line, the state as chips, and the provenance as one muted line — and the
+ * other cells are simply not rendered.
+ *
+ * `usePhone()` rather than CSS: the rows differ in structure, not in styling,
+ * and branching in the markup leaves the desktop table byte-identical.
  */
-const PHONE_HIDE = "max-sm:hidden!";
-const PHONE_ACTIONS = "max-sm:before:hidden! max-sm:pt-1";
-const PHONE_ACTIONS_ROW = "max-sm:w-full! max-sm:ml-0!";
-const PHONE_BLOCK = "max-sm:flex-col max-sm:gap-1! max-sm:text-left!";
 
-/**
- * The card title on a phone: the village, with the date under it and an
- * optional status at the right. Hidden from sm up, where the table's own
- * columns say the same thing.
- */
-function PhoneTitle({ title, sub, aside }) {
+/** The card's first line: what the row is about, and where tapping it goes. */
+function CardTitle({ title, sub, mono = false, aside, onClick }) {
   return (
-    <span className="flex flex-1 items-start justify-between gap-3 sm:hidden">
-      <span className="flex min-w-0 flex-col">
-        <span className="text-[14px] font-semibold text-[var(--fg-primary)]">{title}</span>
-        {sub && <span className="text-[12px] text-[var(--fg-muted)]">{sub}</span>}
+    <button
+      type="button"
+      onClick={onClick}
+      className="flex min-h-9 w-full items-center gap-2.5 rounded-lg text-left focus-ring"
+    >
+      <span className="min-w-0 flex-1">
+        <span className="block text-[14px] font-semibold leading-snug text-[var(--fg-primary)]">{title}</span>
+        {sub && (
+          <span
+            className={cx(
+              "block text-[11.5px] leading-snug text-[var(--fg-muted)] [overflow-wrap:anywhere]",
+              mono && "font-mono text-[11px]"
+            )}
+          >
+            {sub}
+          </span>
+        )}
       </span>
-      {aside && <span className="shrink-0">{aside}</span>}
-    </span>
+      {aside}
+      <ChevronRight size={16} aria-hidden="true" className="shrink-0 text-[var(--fg-subtle)]" />
+    </button>
   );
 }
+
+/** The chips line under a card title: state, never labels. */
+function CardChips({ children }) {
+  return <span className="flex flex-wrap items-center gap-1.5">{children}</span>;
+}
+
+/** One muted line of provenance — who, when, how many. */
+function CardMeta({ children }) {
+  return <span className="text-[11.5px] leading-snug text-[var(--fg-muted)]">{children}</span>;
+}
+
+/** The phone card's shell: the whole row, since no other cell is rendered. */
+function PhoneCard({ children }) {
+  return <span className="flex w-full flex-col gap-2">{children}</span>;
+}
+
+/**
+ * The four compliance figures on a phone.
+ *
+ * As StatCards they are four 140px tiles — the better part of the first screen
+ * spent before the village list starts, on a page whose first question is
+ * "which village". The same four figures in one card, at a quarter of the
+ * height: the label, the figure, and the one clause that qualifies it.
+ */
+function PhoneKpis({ items }) {
+  return (
+    <div className="grid grid-cols-2 gap-px overflow-hidden rounded-xl border border-[var(--border-default)] bg-[var(--border-subtle)] shadow-[var(--shadow-card)]">
+      {items.map((it) => (
+        <div key={it.label} className="flex flex-col bg-[var(--bg-elevated)] px-3.5 py-2.5">
+          <span className="text-label truncate">{it.label}</span>
+          <span className="mt-1.5 flex items-baseline gap-1.5">
+            <span
+              className={cx(
+                "text-[19px] font-semibold leading-none tabular-nums",
+                it.tone || "text-[var(--fg-primary)]"
+              )}
+            >
+              {it.value}
+            </span>
+            <span className="min-w-0 flex-1 truncate text-[11px] leading-none text-[var(--fg-muted)]">{it.sub}</span>
+          </span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/**
+ * A component filed before the current checklist keeps its old key
+ * ("access_points", "solar"), for which the server has no label and hands back
+ * the key itself. Print something a person can read rather than a column value.
+ */
+const humanComponent = (label, key) => {
+  const t = String(label ?? key ?? "").trim();
+  if (!t) return "Component";
+  // Only a bare key is rewritten; a real label ("Power (solar / battery / PSU)")
+  // has spaces and capitals and is left exactly as the server said it.
+  if (!/^[a-z0-9]+(?:_[a-z0-9]+)*$/.test(t)) return t;
+  return t.replace(/_/g, " ").replace(/^./, (ch) => ch.toUpperCase());
+};
 
 const CONDITION_TONE = { ok: "success", attention: "warning", faulty: "danger", na: "neutral" };
 const CONDITION_LABEL = { ok: "OK", attention: "Needs attention", faulty: "Faulty", na: "N/A" };
@@ -131,6 +203,14 @@ export default function MaintenancePage() {
   // the estate the operator is looking at, so it must not appear in the
   // compliance counts either — a test site would otherwise read as overdue.
   const { isInScope } = useSite();
+  // Phone rows are a different card, not a narrower table; see the helpers above.
+  const phone = usePhone();
+  // Long lists are capped on a phone and offer the rest, the same as every
+  // other list in the console. The schedule is not capped: "which villages are
+  // overdue" is the page, and hiding four of them behind a button answers it
+  // with a button.
+  const [showAllReports, setShowAllReports] = useState(false);
+  const [showAllSubs, setShowAllSubs] = useState(false);
   const [schedule, setSchedule] = useState(null);
   const [visits, setVisits] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -210,7 +290,7 @@ export default function MaintenancePage() {
   }, [sites, filterProject, loading]);
 
   const villageFilter = (
-    <Select value={filterProject} onChange={(e) => setFilterProject(e.target.value)} className="min-w-[180px]">
+    <Select value={filterProject} onChange={(e) => setFilterProject(e.target.value)} className="min-w-[180px] max-sm:min-w-0">
       <option value="">All villages</option>
       {sites.map((s) => (
         <option key={s.projectId} value={s.projectId}>{s.name}</option>
@@ -224,11 +304,17 @@ export default function MaintenancePage() {
         eyebrow="Field service"
         title="Maintenance"
         subtitle={
-          `${isAdmin ? "Every village" : "Each village assigned to you"} is inspected every ` +
-          `${schedule?.intervalMonths ?? 6} months. ` +
-          (isViewer
-            ? "Open one to see what was found, component by component."
-            : "Open one to record what you found, component by component.")
+          // The phone gets the same sentence with the clauses a small screen
+          // cannot afford: "component by component" costs a whole line above
+          // the figures, and the component list says it two taps later.
+          phone
+            ? `Inspected every ${schedule?.intervalMonths ?? 6} months. ` +
+              (isViewer ? "Open a village to see what was found." : "Open a village to record what you found.")
+            : `${isAdmin ? "Every village" : "Each village assigned to you"} is inspected every ` +
+              `${schedule?.intervalMonths ?? 6} months. ` +
+              (isViewer
+                ? "Open one to see what was found, component by component."
+                : "Open one to record what you found, component by component.")
         }
         icon={<Wrench size={22} />}
         tone="orange"
@@ -239,7 +325,36 @@ export default function MaintenancePage() {
         }
       />
 
-      {/* Compliance first — the question this page exists to answer. */}
+      {/* Compliance first — the question this page exists to answer. On a phone
+          it is the same four figures in a quarter of the height; see PhoneKpis. */}
+      {phone ? (
+        <PhoneKpis
+          items={[
+            {
+              label: "Villages in scope",
+              value: sites.length,
+              sub: `${schedule?.intervalMonths ?? 6}-month cycle`,
+            },
+            {
+              label: "Overdue",
+              value: overdue.length,
+              sub: overdue.length ? "past window" : "all in window",
+              tone: overdue.length ? "text-[var(--danger-fg)]" : null,
+            },
+            {
+              label: "Never serviced",
+              value: neverServiced.length,
+              sub: neverServiced.length ? "no record" : "all on record",
+              tone: neverServiced.length ? "text-[var(--warning-fg)]" : null,
+            },
+            {
+              label: "Reports filed",
+              value: filedCount,
+              sub: draftCount ? `${draftCount} draft${draftCount === 1 ? "" : "s"} open` : "no open drafts",
+            },
+          ]}
+        />
+      ) : (
       <KpiGrid>
         <StatCard
           label="Villages in scope"
@@ -278,6 +393,7 @@ export default function MaintenancePage() {
           color="indigo"
         />
       </KpiGrid>
+      )}
 
       {/* One strip carries the view switch and that view's filters, so the
           filters never float loose above a table. */}
@@ -291,14 +407,19 @@ export default function MaintenancePage() {
             { value: "submissions", label: "Submissions", count: scopedSubmissions.length },
           ]}
         />
+        {/* One row on a phone too: two stacked full-width selects put ~90px of
+            chrome between the view switch and the first record. `[&>*]` is the
+            Select's own relative wrapper — that is the flex item, and it needs
+            both a zero basis and a zero minimum, or the widest option ("Power
+            (solar / battery / PSU)") sets its width. */}
         {tab !== "schedule" && (
-          <div className="ml-auto flex flex-wrap items-center gap-2.5 max-sm:flex-col max-sm:items-stretch">
+          <div className="ml-auto flex flex-wrap items-center gap-2.5 max-sm:flex-nowrap max-sm:gap-2 max-sm:[&>*]:min-w-0 max-sm:[&>*]:flex-1">
             {villageFilter}
             {tab === "submissions" && (
               <Select
                 value={filterComponent}
                 onChange={(e) => setFilterComponent(e.target.value)}
-                className="min-w-[190px]"
+                className="min-w-[190px] max-sm:min-w-0"
               >
                 <option value="">All components</option>
                 {COMPONENT_FILTERS.map((c) => (
@@ -351,7 +472,42 @@ export default function MaintenancePage() {
                 {loading ? (
                   <TableMessage colSpan={7}>Loading…</TableMessage>
                 ) : (
-                  sites.map((s) => (
+                  sites.map((s) => {
+                    const open = () => navigate(`/maintenance/village/${s.projectId}`);
+                    const openDocs = () => navigate(`/maintenance/village/${s.projectId}?tab=documents`);
+                    // A phone card: the village, its due state and condition as
+                    // chips, and the last visit as one line. No Service button —
+                    // the card already opens the village, which is where the
+                    // servicing happens.
+                    if (phone) {
+                      const late = s.overdue || s.neverServiced;
+                      return (
+                        <tr key={s.projectId}>
+                          <Td>
+                            <PhoneCard>
+                              <CardTitle title={s.name} sub={s.hostname} mono onClick={open} />
+                              <CardChips>
+                                <StatusPill tone={late ? "danger" : "neutral"} dot={false}>
+                                  {s.overdue || s.neverServiced
+                                    ? <AlertTriangle size={11} />
+                                    : <CalendarClock size={11} className="text-[var(--fg-subtle)]" />}
+                                  {dueLabel(s)}
+                                </StatusPill>
+                                {s.lastCondition && <ConditionPill value={s.lastCondition} />}
+                                {s.docCount > 0 && <DocsCell site={s} onOpen={openDocs} />}
+                              </CardChips>
+                              {s.lastVisitDate && (
+                                <CardMeta>
+                                  Last serviced {fmtDate(s.lastVisitDate)}
+                                  {s.lastEngineer ? ` · ${s.lastEngineer}` : ""}
+                                </CardMeta>
+                              )}
+                            </PhoneCard>
+                          </Td>
+                        </tr>
+                      );
+                    }
+                    return (
                     <tr key={s.projectId}>
                       <Td>
                         <RecordCell
@@ -360,22 +516,14 @@ export default function MaintenancePage() {
                           title={s.name}
                           subtitle={s.hostname}
                           mono
-                          onClick={() => navigate(`/maintenance/village/${s.projectId}`)}
+                          onClick={open}
                         />
                       </Td>
-                      {/* On a phone card, what is due leads and the last visit
-                          follows; a village never serviced has no last visit
-                          to show, so those lines go rather than read "—". */}
-                      <Td nowrap className={cx("max-sm:order-2", !s.lastVisitDate && PHONE_HIDE)}>
-                        {fmtDate(s.lastVisitDate)}
-                      </Td>
-                      <Td className={cx("max-sm:order-2", !s.lastEngineer && PHONE_HIDE)}>{s.lastEngineer || "—"}</Td>
-                      <Td className={cx("max-sm:order-1", !s.lastCondition && PHONE_HIDE)}><ConditionPill value={s.lastCondition} /></Td>
-                      <Td className="max-sm:order-1">
-                        <DocsCell
-                          site={s}
-                          onOpen={() => navigate(`/maintenance/village/${s.projectId}?tab=documents`)}
-                        />
+                      <Td nowrap>{fmtDate(s.lastVisitDate)}</Td>
+                      <Td>{s.lastEngineer || "—"}</Td>
+                      <Td><ConditionPill value={s.lastCondition} /></Td>
+                      <Td>
+                        <DocsCell site={s} onOpen={openDocs} />
                       </Td>
                       <Td nowrap>
                         <span
@@ -389,21 +537,21 @@ export default function MaintenancePage() {
                           {dueLabel(s)}
                         </span>
                       </Td>
-                      <Td align="right" className={cx("max-sm:order-3", PHONE_ACTIONS)}>
-                        <div className={cx("flex items-center justify-end gap-2", PHONE_ACTIONS_ROW)}>
+                      <Td align="right">
+                        <div className="flex items-center justify-end gap-2">
                           <Button
                             variant="secondary"
                             size="sm"
-                            className="max-sm:flex-1"
                             iconLeft={<Wrench size={13} />}
-                            onClick={() => navigate(`/maintenance/village/${s.projectId}`)}
+                            onClick={open}
                           >
                             Service
                           </Button>
                         </div>
                       </Td>
                     </tr>
-                  ))
+                    );
+                  })
                 )}
               </tbody>
             </DataTable>
@@ -426,6 +574,7 @@ export default function MaintenancePage() {
               description="Start one from the schedule."
             />
           ) : (
+            <>
             <DataTable>
               <thead>
                 <tr>
@@ -442,40 +591,69 @@ export default function MaintenancePage() {
                 {loading ? (
                   <TableMessage colSpan={7}>Loading…</TableMessage>
                 ) : (
-                  scopedVisits.map((v) => {
-                    const statusPill =
-                      v.status === "submitted" ? (
-                        <StatusPill tone="success" dot={false}>
-                          <Lock size={10} /> Filed
-                        </StatusPill>
-                      ) : (
-                        <StatusPill tone="warning">Draft</StatusPill>
+                  scopedVisits.map((v, i) => {
+                    const filed = v.status === "submitted";
+                    const statusPill = filed ? (
+                      <StatusPill tone="success" dot={false}>
+                        <Lock size={10} /> Filed
+                      </StatusPill>
+                    ) : (
+                      <StatusPill tone="warning">Draft</StatusPill>
+                    );
+                    // A phone card is titled by the village, not the date, and
+                    // opens the report by being tapped. Only a draft keeps a
+                    // button: deleting one is the single thing the card cannot
+                    // say with a tap.
+                    if (phone) {
+                      if (!showAllReports && i >= PHONE_ROWS) return null;
+                      return (
+                        <tr key={v.id}>
+                          <Td>
+                            <PhoneCard>
+                              <CardTitle
+                                title={v.projectName || "Village"}
+                                sub={`${fmtDate(v.visitDate)}${v.engineerName ? ` · ${v.engineerName}` : ""}`}
+                                aside={statusPill}
+                                onClick={() => setOpenVisit(v.id)}
+                              />
+                              <CardChips>
+                                {v.overallCondition && <ConditionPill value={v.overallCondition} />}
+                                <CardMeta>
+                                  {v.photoCount ?? 0} photo{(v.photoCount ?? 0) === 1 ? "" : "s"}
+                                </CardMeta>
+                                {!filed && (
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    className="ml-auto"
+                                    loading={deleting === v.id}
+                                    onClick={() => deleteDraft(v)}
+                                    aria-label={`Delete the draft for ${v.projectName || "this village"}`}
+                                    iconLeft={deleting !== v.id && <Trash2 size={13} />}
+                                  />
+                                )}
+                              </CardChips>
+                            </PhoneCard>
+                          </Td>
+                        </tr>
                       );
+                    }
                     return (
                     <tr key={v.id}>
-                      {/* A phone card is titled by the village, not the date. */}
-                      <Td nowrap>
-                        <PhoneTitle title={v.projectName || "—"} sub={fmtDate(v.visitDate)} aside={statusPill} />
-                        <span className="max-sm:hidden">{fmtDate(v.visitDate)}</span>
-                      </Td>
-                      <Td strong className={PHONE_HIDE}>{v.projectName || "—"}</Td>
+                      <Td nowrap>{fmtDate(v.visitDate)}</Td>
+                      <Td strong>{v.projectName || "—"}</Td>
                       <Td>{v.engineerName || "—"}</Td>
-                      <Td className={cx(!v.overallCondition && PHONE_HIDE)}><ConditionPill value={v.overallCondition} /></Td>
+                      <Td><ConditionPill value={v.overallCondition} /></Td>
                       <Td align="right" className="tabular-nums">{v.photoCount ?? 0}</Td>
-                      <Td className={PHONE_HIDE}>{statusPill}</Td>
-                      <Td align="right" className={PHONE_ACTIONS}>
-                        <div className={cx("flex items-center justify-end gap-1", PHONE_ACTIONS_ROW, "max-sm:gap-2")}>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            className="max-sm:flex-1"
-                            onClick={() => setOpenVisit(v.id)}
-                          >
-                            {v.status === "submitted" ? "View" : "Continue"}
+                      <Td>{statusPill}</Td>
+                      <Td align="right">
+                        <div className="flex items-center justify-end gap-1">
+                          <Button variant="ghost" size="sm" onClick={() => setOpenVisit(v.id)}>
+                            {filed ? "View" : "Continue"}
                           </Button>
                           {/* Drafts only — a filed report is evidence, and an
                               admin reopens it rather than deleting it. */}
-                          {v.status !== "submitted" && (
+                          {!filed && (
                             <Button
                               variant="ghost"
                               size="sm"
@@ -494,6 +672,13 @@ export default function MaintenancePage() {
                 )}
               </tbody>
             </DataTable>
+            <PhoneMore
+              total={scopedVisits.length}
+              expanded={showAllReports}
+              onToggle={() => setShowAllReports((v) => !v)}
+              noun="reports"
+            />
+            </>
           )}
         </Panel>
       )}
@@ -513,6 +698,7 @@ export default function MaintenancePage() {
               description="Components appear here as engineers file them, one at a time."
             />
           ) : (
+            <>
             <DataTable>
               <thead>
                 <tr>
@@ -530,41 +716,71 @@ export default function MaintenancePage() {
                 {loading ? (
                   <TableMessage colSpan={8}>Loading…</TableMessage>
                 ) : (
-                  scopedSubmissions.map((x, i) => (
+                  scopedSubmissions.map((x, i) => {
+                    // A phone card leads with the component — the village is
+                    // the sub-line, because this list is read component-first
+                    // ("what has been filed for the solar") — and the note gets
+                    // two lines before the next card starts.
+                    if (phone) {
+                      if (!showAllSubs && i >= PHONE_ROWS) return null;
+                      return (
+                        <tr key={`${x.visitId}-${x.component}-${i}`}>
+                          <Td>
+                            <PhoneCard>
+                              <CardTitle
+                                title={humanComponent(x.componentLabel, x.component)}
+                                sub={x.projectName || "—"}
+                                aside={x.condition ? <ConditionPill value={x.condition} /> : null}
+                                onClick={() => setOpenVisit(x.visitId)}
+                              />
+                              <CardMeta>
+                                {[
+                                  x.submittedAt ? `Filed ${fmtDate(x.submittedAt)}` : null,
+                                  x.engineerName || null,
+                                  `${x.photoCount} photo${x.photoCount === 1 ? "" : "s"}`,
+                                ]
+                                  .filter(Boolean)
+                                  .join(" · ")}
+                              </CardMeta>
+                              {x.notes && (
+                                <span className="line-clamp-2 text-[12px] leading-relaxed text-[var(--fg-secondary)]">
+                                  {x.notes}
+                                </span>
+                              )}
+                            </PhoneCard>
+                          </Td>
+                        </tr>
+                      );
+                    }
+                    return (
                     <tr key={`${x.visitId}-${x.component}-${i}`}>
-                      <Td nowrap>
-                        <PhoneTitle
-                          title={x.projectName || "—"}
-                          sub={x.submittedAt ? `Filed ${fmtDate(x.submittedAt)}` : null}
-                          aside={x.condition ? <ConditionPill value={x.condition} /> : null}
-                        />
-                        <span className="max-sm:hidden">{fmtDate(x.submittedAt)}</span>
-                      </Td>
-                      <Td strong className={PHONE_HIDE}>{x.projectName || "—"}</Td>
+                      <Td nowrap>{fmtDate(x.submittedAt)}</Td>
+                      <Td strong>{x.projectName || "—"}</Td>
                       <Td>{x.componentLabel}</Td>
-                      <Td className={PHONE_HIDE}><ConditionPill value={x.condition} /></Td>
+                      <Td><ConditionPill value={x.condition} /></Td>
                       <Td align="right" className="tabular-nums">{x.photoCount}</Td>
                       <Td>{x.engineerName || "—"}</Td>
-                      {/* Truncated to one line in the table; a phone card has
-                          the room to show the note whole. */}
-                      <Td className={cx("sm:max-w-[280px] sm:truncate", PHONE_BLOCK, !x.notes && PHONE_HIDE)}>
-                        <span title={x.notes || ""} className="max-sm:ml-0!">{x.notes || "—"}</span>
+                      <Td className="sm:max-w-[280px] sm:truncate">
+                        <span title={x.notes || ""}>{x.notes || "—"}</span>
                       </Td>
-                      <Td align="right" className={PHONE_ACTIONS}>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          className={cx("max-sm:flex-1", PHONE_ACTIONS_ROW)}
-                          onClick={() => setOpenVisit(x.visitId)}
-                        >
+                      <Td align="right">
+                        <Button variant="ghost" size="sm" onClick={() => setOpenVisit(x.visitId)}>
                           Open
                         </Button>
                       </Td>
                     </tr>
-                  ))
+                    );
+                  })
                 )}
               </tbody>
             </DataTable>
+            <PhoneMore
+              total={scopedSubmissions.length}
+              expanded={showAllSubs}
+              onToggle={() => setShowAllSubs((v) => !v)}
+              noun="submissions"
+            />
+            </>
           )}
         </Panel>
       )}

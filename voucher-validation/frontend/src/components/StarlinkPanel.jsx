@@ -27,6 +27,7 @@ import {
 import { Satellite, RefreshCw, Info } from "lucide-react";
 
 import { networkApi } from "../services/api";
+import { usePhone } from "./ui/phone";
 import {
   Panel,
   Badge,
@@ -51,10 +52,12 @@ const CYCLES = [
   { value: "C", label: "2 cycles ago" },
 ];
 
+// `short` is the phone's tooltip label: "Priority (included) 9.31 GB" needs
+// 230px of the 343 a 375px screen has, and the tooltip is drawn at the finger.
 const SERIES = [
-  { key: "base", name: "Priority (included)", color: CHART_COLORS.blue },
-  { key: "topup", name: "Priority (top-up)", color: CHART_COLORS.amber },
-  { key: "standard", name: "Standard", color: CHART_COLORS.slate },
+  { key: "base", name: "Priority (included)", short: "Included", color: CHART_COLORS.blue },
+  { key: "topup", name: "Priority (top-up)", short: "Top-up", color: CHART_COLORS.amber },
+  { key: "standard", name: "Standard", short: "Standard", color: CHART_COLORS.slate },
 ];
 
 const gb = (v) => `${Number(v || 0).toFixed(2)} GB`;
@@ -103,6 +106,9 @@ export default function StarlinkPanel({ projectId, compact = false }) {
   const [cycle, setCycle] = useState("A");
   const [loading, setLoading] = useState(true);
   const ct = useChartTheme();
+  // The bar geometry is a prop, not a style, so the phone layout has to be
+  // decided in JS rather than with a max-sm class.
+  const phone = usePhone();
 
   const load = useCallback(async (c) => {
     setLoading(true);
@@ -129,6 +135,18 @@ export default function StarlinkPanel({ projectId, compact = false }) {
   const t = data?.totals;
   const cycleCount = Math.max(1, data?.cycleCount || 1);
 
+  // Three cycles beside the title leave each option about 60px on a phone.
+  // Under the header instead, the row is the switcher and they share it.
+  const cycleSwitcher = (
+    <Segmented
+      size="sm"
+      value={cycle}
+      onChange={setCycle}
+      className={phone ? "w-full [&>button]:flex-1 [&>button]:justify-center" : undefined}
+      options={CYCLES.slice(0, cycleCount)}
+    />
+  );
+
   // The source sets chart.js `borderRadius: 4` on EVERY dataset, which rounds
   // all four corners of each stacked segment — the pill look. Recharts needs the
   // radius on the Bar itself to do the same, and the shared BAR_RADIUS is square
@@ -146,23 +164,37 @@ export default function StarlinkPanel({ projectId, compact = false }) {
       subtitle={kit.nickname || kit.serviceLineNumber || "Data usage"}
       icon={<Satellite size={15} />}
       tone="teal"
-      actions={
-        <Segmented
-          size="sm"
-          value={cycle}
-          onChange={setCycle}
-          options={CYCLES.slice(0, cycleCount)}
-        />
-      }
+      actions={phone ? null : cycleSwitcher}
     >
+      {phone && <div className="mb-3.5">{cycleSwitcher}</div>}
+
       {/* Headline: total consumed this cycle, with the kit's identifiers beside
           it — they are reference detail, not figures, so they stay small. */}
       <ChartStat
         value={t ? gb1(t.totalUsed) : "—"}
         unit="GB used"
-        caption={dateRange(data?.cycle) || "This billing cycle"}
+        caption={
+          <>
+            {dateRange(data?.cycle) || "This billing cycle"}
+            {/* The three kit facts below are a block on a phone — taller than
+                the figure they annotate. The one an operator quotes down the
+                phone is the service line, so that and the kit's state stay as a
+                single line; the device id is reference detail, on the desktop
+                panel and in Settings. */}
+            {!compact && (kit.serviceLineNumber || kit.active != null) && (
+              <span className="sm:hidden mt-1 flex items-center gap-2 min-w-0">
+                {kit.serviceLineNumber && (
+                  <span className="font-mono text-[11.5px] truncate">{kit.serviceLineNumber}</span>
+                )}
+                {kit.active != null && (
+                  <Badge tone={kit.active ? "success" : "neutral"}>{kit.active ? "Active" : "Inactive"}</Badge>
+                )}
+              </span>
+            )}
+          </>
+        }
         right={compact ? null : (
-          <div className="grid grid-cols-2 sm:flex sm:items-end gap-4 sm:gap-7">
+          <div className="max-sm:hidden grid grid-cols-2 sm:flex sm:items-end gap-4 sm:gap-7">
             <KitFact label="Service line">
               <span className="font-mono text-[11.5px]">{kit.serviceLineNumber || "—"}</span>
             </KitFact>
@@ -191,22 +223,39 @@ export default function StarlinkPanel({ projectId, compact = false }) {
         />
       ) : (
         <>
-          <div className={compact ? "flex-1 min-h-[200px]" : ""}>
-          <ResponsiveContainer width="100%" height={compact ? "100%" : 300}>
-            <BarChart data={days} margin={{ top: 8, right: 4, left: -8, bottom: 0 }} barCategoryGap={BAR_CATEGORY_GAP}>
+          <div className={compact ? "flex-1 min-h-[200px] max-sm:min-h-0" : ""}>
+          <ResponsiveContainer width="100%" height={phone ? 200 : compact ? "100%" : 300}>
+            <BarChart
+              data={days}
+              margin={phone ? { top: 8, right: 2, left: -2, bottom: 0 } : { top: 8, right: 4, left: -8, bottom: 0 }}
+              // A month of days across 340px leaves 12px a day. At the shared
+              // gap and cap that draws a 4px pin-stripe per day — a chart you
+              // cannot read. The phone spends the whole slot on the bar.
+              barCategoryGap={phone ? "8%" : BAR_CATEGORY_GAP}
+            >
               <CartesianGrid {...gridProps(ct)} />
-              <XAxis dataKey="d" {...axisX(ct)} />
-              <YAxis {...axisY(ct, { unit: "GB" })} />
-              <Tooltip content={<ChartTooltip valueFormatter={gb} />} cursor={{ fill: ct.cursor }} />
+              <XAxis dataKey="d" {...axisX(ct)} minTickGap={phone ? 26 : 14} />
+              {/* The unit is already in the headline ("GB used"); on a phone the
+                  rotated axis label costs plot width the bars need more. */}
+              <YAxis {...axisY(ct, phone ? { width: 30 } : { unit: "GB" })} />
+              {/* Three series and a date make a tooltip wider than the plot it
+                  is drawn in on a phone, and recharts cannot keep inside a box
+                  narrower than its content. Capped, with the short names, it
+                  fits the chart whichever day the finger is on. */}
+              <Tooltip
+                content={<ChartTooltip valueFormatter={gb} />}
+                cursor={{ fill: ct.cursor }}
+                wrapperStyle={phone ? { maxWidth: 190 } : undefined}
+              />
               {SERIES.map((s) => (
                 <Bar
                   key={s.key}
                   dataKey={s.key}
-                  name={s.name}
+                  name={phone ? s.short : s.name}
                   stackId="a"
                   fill={s.color}
-                  radius={STACK_RADIUS}
-                  maxBarSize={BAR_MAX_SIZE}
+                  radius={phone ? [2, 2, 2, 2] : STACK_RADIUS}
+                  maxBarSize={phone ? 18 : BAR_MAX_SIZE}
                   isAnimationActive={false}
                 />
               ))}

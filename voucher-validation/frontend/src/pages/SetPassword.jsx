@@ -169,8 +169,11 @@ export default function SetPassword() {
         </p>
       </aside>
 
-      {/* Near the top on a phone, so the button stays above the keyboard. */}
-      <main className="relative flex flex-col justify-center px-6 py-12 max-sm:justify-start max-sm:px-5 max-sm:pt-10 max-sm:pb-8 sm:px-10 lg:px-14 xl:px-20">
+      {/* justify-start, not justify-center: the block below centres itself with
+          auto margins, which give way when the content is taller than the
+          screen (the keyboard is open) instead of clipping its top. The
+          uneven phone padding is the optical bias — a little above centre. */}
+      <main className="relative flex flex-col justify-center px-6 py-12 max-sm:justify-start max-sm:px-5 max-sm:pt-8 max-sm:pb-12 sm:px-10 lg:px-14 xl:px-20">
         <div
           aria-hidden
           className="pointer-events-none absolute inset-0"
@@ -183,7 +186,12 @@ export default function SetPassword() {
           }}
         />
 
-        <div className="relative mx-auto w-full max-w-[404px]">
+        {/* On a phone the whole block — lockup, heading, form, footer — is
+            centred as ONE thing. Stretching it to fill the screen and pinning
+            the footer to the bottom edge only moved the empty space: it opened
+            a blank third of a screen between the Set password button and the
+            footer. */}
+        <div className="relative mx-auto w-full max-w-[404px] max-sm:my-auto">
           <div className="mb-10 flex items-center gap-3 lg:hidden max-sm:mb-8">
             <span className="flex h-11 w-11 items-center justify-center rounded-[14px] bg-[var(--brand-soft)]">
               <VodafoneLogo size={26} />
@@ -369,7 +377,7 @@ export default function SetPassword() {
                 </Button>
               </form>
 
-              <div className="mt-8 flex items-center justify-center gap-2 border-t border-[var(--border-subtle)] pt-6 text-[11.5px] text-[var(--fg-muted)]">
+              <div className="mt-8 flex items-center justify-center gap-2 border-t border-[var(--border-subtle)] pt-6 text-[11.5px] text-[var(--fg-muted)] max-sm:mt-7 max-sm:pt-5">
                 <ShieldCheck size={13} />
                 <span>This link works once and then stops working</span>
               </div>

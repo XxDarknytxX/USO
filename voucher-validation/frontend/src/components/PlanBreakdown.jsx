@@ -13,7 +13,7 @@
 import { useState } from "react";
 import { AlertTriangle, PackageOpen } from "lucide-react";
 import { DataTable, Th, Td, StatusPill, EmptyState, CHART_SERIES } from "./ui";
-import { PHONE_CARD, PhoneChevron, PhoneMore, phoneRowClass } from "./MonthlyBreakdown";
+import { PHONE_ROWS, PhoneBarRow, PhoneFacts, PhoneList, PhoneMore, usePhone } from "./ui/phone";
 
 const fmtNum = (n) => Number(n || 0).toLocaleString();
 
@@ -43,6 +43,7 @@ export default function PlanBreakdown({
 }) {
   // Phones list the first few plans and offer the rest; see PhoneMore.
   const [showAll, setShowAll] = useState(false);
+  const phone = usePhone();
   const rows = packages
     .map((p) => {
       const total = Number(p.total || 0);
@@ -63,7 +64,9 @@ export default function PlanBreakdown({
     .sort((a, b) => b.total - a.total);
 
   if (rows.length === 0) {
-    return <EmptyState className="max-sm:py-8" icon={PackageOpen} title="No voucher packages yet" description="Plans appear once vouchers are synced." />;
+    // The illustration is 72px of a 375px screen and says nothing the sentence
+    // does not; on a phone the sentence is the whole message.
+    return <EmptyState className="max-sm:py-8" icon={phone ? null : PackageOpen} title="No voucher packages yet" description="Plans appear once vouchers are synced." />;
   }
 
   const t = rows.reduce(
@@ -94,10 +97,81 @@ export default function PlanBreakdown({
         </div>
       )}
 
+      {/* A phone reads a plan as one row: the name, whether there is stock to
+          sell, a bar for how much of the pool has gone, and the counts as small
+          print. The eight columns as eight labelled lines were a 155px card a
+          plan, and there can be ninety of them. */}
+      <PhoneList>
+        {rows.slice(0, showAll ? undefined : PHONE_ROWS).map((r, i) => (
+          <PhoneBarRow
+            key={r.name}
+            label={
+              // Inline content, not a flex row: PhoneBarRow's label cell clamps
+              // to two lines, and an inline-flex child is one unbreakable box
+              // that the clamp cannot wrap — the name was cut mid-word with no
+              // ellipsis, and a phone has no hover to recover the rest. The
+              // hanging indent (swatch 10px + gap 8px) starts a wrapped second
+              // line under the name rather than under the swatch.
+              <span className="block pl-[18px] -indent-[18px]">
+                <span
+                  className="inline-block w-2.5 h-2.5 rounded-[3px] mr-2 align-middle indent-0"
+                  style={{ background: color || CHART_SERIES[i % CHART_SERIES.length] }}
+                />
+                {r.name}
+              </span>
+            }
+            value={<StockPill stock={r.stock} />}
+            amount={r.sold}
+            total={r.total}
+            color={color || CHART_SERIES[i % CHART_SERIES.length]}
+            onClick={onSelect ? () => onSelect(r.name) : undefined}
+            title={onSelect ? `View ${r.name} vouchers` : undefined}
+            sub={
+              <PhoneFacts
+                items={[
+                  { v: `${fmtNum(r.sold)}/${fmtNum(r.total)}`, l: "sold" },
+                  { v: fmtNum(r.active), l: "active" },
+                  r.expired ? { v: fmtNum(r.expired), l: "expired" } : null,
+                  { v: fmtNum(r.left), l: "left" },
+                  r.usedMb ? { v: formatQuota(r.usedMb), l: "used" } : null,
+                ]}
+              />
+            }
+          />
+        ))}
+        {/* Directly under the rows it expands, above the totals that close the
+            list — outside it the control read as if it belonged to the table.
+            Inside a divide-y list the row above already draws the rule, so
+            PhoneMore's own top border is dropped or the line doubles. Only
+            rendered when there is something to expand: an empty wrapper would
+            still be a divided child and draw a stray second rule. */}
+        {rows.length > PHONE_ROWS && (
+          <div className="[&>div]:border-t-0">
+            <PhoneMore total={rows.length} expanded={showAll} onToggle={() => setShowAll((v) => !v)} noun="plans" />
+          </div>
+        )}
+        {/* The panel's corners are rounded but it does not clip, so the tinted
+            totals block rounds its own bottom (the card radius less its 1px
+            border) instead of poking square corners past the card's. */}
+        <div className="px-4 py-3 bg-[var(--bg-surface)] rounded-b-[11px]">
+          <p className="text-[13px] font-semibold text-[var(--fg-primary)]">All plans</p>
+          <PhoneFacts
+            className="mt-1"
+            items={[
+              { v: `${fmtNum(t.sold)}/${fmtNum(t.total)}`, l: "sold" },
+              { v: fmtNum(t.active), l: "active" },
+              { v: fmtNum(t.expired), l: "expired" },
+              { v: fmtNum(t.left), l: "left" },
+              { v: formatQuota(t.usedMb), l: "used" },
+            ]}
+          />
+        </div>
+      </PhoneList>
+
       {/* There are ninety-odd plans across the estate — one per village per
           package — so this list runs far longer than the village one. Same
           contained scroll, same reasoning. */}
-      <DataTable maxHeight={320}>
+      <DataTable maxHeight={320} className="max-sm:hidden!">
         <thead>
           <tr>
             <Th>Plan</Th>
@@ -116,30 +190,25 @@ export default function PlanBreakdown({
               key={r.name}
               onClick={onSelect ? () => onSelect(r.name) : undefined}
               title={onSelect ? `View ${r.name} vouchers` : undefined}
-              className={[onSelect ? "cursor-pointer" : "", phoneRowClass(i, showAll)].join(" ")}
+              className={onSelect ? "cursor-pointer" : ""}
             >
-              <Td strong className={PHONE_CARD.title}>
+              <Td strong>
                 <span className="flex items-center gap-2.5 min-w-0">
                   <span
                     className="w-2.5 h-2.5 rounded-[3px] shrink-0"
                     style={{ background: color || CHART_SERIES[i % CHART_SERIES.length] }}
                   />
                   <span className="truncate">{r.name}</span>
-                  {onSelect && <PhoneChevron />}
                 </span>
               </Td>
-              <Td align="right" className={`tabular-nums ${PHONE_CARD.stat}`}>{fmtNum(r.total)}</Td>
-              <Td align="right" className={`tabular-nums ${PHONE_CARD.stat}`}>
-                {/* One element, not two: a stacked phone card spreads a cell's
-                    children apart, which parted the figure from its share. */}
-                <span>
-                  <span className="font-semibold text-[var(--fg-primary)]">{fmtNum(r.sold)}</span>
-                  <span className="text-[var(--fg-muted)] ml-1">· {r.soldPct}%</span>
-                </span>
+              <Td align="right" className="tabular-nums">{fmtNum(r.total)}</Td>
+              <Td align="right" className="tabular-nums">
+                <span className="font-semibold text-[var(--fg-primary)]">{fmtNum(r.sold)}</span>
+                <span className="text-[var(--fg-muted)] ml-1">· {r.soldPct}%</span>
               </Td>
-              <Td align="right" className={`tabular-nums text-[var(--success-fg)] font-semibold ${PHONE_CARD.stat}`}>{fmtNum(r.active)}</Td>
-              <Td align="right" className={`tabular-nums ${PHONE_CARD.stat}`} muted>{fmtNum(r.expired)}</Td>
-              <Td align="right" className={`tabular-nums ${PHONE_CARD.stat}`}>
+              <Td align="right" className="tabular-nums text-[var(--success-fg)] font-semibold">{fmtNum(r.active)}</Td>
+              <Td align="right" className="tabular-nums" muted>{fmtNum(r.expired)}</Td>
+              <Td align="right" className="tabular-nums">
                 <span
                   className="font-semibold"
                   style={{
@@ -154,27 +223,26 @@ export default function PlanBreakdown({
                   {fmtNum(r.left)}
                 </span>
               </Td>
-              <Td align="right" className={`tabular-nums ${PHONE_CARD.stat}`}>{formatQuota(r.usedMb)}</Td>
-              <Td className={PHONE_CARD.aside}>
+              <Td align="right" className="tabular-nums">{formatQuota(r.usedMb)}</Td>
+              <Td>
                 <StockPill stock={r.stock} />
               </Td>
             </tr>
           ))}
           {/* Totals live in the tbody, not a tfoot: .sf-table only pads
               `tbody td`, so a footer row would sit unpadded and out of grid. */}
-          <tr className={`bg-[var(--bg-surface)] ${PHONE_CARD.row}`}>
-            <Td strong className={PHONE_CARD.titleFull}>All plans</Td>
-            <Td align="right" strong className={`tabular-nums ${PHONE_CARD.stat}`}>{fmtNum(t.total)}</Td>
-            <Td align="right" strong className={`tabular-nums ${PHONE_CARD.stat}`}>{fmtNum(t.sold)}</Td>
-            <Td align="right" strong className={`tabular-nums ${PHONE_CARD.stat}`}>{fmtNum(t.active)}</Td>
-            <Td align="right" strong className={`tabular-nums ${PHONE_CARD.stat}`}>{fmtNum(t.expired)}</Td>
-            <Td align="right" strong className={`tabular-nums ${PHONE_CARD.stat}`}>{fmtNum(t.left)}</Td>
-            <Td align="right" strong className={`tabular-nums ${PHONE_CARD.stat}`}>{formatQuota(t.usedMb)}</Td>
+          <tr className="bg-[var(--bg-surface)]">
+            <Td strong>All plans</Td>
+            <Td align="right" strong className="tabular-nums">{fmtNum(t.total)}</Td>
+            <Td align="right" strong className="tabular-nums">{fmtNum(t.sold)}</Td>
+            <Td align="right" strong className="tabular-nums">{fmtNum(t.active)}</Td>
+            <Td align="right" strong className="tabular-nums">{fmtNum(t.expired)}</Td>
+            <Td align="right" strong className="tabular-nums">{fmtNum(t.left)}</Td>
+            <Td align="right" strong className="tabular-nums">{formatQuota(t.usedMb)}</Td>
             <Td />
           </tr>
         </tbody>
       </DataTable>
-      <PhoneMore total={rows.length} expanded={showAll} onToggle={() => setShowAll((v) => !v)} noun="plans" />
     </div>
   );
 }

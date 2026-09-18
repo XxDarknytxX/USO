@@ -24,7 +24,7 @@ import { useNavigate } from "react-router-dom";
 import toast from "react-hot-toast";
 import {
   Megaphone, Plus, RefreshCw, Users, ShoppingBag, MailX, Mail, Copy, Trash2, ArrowRight,
-  ServerCog, PenLine, BarChart3, Settings as SettingsIcon,
+  ServerCog, PenLine, BarChart3, ChevronRight, Settings as SettingsIcon,
 } from "lucide-react";
 
 import { campaignApi } from "../services/api";
@@ -36,8 +36,10 @@ import {
   ConfirmDialog, StatusPill, SkeletonKpis,
 } from "../components/ui";
 import SuppressionsPanel from "../components/campaigns/SuppressionsPanel";
+import { PHONE_CARD, PhoneMore, phoneRowClass } from "../components/ui/phone";
 import {
-  CampaignStatusPill, DeliveryBar, Callout, audienceSummary, relTime, fmtDateTime, plural, smtpProblem,
+  CampaignStatusPill, DeliveryBar, Callout, PHONE_WIDE, PHONE_HEADER_BARE,
+  audienceSummary, relTime, fmtDateTime, plural, smtpProblem,
 } from "../components/campaigns/campaignUi";
 
 const POLL_MS = 5000;
@@ -106,11 +108,75 @@ function SmtpCard({ stats, onOpenSettings }) {
   );
 }
 
+/**
+ * The same four answers as the KPI row, in one card, for a phone: the three
+ * figures that bound what any campaign can reach, side by side, and under them
+ * whether mail can go out at all.
+ *
+ * Four separate tiles cost most of the first screen before the list starts, and
+ * the sending card in particular is a state and an address rather than a
+ * number — it never belonged in a square beside three counts.
+ */
+// "Vodafone Fiji USO <uso@vodafone.com.fj>" → "uso@vodafone.com.fj". On one
+// phone line the address is what identifies the sender; the display name eats
+// the room the rate needs.
+const senderAddress = (from) => String(from || "").match(/<([^>]+)>/)?.[1] || from;
+
+function PhoneSummary({ stats, onExcluded, onOpenSettings }) {
+  const smtp = stats?.smtp;
+  const problem = smtpProblem(smtp);
+  const fix = problem && onOpenSettings;
+  const n = (v) => (stats ? Number(v || 0).toLocaleString() : "—");
+  const figure = "mt-1 block text-[21px] font-semibold leading-none tracking-tight tabular-nums text-[var(--fg-primary)]";
+  const Strip = fix ? "button" : "div";
+
+  return (
+    <div className="sm:hidden rounded-xl border border-[var(--border-default)] bg-[var(--bg-elevated)] shadow-[var(--shadow-card)]">
+      <div className="grid grid-cols-3 divide-x divide-[var(--border-subtle)]">
+        <div className="px-3.5 py-3">
+          <span className="text-label">Contacts</span>
+          <span className={figure}>{n(stats?.contacts)}</span>
+        </div>
+        <div className="px-3.5 py-3">
+          <span className="text-label">Purchasers</span>
+          <span className={figure}>{n(stats?.purchasers)}</span>
+        </div>
+        <button type="button" onClick={onExcluded} className="px-3.5 py-3 text-left focus-ring">
+          <span className="text-label inline-flex items-center gap-0.5">
+            Excluded <ChevronRight size={12} className="text-[var(--fg-subtle)]" />
+          </span>
+          <span className={figure}>{n(stats?.suppressed)}</span>
+        </button>
+      </div>
+      <Strip
+        {...(fix ? { type: "button", onClick: onOpenSettings } : {})}
+        className="flex w-full items-center gap-2 border-t border-[var(--border-subtle)] px-3.5 py-2.5 text-left focus-ring"
+      >
+        {!smtp ? (
+          <StatusPill tone="neutral">Unknown</StatusPill>
+        ) : problem ? (
+          <StatusPill tone="warning">{smtp.configured ? "Turned off" : "Not set up"}</StatusPill>
+        ) : (
+          <StatusPill tone="success">Ready</StatusPill>
+        )}
+        <span className="min-w-0 flex-1 truncate text-[12px] text-[var(--fg-muted)]">
+          {!smtp
+            ? "Could not read the mail settings"
+            : problem
+              ? fix ? "Fix in Settings → Email" : "Ask the superadmin to fix this"
+              : `From ${senderAddress(smtp.from) || "the default sender"}${stats?.sendPerMinute ? ` · ${stats.sendPerMinute}/min` : ""}`}
+        </span>
+        {fix && <ArrowRight size={13} className="shrink-0 text-[var(--warning-fg)]" />}
+      </Strip>
+    </div>
+  );
+}
+
 function ProgressCell({ c }) {
   if (c.status === "draft") return <span className="text-[12.5px] text-[var(--fg-muted)]">Not sent yet</span>;
   const t = c.totals || {};
   return (
-    <div className="flex w-[170px] flex-col gap-1.5">
+    <div className="flex w-[170px] flex-col gap-1.5 max-sm:w-full">
       <div className="flex items-baseline justify-between gap-2 text-[12.5px] tabular-nums">
         <span className="font-semibold text-[var(--fg-primary)]">
           {Number(t.sent || 0).toLocaleString()}
@@ -149,6 +215,7 @@ export default function EmailCampaignsPage() {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
 
+  const [showAll, setShowAll] = useState(false); // phone: the list is capped until asked
   const [creating, setCreating] = useState(false);
   const [busyId, setBusyId] = useState(null);
   const [deleting, setDeleting] = useState(null);
@@ -254,25 +321,44 @@ export default function EmailCampaignsPage() {
       <PageHeader
         eyebrow="Operations"
         title="Email Campaigns"
-        subtitle="Write an email once and send it to the customers in the M-PAiSA mapping — everyone, a village, or a chosen few."
+        // The phone's app bar already names the screen and the list below
+        // explains itself; the sentence is desktop context, not phone content.
+        subtitle={<span className="max-sm:hidden">Write an email once and send it to the customers in the M-PAiSA mapping — everyone, a village, or a chosen few.</span>}
         icon={<Megaphone size={22} />}
         tone="pink"
         actions={
           <>
-            <Button variant="secondary" size="sm" onClick={refresh} iconLeft={<RefreshCw size={14} />} disabled={loading}>
+            <IconButton
+              variant="secondary"
+              size="md"
+              className="sm:hidden"
+              onClick={refresh}
+              disabled={loading}
+              aria-label="Refresh"
+              title="Refresh"
+            >
+              <RefreshCw size={16} />
+            </IconButton>
+            <Button variant="secondary" size="sm" onClick={refresh} iconLeft={<RefreshCw size={14} />} disabled={loading} className="max-sm:hidden">
               Refresh
             </Button>
-            <Button variant="primary" size="sm" onClick={createCampaign} loading={creating} iconLeft={<Plus size={14} />}>
+            <Button variant="primary" size="sm" onClick={createCampaign} loading={creating} iconLeft={<Plus size={14} />} className="max-sm:flex-1">
               New campaign
             </Button>
           </>
         }
+        className={PHONE_HEADER_BARE}
       />
 
       {statsLoading ? (
-        <SkeletonKpis count={4} />
+        <>
+          <div className="sm:hidden h-[104px] rounded-xl skeleton" />
+          <SkeletonKpis count={4} className="max-sm:hidden" />
+        </>
       ) : (
-        <KpiGrid cols={4}>
+        <>
+        <PhoneSummary stats={stats} onExcluded={() => setTab("excluded")} onOpenSettings={openSettings} />
+        <KpiGrid cols={4} className="max-sm:hidden">
           <StatCard
             label={
               <>
@@ -307,6 +393,7 @@ export default function EmailCampaignsPage() {
           />
           <SmtpCard stats={stats} onOpenSettings={openSettings} />
         </KpiGrid>
+        </>
       )}
 
       {problem && (
@@ -410,12 +497,18 @@ export default function EmailCampaignsPage() {
                       {debounced ? "No campaign matches that search." : "No campaigns in this view."}
                     </TableMessage>
                   ) : (
-                    campaigns.map((c) => {
+                    campaigns.map((c, i) => {
                       const when = whenCell(c);
                       const open = () => navigate(`/email-campaigns/${c.id}`);
+                      // A phone card, six tracks wide: name and state on the
+                      // first line, audience and when as a pair of small tiles,
+                      // the delivery bar its own full-width line, then the
+                      // buttons. A draft has no delivery to draw, so that line
+                      // is left out and the buttons move up into its place.
+                      const draft = c.status === "draft";
                       return (
-                        <tr key={c.id} onClick={open} className="cursor-pointer">
-                          <Td>
+                        <tr key={c.id} onClick={open} className={`cursor-pointer ${phoneRowClass(i, showAll)}`}>
+                          <Td className={PHONE_CARD.title}>
                             <div className="flex items-start gap-3 max-sm:w-full">
                               <div className="flex min-w-[200px] max-w-[340px] flex-col max-sm:min-w-0 max-sm:max-w-none max-sm:flex-1">
                                 <span className="truncate font-semibold text-[var(--fg-primary)]">{c.name || "Untitled campaign"}</span>
@@ -423,22 +516,24 @@ export default function EmailCampaignsPage() {
                                   {c.subject || <span className="italic">No subject yet</span>}
                                 </span>
                               </div>
-                              <CampaignStatusPill status={c.status} className="shrink-0 sm:hidden" />
                             </div>
                           </Td>
-                          <Td nowrap className="max-sm:hidden!"><CampaignStatusPill status={c.status} /></Td>
-                          <Td>
+                          <Td nowrap className={PHONE_CARD.aside}><CampaignStatusPill status={c.status} /></Td>
+                          <Td className={`max-sm:col-span-3 max-sm:row-start-2 ${PHONE_CARD.cell}`}>
                             <span className="block max-w-[220px] truncate text-[12.5px]" title={audienceSummary(c.audience, sites)}>
                               {audienceSummary(c.audience, sites)}
                             </span>
                           </Td>
-                          <Td><ProgressCell c={c} /></Td>
-                          <Td nowrap muted>
+                          <Td className={draft ? PHONE_CARD.hide : `max-sm:row-start-3 ${PHONE_WIDE}`}><ProgressCell c={c} /></Td>
+                          <Td nowrap muted className={`max-sm:col-start-4 max-sm:col-span-3 max-sm:row-start-2 ${PHONE_CARD.cell}`}>
                             <span className="text-[12.5px]" title={fmtDateTime(when.at)}>
                               {when.label} {relTime(when.at)}
                             </span>
                           </Td>
-                          <td className="text-right" onClick={(e) => e.stopPropagation()}>
+                          <td
+                            className={`text-right max-sm:col-span-6 ${draft ? "max-sm:row-start-3" : "max-sm:row-start-4"}`}
+                            onClick={(e) => e.stopPropagation()}
+                          >
                             <div className="inline-flex items-center justify-end gap-1 max-sm:mt-1 max-sm:flex max-sm:w-full max-sm:gap-2">
                               <Button
                                 size="xs"
@@ -478,6 +573,12 @@ export default function EmailCampaignsPage() {
                 </tbody>
               </DataTable>
             )}
+            <PhoneMore
+              total={campaigns.length}
+              expanded={showAll}
+              onToggle={() => setShowAll((v) => !v)}
+              noun="campaigns"
+            />
           </Panel>
         </>
       )}

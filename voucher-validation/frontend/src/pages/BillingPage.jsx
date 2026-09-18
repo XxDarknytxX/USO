@@ -32,6 +32,7 @@ import {
   PageShell, PageHeader, Panel, KpiGrid, StatCard, Select, Button, Input,
   DataTable, Th, Td, EmptyState, SkeletonKpis, SkeletonCard,
 } from "../components/ui";
+import { usePhone, PhoneMore, PHONE_ROWS } from "../components/ui/phone";
 
 const money = (n) =>
   "$" + Number(n || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -57,10 +58,12 @@ const joinNames = (names, max = 6) =>
  * came from, because the bill follows the reader's view the way the dashboards
  * do: the switcher's village, else "Your view", else the estate default.
  */
-function ScopeStrip({ data, isAdmin, view }) {
+function ScopeStrip({ data, isAdmin, view, phone }) {
   const navigate = useNavigate();
   const { setActiveSiteId, followEstateDefault } = useSite();
-  const [open, setOpen] = useState(false);
+  // null = nobody has touched it, so a phone opens the strip only when it is
+  // carrying a warning; a desktop keeps the excluded list closed as before.
+  const [openOverride, setOpenOverride] = useState(null);
   const scope = data.scope;
   if (!scope) return null;
 
@@ -83,6 +86,9 @@ function ScopeStrip({ data, isAdmin, view }) {
 
   let icon = <Globe2 size={14} className="mt-0.5 shrink-0 text-[var(--fg-muted)]" />;
   let headline;
+  // What the strip says on a phone before it is opened: which villages, in as
+  // few words as the answer takes. The sentence itself is one tap away.
+  let short;
   let sub = null;
   let tone = "neutral";
   const actions = [];
@@ -90,6 +96,7 @@ function ScopeStrip({ data, isAdmin, view }) {
   if (view.kind === "village") {
     icon = <MapPin size={14} className="mt-0.5 shrink-0 text-[var(--fg-muted)]" />;
     headline = `${view.name || "One village"} only — the village selected in the switcher${billedNote}`;
+    short = `${view.name || "One village"} only`;
     actions.push(
       <Button key="all" variant="ghost" size="xs" onClick={() => setActiveSiteId(null)}>
         Show all my villages
@@ -98,6 +105,7 @@ function ScopeStrip({ data, isAdmin, view }) {
   } else if (view.kind === "personal") {
     icon = <Eye size={14} className="mt-0.5 shrink-0 text-[var(--info-fg)]" />;
     headline = `Your view · ${plural(inView)}${billedNote}`;
+    short = `Your view · ${plural(inView)}`;
     sub = `Accounts following the estate default see ${estateText}${saved}.`;
     if (isAdmin) {
       actions.push(
@@ -114,21 +122,25 @@ function ScopeStrip({ data, isAdmin, view }) {
     headline = isAdmin
       ? `No estate default has been saved, so this covers every active village (${inView}${billedNote}) — test villages included, and any village added later.`
       : `Every active village (${inView}${billedNote}).`;
+    short = isAdmin ? `No estate default saved · ${plural(inView)}` : `Every active village (${inView})`;
     if (isAdmin) actions.push(<Button key="set" variant="secondary" size="xs" onClick={() => navigate("/settings")}>Set the estate default</Button>);
   } else if (scope.mode === "unreadable") {
     tone = isAdmin ? "danger" : "neutral";
     headline = isAdmin
       ? `The saved estate default could not be read, so this covers every active village (${inView}${billedNote}). Save it again under Settings.`
       : `Every active village (${inView}${billedNote}).`;
+    short = isAdmin ? `Estate default unreadable · ${plural(inView)}` : `Every active village (${inView})`;
     if (isAdmin) actions.push(<Button key="set" variant="secondary" size="xs" onClick={() => navigate("/settings")}>Estate default settings</Button>);
   } else if (scope.mode === "none") {
     tone = "warning";
     headline = "The estate default has no villages in it, so nothing is billed.";
+    short = "Nothing is billed";
   } else {
     headline =
       scope.mode === "all"
         ? `Estate default · every active village (${inView}${billedNote}), including any added later${saved}`
         : `Estate default · ${plural(inView)}${billedNote}${saved}`;
+    short = `Estate default · ${plural(inView)}`;
     if (isAdmin) actions.push(<Button key="set" variant="ghost" size="xs" onClick={() => navigate("/settings")}>Estate default settings</Button>);
   }
 
@@ -138,6 +150,61 @@ function ScopeStrip({ data, isAdmin, view }) {
     warning: "border-[var(--warning-border)] bg-[var(--warning-soft)] text-[var(--warning-fg)]",
     danger: "border-[var(--danger-border)] bg-[var(--danger-soft)] text-[var(--danger-fg)]",
   }[tone];
+  const open = openOverride ?? (phone && tone !== "neutral");
+  const setOpen = () => setOpenOverride(!open);
+
+  // The same list in both layouts; the desktop one carries its own rule above
+  // it, exactly as it always has, and the phone's sits in a padded panel.
+  const excludedList = (className) => (
+    <ul className={className}>
+      {Object.entries(byReason).map(([reason, list]) => (
+        <li key={reason} className="flex flex-wrap gap-x-1.5 max-sm:flex-col">
+          <span className="font-medium text-[var(--fg-primary)]">{REASONS[reason] || reason}:</span>
+          <span>{joinNames(list.map((x) => x.name), 12)}</span>
+        </li>
+      ))}
+    </ul>
+  );
+
+  // A phone gets the answer on one line — which villages, and whether anything
+  // was left out — and the sentence, the exclusions and the settings links
+  // behind it. Three lines of provenance above the figures is a paragraph
+  // nobody reads twice.
+  if (phone) {
+    return (
+      <div className={`overflow-hidden rounded-xl border text-[12.5px] ${toneClass}`}>
+        <button
+          type="button"
+          onClick={setOpen}
+          aria-expanded={open}
+          className="flex min-h-11 w-full items-center gap-2 px-4 py-2.5 text-left"
+        >
+          {icon}
+          <span className={`min-w-0 flex-1 ${tone === "neutral" ? "text-[var(--fg-primary)]" : "font-medium"}`}>
+            {short || headline}
+          </span>
+          {excluded.length > 0 && (
+            <span className="shrink-0 rounded-full bg-[var(--bg-elevated)] px-2 py-0.5 text-[11px] font-semibold text-[var(--fg-muted)]">
+              {excluded.length} not billed
+            </span>
+          )}
+          <ChevronDown
+            size={14}
+            aria-hidden="true"
+            className={`shrink-0 transition-transform duration-200 ${open ? "rotate-180" : ""}`}
+          />
+        </button>
+        {open && (
+          <div className="flex flex-col gap-2.5 border-t border-[var(--border-subtle)] px-4 py-3">
+            <span className={tone === "neutral" ? "text-[var(--fg-primary)]" : "font-medium"}>{headline}</span>
+            {sub && <span className="text-[12px] text-[var(--fg-muted)]">{sub}</span>}
+            {excluded.length > 0 && excludedList("flex flex-col gap-1 text-[12px] text-[var(--fg-secondary)]")}
+            {actions.length > 0 && <span className="flex flex-wrap items-center gap-1.5">{actions}</span>}
+          </div>
+        )}
+      </div>
+    );
+  }
 
   return (
     <div className={`flex flex-col gap-2 rounded-xl border px-4 py-3 text-[12.5px] ${toneClass}`}>
@@ -157,7 +224,7 @@ function ScopeStrip({ data, isAdmin, view }) {
             <Button
               variant="ghost"
               size="xs"
-              onClick={() => setOpen((v) => !v)}
+              onClick={setOpen}
               iconRight={<ChevronDown size={12} className={open ? "rotate-180 transition-transform" : "transition-transform"} />}
             >
               {excluded.length} not billed
@@ -167,16 +234,8 @@ function ScopeStrip({ data, isAdmin, view }) {
         </span>
       </div>
 
-      {open && excluded.length > 0 && (
-        <ul className="flex flex-col gap-1 border-t border-[var(--border-subtle)] pt-2 text-[12px] text-[var(--fg-secondary)]">
-          {Object.entries(byReason).map(([reason, list]) => (
-            <li key={reason} className="flex flex-wrap gap-x-1.5 max-sm:flex-col">
-              <span className="font-medium text-[var(--fg-primary)]">{REASONS[reason] || reason}:</span>
-              <span>{joinNames(list.map((x) => x.name), 12)}</span>
-            </li>
-          ))}
-        </ul>
-      )}
+      {open && excluded.length > 0 &&
+        excludedList("flex flex-col gap-1 border-t border-[var(--border-subtle)] pt-2 text-[12px] text-[var(--fg-secondary)]")}
     </div>
   );
 }
@@ -199,6 +258,35 @@ function VillageCell({ name, hostname }) {
     <span className="flex min-w-0 flex-col">
       <span className="truncate text-[13px] font-semibold text-[var(--fg-primary)]">{name}</span>
       {hostname && <span className="truncate font-mono text-[11px] text-[var(--fg-muted)]">{hostname}</span>}
+    </span>
+  );
+}
+
+/**
+ * One village on a phone: the name and the figure that matters on one line, the
+ * bar under it, and the working ("$0.00 of $168.00 · 0%") as one muted line.
+ *
+ * The labelled-lines card the table falls back to spent five lines per village
+ * saying REVENUE and SHORT BY over and over — ten villages of it — and the
+ * hostname, which nobody reads a bill by, took one of them.
+ */
+function PhoneBillRow({ name, revenue, target, pct, figure, tone, bar }) {
+  return (
+    <span className="flex w-full flex-col gap-1.5">
+      <span className="flex items-baseline justify-between gap-3">
+        <span className="min-w-0 text-[14px] font-semibold leading-snug text-[var(--fg-primary)]">{name}</span>
+        <span
+          className={`shrink-0 text-[14px] font-semibold tabular-nums ${
+            tone === "danger" ? "text-[var(--danger-fg)]" : "text-[var(--success-fg)]"
+          }`}
+        >
+          {figure}
+        </span>
+      </span>
+      {bar && <Progress pct={pct} tone={tone} />}
+      <span className="text-[11.5px] tabular-nums text-[var(--fg-muted)]">
+        {money(revenue)} of {money(target)} · {pct}% of target
+      </span>
     </span>
   );
 }
@@ -262,6 +350,10 @@ function TargetControl({ target, onSaved, canEdit }) {
 export default function BillingPage() {
   const { isAdmin } = useAuth();
   const { activeSiteId, activeSite, visibleSiteIds, loading: sitesLoading } = useSite();
+  // The village lists are a different card on a phone, not a narrower table.
+  const phone = usePhone();
+  const [showAllUnder, setShowAllUnder] = useState(false);
+  const [showAllOver, setShowAllOver] = useState(false);
   const [month, setMonth] = useState(""); // "" = let the server choose the last complete month
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -391,7 +483,7 @@ export default function BillingPage() {
         </div>
       )}
 
-      {data && <ScopeStrip data={data} isAdmin={isAdmin} view={view} />}
+      {data && <ScopeStrip data={data} isAdmin={isAdmin} view={view} phone={phone} />}
 
       {loading && !data ? (
         <>
@@ -460,7 +552,26 @@ export default function BillingPage() {
                         </tr>
                       </thead>
                       <tbody>
-                        {data.under.map((r) => (
+                        {data.under.map((r, i) => {
+                          if (phone) {
+                            if (!showAllUnder && i >= PHONE_ROWS) return null;
+                            return (
+                              <tr key={r.projectId}>
+                                <Td>
+                                  <PhoneBillRow
+                                    name={r.name}
+                                    revenue={r.revenue}
+                                    target={data.target}
+                                    pct={r.pctOfTarget}
+                                    figure={`−${money(r.deficit)}`}
+                                    tone="danger"
+                                    bar
+                                  />
+                                </Td>
+                              </tr>
+                            );
+                          }
+                          return (
                           <tr key={r.projectId}>
                             <Td>
                               <span className="flex w-full min-w-0 flex-col gap-1.5">
@@ -469,7 +580,7 @@ export default function BillingPage() {
                               </span>
                             </Td>
                             <Td align="right" nowrap className="tabular-nums">
-                              <span className="flex flex-col items-end max-sm:flex-row-reverse max-sm:items-baseline max-sm:gap-2">
+                              <span className="flex flex-col items-end">
                                 <span>{money(r.revenue)}</span>
                                 <span className="text-[11px] text-[var(--fg-muted)]">{r.pctOfTarget}% of target</span>
                               </span>
@@ -478,10 +589,17 @@ export default function BillingPage() {
                               <span className="font-semibold tabular-nums text-[var(--danger-fg)]">−{money(r.deficit)}</span>
                             </Td>
                           </tr>
-                        ))}
+                          );
+                        })}
                       </tbody>
                     </DataTable>
                   </div>
+                  <PhoneMore
+                    total={data.under.length}
+                    expanded={showAllUnder}
+                    onToggle={() => setShowAllUnder((v) => !v)}
+                    noun="villages"
+                  />
                   <div className="flex items-center justify-between border-t border-[var(--border-subtle)] bg-[var(--bg-surface)] px-5 py-3 text-[12.5px]">
                     <span className="text-[var(--fg-muted)]">
                       {data.under.length} village{data.under.length === 1 ? "" : "s"} short
@@ -513,11 +631,29 @@ export default function BillingPage() {
                         </tr>
                       </thead>
                       <tbody>
-                        {data.over.map((r) => (
+                        {data.over.map((r, i) => {
+                          if (phone) {
+                            if (!showAllOver && i >= PHONE_ROWS) return null;
+                            return (
+                              <tr key={r.projectId}>
+                                <Td>
+                                  <PhoneBillRow
+                                    name={r.name}
+                                    revenue={r.revenue}
+                                    target={data.target}
+                                    pct={r.pctOfTarget}
+                                    figure={r.excess > 0 ? `+${money(r.excess)}` : money(0)}
+                                    tone="success"
+                                  />
+                                </Td>
+                              </tr>
+                            );
+                          }
+                          return (
                           <tr key={r.projectId}>
                             <Td><VillageCell name={r.name} hostname={r.hostname} /></Td>
                             <Td align="right" nowrap className="tabular-nums">
-                              <span className="flex flex-col items-end max-sm:flex-row-reverse max-sm:items-baseline max-sm:gap-2">
+                              <span className="flex flex-col items-end">
                                 <span>{money(r.revenue)}</span>
                                 <span className="text-[11px] text-[var(--fg-muted)]">{r.pctOfTarget}% of target</span>
                               </span>
@@ -528,10 +664,17 @@ export default function BillingPage() {
                               </span>
                             </Td>
                           </tr>
-                        ))}
+                          );
+                        })}
                       </tbody>
                     </DataTable>
                   </div>
+                  <PhoneMore
+                    total={data.over.length}
+                    expanded={showAllOver}
+                    onToggle={() => setShowAllOver((v) => !v)}
+                    noun="villages"
+                  />
                   <div className="flex items-center justify-between border-t border-[var(--border-subtle)] bg-[var(--bg-surface)] px-5 py-3 text-[12.5px]">
                     <span className="text-[var(--fg-muted)]">
                       {data.over.length} village{data.over.length === 1 ? "" : "s"} at or above target

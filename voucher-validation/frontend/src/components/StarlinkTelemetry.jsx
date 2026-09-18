@@ -22,7 +22,7 @@ import {
   Panel, Segmented, EmptyState, SkeletonCard,
   ChartTooltip, ChartGradient, useChartTheme, axisX, axisY, gridProps,
 } from "./ui";
-import { usePhone } from "./MonthlyBreakdown";
+import { usePhone } from "./ui/phone";
 
 const RANGES = [
   { value: "A", label: "15m" },
@@ -85,8 +85,18 @@ export default function StarlinkTelemetry({ projectId, className, compact = fals
     [data, range]
   );
 
+  // Beside the title on a phone the three windows are squeezed against the
+  // right edge; under the header they take a row and split it evenly. It sits
+  // above the empty state too — "try a longer window" is the advice there, so
+  // the control that does it has to be in reach.
   const control = (
-    <Segmented options={RANGES} value={range} onChange={setRange} size="sm" />
+    <Segmented
+      options={RANGES}
+      value={range}
+      onChange={setRange}
+      size="sm"
+      className={phone ? "w-full [&>button]:flex-1 [&>button]:justify-center" : undefined}
+    />
   );
 
   if (loading && !data) return <SkeletonCard height="h-[420px]" className={className} />;
@@ -118,9 +128,10 @@ export default function StarlinkTelemetry({ projectId, className, compact = fals
       }
       icon={<SignalHigh size={15} />}
       tone="violet"
-      actions={control}
+      actions={phone ? null : control}
       className={className}
     >
+      {phone && <div className="mb-3.5">{control}</div>}
       {empty ? (
         <EmptyState
           className="max-sm:py-8"
@@ -150,6 +161,26 @@ export default function StarlinkTelemetry({ projectId, className, compact = fals
         </div>
       )}
     </Panel>
+  );
+}
+
+/**
+ * The sparkline's own tooltip.
+ *
+ * The shared ChartTooltip is 136px at its narrowest, and a phone tile two to a
+ * row leaves the plot 128 — so it hung over the edge of the card it belongs to.
+ * This says the same two things, when and how much, in the width there is; the
+ * series is named by the tile's own heading, so it does not repeat it.
+ */
+function SparkTooltip({ active, payload, label, spec }) {
+  if (!active || !payload || payload.length === 0) return null;
+  return (
+    <div className="max-w-[124px] rounded-lg border border-[var(--border-default)] bg-[var(--bg-elevated)] px-2 py-1.5 shadow-[var(--shadow-elevated)]">
+      <p className="text-[10.5px] leading-tight text-[var(--fg-muted)]">{label}</p>
+      <p className="text-[12px] font-semibold leading-tight tabular-nums text-[var(--fg-primary)]">
+        {fmt(payload[0].value, spec.decimals)} <span className="font-medium text-[var(--fg-muted)]">{spec.unit}</span>
+      </p>
+    </div>
   );
 }
 
@@ -219,9 +250,16 @@ function MetricChart({ spec, points, stats, compact = false, spark = false }) {
               tickFormatter={(v) => fmt(v, 0)}
             />
             {/* valueFormatter, not recharts' own `formatter`: this is the
-                app's tooltip and that is the prop it reads. */}
+                app's tooltip and that is the prop it reads. A sparkline's plot
+                is narrower than that tooltip can go, so it gets its own. */}
             <Tooltip
-              content={<ChartTooltip valueFormatter={(v) => `${fmt(v, spec.decimals)} ${spec.unit}`} />}
+              content={
+                spark ? (
+                  <SparkTooltip spec={spec} />
+                ) : (
+                  <ChartTooltip valueFormatter={(v) => `${fmt(v, spec.decimals)} ${spec.unit}`} />
+                )
+              }
             />
             <Area
               type="monotone"

@@ -11,14 +11,15 @@
 // village Wi-Fi, and an autosave firing per character would spend the whole
 // visit retrying.
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import toast from "react-hot-toast";
 import {
   ClipboardCheck, Camera, Send, Lock, Unlock, Save, AlertTriangle, CheckCircle2,
-  X, Check, CircleDashed, Images,
+  ChevronDown, X, Check, CircleDashed, Images, Loader2,
 } from "lucide-react";
 import { maintenanceApi, downscaleImage } from "../../services/api";
 import { Modal, Button, Field, Textarea, Input, StatusPill, ObjectTile, Segmented } from "../ui";
+import { usePhone } from "../ui/phone";
 import PhotoThumb from "./PhotoThumb";
 
 const CONDITION_UI = {
@@ -34,8 +35,32 @@ const CONDITION_OPTIONS = ["ok", "attention", "faulty", "na"].map((v) => ({
   value: v,
   label: CONDITION_UI[v].label,
 }));
+// Four options share a phone's width, and "Needs attention" is most of it. The
+// word is enough to choose between them; the condition is written out in full
+// wherever it is READ.
+const CONDITION_OPTIONS_PHONE = CONDITION_OPTIONS.map((o) =>
+  o.value === "attention" ? { ...o, label: "Attention" } : o
+);
+const condLabel = (key, phone) =>
+  (phone && key === "attention" ? "Attention" : CONDITION_UI[key]?.label) || null;
+
+/** What a component still needs before it can be filed, in the engineer's words. */
+function missingFor(c) {
+  if (c.condition === "na") return String(c.notes || "").trim() ? null : "needs a note";
+  if (!c.condition) return "needs a condition";
+  return c.photos.length === 0 ? "needs a photo" : null;
+}
 
 const fmtDate = (d) => (d ? new Date(d).toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" }) : "—");
+
+const cx = (...p) => p.filter(Boolean).join(" ");
+
+/** Why "File this" cannot be pressed yet, said in full. */
+const MISSING_HELP = {
+  "needs a note": "Say why it is not applicable in the notes to file it.",
+  "needs a condition": "Pick a condition to file this.",
+  "needs a photo": "Add at least one photo to file this.",
+};
 
 // On a phone the condition picker spans the card and each option is a
 // thumb-height target; from sm up it is the compact pill it always was.
@@ -45,6 +70,14 @@ const PHONE_SEGMENTED = "max-sm:flex max-sm:w-full max-sm:[&>button]:grow max-sm
 const PHONE_THUMB = "max-sm:h-20 max-sm:w-20";
 
 export default function VisitEditor({ visitId, isAdmin, onClose, onChanged }) {
+  // A phone shows the report as a checklist: one component open, the rest as
+  // rows saying what they still need. Six open forms is four screens of scroll
+  // between the component you are standing in front of and the button that
+  // files it.
+  const phone = usePhone();
+  // undefined = nothing chosen yet, so the first unfiled component opens;
+  // null = the engineer closed it.
+  const [openKey, setOpenKey] = useState(undefined);
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -184,6 +217,13 @@ export default function VisitEditor({ visitId, isAdmin, onClose, onChanged }) {
 
   const filedCount = (data?.checks || []).filter((c) => c.status === "submitted").length;
   const totalCount = (data?.checks || []).length;
+  // Which card the phone opens on: the first one still to file, or none at all
+  // on a report that is already filed.
+  const firstPending = useMemo(
+    () => (readOnly ? null : (data?.checks || []).find((c) => c.status !== "submitted")?.key ?? null),
+    [data, readOnly]
+  );
+  const shownKey = openKey === undefined ? firstPending : openKey;
   const photoTotal =
     (data?.generalPhotos?.length || 0) + (data?.checks || []).reduce((a, c) => a + c.photos.length, 0);
   const progressPct = totalCount ? Math.round((filedCount / totalCount) * 100) : 0;
@@ -275,6 +315,169 @@ export default function VisitEditor({ visitId, isAdmin, onClose, onChanged }) {
                 const ui = CONDITION_UI[c.condition];
                 const locked = readOnly || c.status === "submitted";
                 const CondIcon = ui?.Icon || CircleDashed;
+
+                // A phone works through the checklist one component at a time:
+                // a row says where each one stands and what it still needs, and
+                // the open one carries the whole form.
+                if (phone) {
+                  const open = shownKey === c.key;
+                  const missing = locked ? null : missingFor(c);
+                  return (
+                    <div
+                      key={c.key}
+                      className="overflow-hidden rounded-xl border border-[var(--border-default)] bg-[var(--bg-elevated)] shadow-[var(--shadow-xs)]"
+                    >
+                      <button
+                        type="button"
+                        onClick={() => setOpenKey(open ? null : c.key)}
+                        aria-expanded={open}
+                        className="flex w-full items-center gap-3 p-3.5 text-left focus-ring"
+                      >
+                        <ObjectTile tone={ui?.tile || "slate"} size="sm">
+                          <CondIcon size={15} />
+                        </ObjectTile>
+                        <span className="min-w-0 flex-1">
+                          <span className="block font-display text-[13.5px] font-semibold leading-snug text-[var(--fg-primary)]">
+                            {c.label}
+                          </span>
+                          <span className="mt-0.5 block text-[11.5px] leading-snug text-[var(--fg-muted)]">
+                            {/* A filed component says when; one still open says
+                                what it needs. A locked report can carry a check
+                                that was never filed, and that is neither. */}
+                            {c.status === "submitted"
+                              ? c.submittedAt
+                                ? `Filed ${fmtDate(c.submittedAt)}`
+                                : "Filed"
+                              : locked
+                                ? "not filed"
+                                : missing || "ready to file"}
+                            {c.photos.length ? ` · ${c.photos.length} photo${c.photos.length === 1 ? "" : "s"}` : ""}
+                          </span>
+                        </span>
+                        {c.status === "submitted" ? (
+                          <StatusPill tone={ui?.tone || "neutral"} dot={false}>
+                            <Lock size={10} /> {condLabel(c.condition, true) || "Filed"}
+                          </StatusPill>
+                        ) : c.condition ? (
+                          <StatusPill tone={ui?.tone || "neutral"}>{condLabel(c.condition, true)}</StatusPill>
+                        ) : null}
+                        <ChevronDown
+                          size={16}
+                          aria-hidden="true"
+                          className={cx(
+                            "shrink-0 text-[var(--fg-subtle)] transition-transform duration-200",
+                            open && "rotate-180"
+                          )}
+                        />
+                      </button>
+
+                      {open && (
+                        <div className="flex flex-col gap-3 border-t border-[var(--border-subtle)] px-3.5 pb-3.5 pt-3">
+                          <p className="text-[11.5px] leading-snug text-[var(--fg-muted)]">{c.hint}</p>
+                          {c.reopenReason && (
+                            <p className="text-[11px] text-[var(--warning-fg)]">Reopened: {c.reopenReason}</p>
+                          )}
+                          {!locked && (
+                            <Segmented
+                              size="sm"
+                              className={PHONE_SEGMENTED}
+                              options={CONDITION_OPTIONS_PHONE}
+                              value={c.condition}
+                              onChange={(v) => setCheck(c.key, { condition: v })}
+                            />
+                          )}
+                          {locked
+                            ? c.notes && (
+                                <p className="whitespace-pre-wrap text-[12.5px] leading-relaxed text-[var(--fg-secondary)]">
+                                  {c.notes}
+                                </p>
+                              )
+                            : (
+                              <Textarea
+                                rows={2}
+                                value={c.notes}
+                                placeholder="What did you find? Anything replaced or adjusted?"
+                                onChange={(e) => setCheck(c.key, { notes: e.target.value })}
+                              />
+                            )}
+
+                          {/* The camera is the point of this form on a phone, so
+                              it is a tile the size of a photo rather than a
+                              button beside one. */}
+                          {(c.photos.length > 0 || !locked) && (
+                            <div className="grid grid-cols-3 gap-2">
+                              {c.photos.map((p) => (
+                                <div key={p.id} className="relative aspect-square">
+                                  <PhotoThumb
+                                    photoId={p.id}
+                                    caption={p.caption}
+                                    size="fill"
+                                    onRemove={locked ? undefined : removePhoto}
+                                    onOpen={(url) => setLightbox({ url, caption: c.label })}
+                                  />
+                                </div>
+                              ))}
+                              {!locked && (
+                                <button
+                                  type="button"
+                                  onClick={() => pickPhoto(c.key)}
+                                  disabled={uploading === c.key}
+                                  className="flex aspect-square flex-col items-center justify-center gap-1.5 rounded-[12px] border-2 border-dashed border-[var(--border-strong)] bg-[var(--bg-surface)] text-[var(--fg-muted)] focus-ring active:bg-[var(--surface-pressed)] disabled:opacity-60"
+                                >
+                                  {uploading === c.key ? (
+                                    <Loader2 size={20} className="animate-spin" />
+                                  ) : (
+                                    <Camera size={20} />
+                                  )}
+                                  <span className="text-[11px] font-semibold">
+                                    {uploading === c.key ? "Adding…" : "Take photo"}
+                                  </span>
+                                </button>
+                              )}
+                            </div>
+                          )}
+                          {locked && c.photos.length === 0 && (
+                            <p className="text-[11.5px] text-[var(--fg-muted)]">No photo</p>
+                          )}
+
+                          {c.status === "submitted" ? (
+                            <div className="flex items-center justify-between gap-2">
+                              <span className="flex items-center gap-1 text-[11.5px] text-[var(--success-fg)]">
+                                <Check size={12} /> Filed{c.submittedAt ? ` ${fmtDate(c.submittedAt)}` : ""}
+                              </span>
+                              {isAdmin && !readOnly && (
+                                <Button variant="ghost" size="sm" onClick={() => reopenComponent(c.key)} iconLeft={<Unlock size={12} />}>
+                                  Reopen
+                                </Button>
+                              )}
+                            </div>
+                          ) : (
+                            !readOnly && (
+                              <>
+                                <Button
+                                  variant="primary"
+                                  className="w-full"
+                                  onClick={() => fileComponent(c.key)}
+                                  loading={filing === c.key}
+                                  disabled={filing === c.key || !!missing}
+                                  iconLeft={filing !== c.key && <Send size={13} />}
+                                >
+                                  File this component
+                                </Button>
+                                {/* A finger never hovers, so the reason the
+                                    button is out of reach is written under it. */}
+                                {missing && filing !== c.key && (
+                                  <p className="text-center text-[11.5px] text-[var(--fg-muted)]">{MISSING_HELP[missing]}</p>
+                                )}
+                              </>
+                            )
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  );
+                }
+
                 return (
                   <div
                     key={c.key}
@@ -440,33 +643,76 @@ export default function VisitEditor({ visitId, isAdmin, onClose, onChanged }) {
                 <Images size={13} className="text-[var(--fg-muted)]" />
                 <span className="text-label">General photos</span>
               </div>
-              <div className="flex items-center gap-2 flex-wrap">
-                {(data?.generalPhotos || []).map((p) => (
-                  <PhotoThumb
-                    key={p.id}
-                    photoId={p.id}
-                    caption={p.caption}
-                    size="sm"
-                    className={PHONE_THUMB}
-                    onRemove={readOnly ? undefined : removePhoto}
-                    onOpen={(url) => setLightbox({ url, caption: "General" })}
-                  />
-                ))}
-                {!readOnly && (
-                  <Button
-                    variant="secondary"
-                    size="sm"
-                    onClick={() => pickPhoto(null)}
-                    loading={uploading === "__general__"}
-                    iconLeft={uploading !== "__general__" && <Camera size={13} />}
-                  >
-                    Add photo
-                  </Button>
-                )}
-                {readOnly && (data?.generalPhotos || []).length === 0 && (
-                  <span className="text-[11.5px] text-[var(--fg-muted)]">No general photos</span>
-                )}
-              </div>
+              {/* The same picker the components use above: one sheet should not
+                  ask for a photograph in two different ways. The tile is filled
+                  --bg-elevated rather than --bg-surface only because this panel
+                  is itself --bg-surface, so the dashed square still reads. */}
+              {phone ? (
+                <>
+                  {((data?.generalPhotos || []).length > 0 || !readOnly) && (
+                    <div className="grid grid-cols-3 gap-2">
+                      {(data?.generalPhotos || []).map((p) => (
+                        <div key={p.id} className="relative aspect-square">
+                          <PhotoThumb
+                            photoId={p.id}
+                            caption={p.caption}
+                            size="fill"
+                            onRemove={readOnly ? undefined : removePhoto}
+                            onOpen={(url) => setLightbox({ url, caption: "General" })}
+                          />
+                        </div>
+                      ))}
+                      {!readOnly && (
+                        <button
+                          type="button"
+                          onClick={() => pickPhoto(null)}
+                          disabled={uploading === "__general__"}
+                          className="flex aspect-square flex-col items-center justify-center gap-1.5 rounded-[12px] border-2 border-dashed border-[var(--border-strong)] bg-[var(--bg-elevated)] text-[var(--fg-muted)] focus-ring active:bg-[var(--surface-pressed)] disabled:opacity-60"
+                        >
+                          {uploading === "__general__" ? (
+                            <Loader2 size={20} className="animate-spin" />
+                          ) : (
+                            <Camera size={20} />
+                          )}
+                          <span className="text-[11px] font-semibold">
+                            {uploading === "__general__" ? "Adding…" : "Take photo"}
+                          </span>
+                        </button>
+                      )}
+                    </div>
+                  )}
+                  {readOnly && (data?.generalPhotos || []).length === 0 && (
+                    <span className="text-[11.5px] text-[var(--fg-muted)]">No general photos</span>
+                  )}
+                </>
+              ) : (
+                <div className="flex items-center gap-2 flex-wrap">
+                  {(data?.generalPhotos || []).map((p) => (
+                    <PhotoThumb
+                      key={p.id}
+                      photoId={p.id}
+                      caption={p.caption}
+                      size="sm"
+                      onRemove={readOnly ? undefined : removePhoto}
+                      onOpen={(url) => setLightbox({ url, caption: "General" })}
+                    />
+                  ))}
+                  {!readOnly && (
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      onClick={() => pickPhoto(null)}
+                      loading={uploading === "__general__"}
+                      iconLeft={uploading !== "__general__" && <Camera size={13} />}
+                    >
+                      Add photo
+                    </Button>
+                  )}
+                  {readOnly && (data?.generalPhotos || []).length === 0 && (
+                    <span className="text-[11.5px] text-[var(--fg-muted)]">No general photos</span>
+                  )}
+                </div>
+              )}
             </div>
           </>
         )}

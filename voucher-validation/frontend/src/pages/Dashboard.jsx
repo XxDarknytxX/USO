@@ -32,19 +32,14 @@ import { scopePackages } from "../utils/scopePackages";
 import { api, voucherApi } from "../services/api";
 import { useSite } from "../hooks/useSite";
 import { useAuth } from "../hooks/useAuth";
-import MonthPicker from "../components/MonthPicker";
+import MonthPicker, { MonthPickerChips } from "../components/MonthPicker";
 import { useMonthlyBreakdown } from "../hooks/useMonthlyBreakdown";
-import {
-  hasSalesHistory, BreakdownEmpty,
-  RevenueTrendPanel, RevenuePlanMix, SalesTotals, RiskTotals,
-  SalesByHourPanel, SoldByPlanPanel, RevenueByVillagePanel, OutcomesPanel,
-  VillageRevenuePanel,
-  PHONE_CARD, PhoneChevron, PhoneMore, phoneRowClass, usePhone, shortLabel,
-} from "../components/MonthlyBreakdown";
+import { hasSalesHistory, BreakdownEmpty, RevenueTrendPanel, RevenuePlanMix, SalesTotals, RiskTotals, SalesByHourPanel, SoldByPlanPanel, RevenueByVillagePanel, OutcomesPanel, VillageRevenuePanel } from "../components/MonthlyBreakdown";
+import { PHONE_ROWS, PhoneBarRow, PhoneChevron, PhoneFacts, PhoneList, PhoneMore, usePhone } from "../components/ui/phone";
 import {
   PageShell, PageHeader, KpiGrid, StatCard, MeterCard, Panel, Toolbar, SearchInput, Tabs,
   DataTable, Th, Td, TableMessage, RecordCell, StatusPill, EmptyState,
-  Button, Modal, Select,
+  Button, Modal,
   SkeletonKpis, SkeletonCard, SkeletonTable,
   CHART_COLORS, CHART_SERIES, STATUS_COLORS, ChartTooltip, ChartGradient,
   useChartTheme, ChartStat, LegendRow, LegendRows, DONUT, DonutCenter,
@@ -507,6 +502,7 @@ export default function Dashboard() {
           tone="red"
           actions={headerActions}
         />
+        <MonthPickerChips state={mb} />
         <SkeletonKpis count={4} />
         <div className="grid grid-cols-1 lg:grid-cols-[1.6fr_1fr] gap-5">
           <SkeletonCard height="h-[400px]" />
@@ -531,11 +527,29 @@ export default function Dashboard() {
       <PageHeader
         eyebrow="Operations"
         title="Dashboard"
-        subtitle={`Revenue, voucher stock and network health across ${allVisible ? "every village" : `${inScopeGroupIds.length} village${inScopeGroupIds.length === 1 ? "" : "s"} in scope`}.`}
+        // Two lines of prose is a lot of a phone screen to spend on a sentence
+        // you read once, so the phone gets the scope and the gist.
+        subtitle={
+          <>
+            <span className="max-sm:hidden">
+              Revenue, voucher stock and network health across{" "}
+              {allVisible ? "every village" : `${inScopeGroupIds.length} village${inScopeGroupIds.length === 1 ? "" : "s"} in scope`}.
+            </span>
+            <span className="sm:hidden">
+              {allVisible ? "Every village" : `${inScopeGroupIds.length} village${inScopeGroupIds.length === 1 ? "" : "s"} in scope`}
+              {" · revenue, stock and link health"}
+            </span>
+          </>
+        }
         icon={<BarChart3 size={22} />}
         tone="red"
         actions={headerActions}
       />
+
+      {/* The window every figure below is scoped to. Its own row on a phone:
+          in the header it shared a wrapping line with Sync now, and a strip
+          that scrolls sideways needs a parent whose width is the page's. */}
+      <MonthPickerChips state={mb} />
 
       {/* ----- Attention. One ~44px row of queue pills rather than a stack of
               full-width banners. An operator's three questions are "is anything
@@ -585,15 +599,31 @@ export default function Dashboard() {
           value={fmtMoney(mb.totals.revenue)}
           icon={<DollarSign size={18} />}
           color="accent"
-          sub={`${fmtNum(mb.totals.transactions)} sale${mb.totals.transactions === 1 ? "" : "s"} · ${mb.label || "this month"}`}
+          // The window is stated by the picker directly above on a phone, and
+          // repeating it here wrapped the line and left the five tiles ragged.
+          sub={
+            <>
+              {fmtNum(mb.totals.transactions)} sale{mb.totals.transactions === 1 ? "" : "s"}
+              <span className="max-sm:hidden"> · {mb.label || "this month"}</span>
+            </>
+          }
           onClick={isAdmin ? () => navigate("/portal-flows") : undefined}
+          // Five tiles two-up leave an orphan. Giving the lead figure the full
+          // width makes the remaining four an even 2x2 and reads as a hero
+          // rather than as a row that ran out of tiles.
+          className="max-sm:col-span-2"
         />
         <StatCard
           label="Vouchers sold"
           value={fmtNum(mb.totals.sold)}
           icon={<TrendingUp size={18} />}
           color="violet"
-          sub={`${fmtNum(mb.totals.customers)} customers · ${mb.label || "month"}`}
+          sub={
+            <>
+              {fmtNum(mb.totals.customers)} customers
+              <span className="max-sm:hidden"> · {mb.label || "month"}</span>
+            </>
+          }
           onClick={
             isAdmin
               ? () => {
@@ -640,8 +670,9 @@ export default function Dashboard() {
             icon={<HardDrive size={18} />}
             color="slate"
             sub="usage collection is off"
-            // Fifth of five in a two-up grid: full width rather than an orphan.
-            className="max-lg:col-span-2"
+            // Fifth of five: full width on a tablet's two-up grid. A phone has
+            // no orphan to absorb — the Revenue tile spans there instead.
+            className="sm:max-lg:col-span-2"
           />
         ) : (
           <MeterCard
@@ -655,7 +686,7 @@ export default function Dashboard() {
             sub={`${fmtNum(netHealth.withTelemetry || 0)} linked ${netHealth.withTelemetry === 1 ? "kit" : "kits"}`}
             noTotalNote="no plan cap published"
             onClick={() => navigate("/overview")}
-            className="max-lg:col-span-2"
+            className="sm:max-lg:col-span-2"
           />
         )}
       </KpiGrid>
@@ -683,27 +714,38 @@ export default function Dashboard() {
             placeholder="Search villages…"
             width="w-72"
           />
-          {/* A stacked table has no header row to tap, so a phone sorts here. */}
-          <div className="sm:hidden flex items-center gap-2">
-            <div className="flex-1 min-w-0">
-              <Select
-                value={sort.key}
-                onChange={(e) => setSort({ key: e.target.value, dir: e.target.value === "name" ? "asc" : "desc" })}
-                aria-label="Sort villages by"
-              >
-                {VILLAGE_SORTS.map((o) => (
-                  <option key={o.key} value={o.key}>Sort by {o.label.toLowerCase()}</option>
-                ))}
-              </Select>
+          {/* A phone card has no header row to tap, so the sort is a scrolling
+              row of chips: tap one to sort by it, tap the active one again to
+              turn it around. Same keys and same default directions as the
+              column heads, so both layouts sort identically. */}
+          <div className="sm:hidden overflow-x-auto scrollbar-none">
+            <div className="flex w-max items-center gap-1.5 py-0.5">
+              {VILLAGE_SORTS.map((o) => {
+                const active = sort.key === o.key;
+                return (
+                  <button
+                    key={o.key}
+                    type="button"
+                    onClick={() => toggleSort(o.key)}
+                    aria-pressed={active}
+                    aria-label={
+                      active
+                        ? `Sorted by ${o.label.toLowerCase()}, ${sort.dir === "asc" ? "ascending" : "descending"}; tap to reverse`
+                        : `Sort by ${o.label.toLowerCase()}`
+                    }
+                    className={
+                      "inline-flex h-9 shrink-0 items-center gap-1 rounded-full px-3.5 text-[12.5px] font-semibold whitespace-nowrap transition-colors " +
+                      (active
+                        ? "bg-[var(--brand-soft)] text-[var(--brand-fg-on-soft)]"
+                        : "border border-[var(--border-default)] text-[var(--fg-secondary)] active:bg-[var(--bg-surface)]")
+                    }
+                  >
+                    {o.label}
+                    {active && (sort.dir === "asc" ? <ArrowUp size={12} /> : <ArrowDown size={12} />)}
+                  </button>
+                );
+              })}
             </div>
-            <Button
-              variant="secondary"
-              onClick={() => setSort((s) => ({ ...s, dir: s.dir === "asc" ? "desc" : "asc" }))}
-              iconLeft={sort.dir === "asc" ? <ArrowUp size={14} /> : <ArrowDown size={14} />}
-              aria-label={`Sort ${sort.dir === "asc" ? "ascending" : "descending"}; tap to reverse`}
-            >
-              {sort.key === "name" ? (sort.dir === "asc" ? "A–Z" : "Z–A") : sort.dir === "asc" ? "Low" : "High"}
-            </Button>
           </div>
           <span className="text-[12.5px] text-[var(--fg-muted)]">
             {visibleVillages.length} of {villageRows.length} village{villageRows.length === 1 ? "" : "s"}
@@ -729,7 +771,35 @@ export default function Dashboard() {
               that says "keep going", the same trick the tab strip uses. It is a
               MAX height, so filtering down to three villages shrinks the box
               instead of stranding them in an empty well. */}
-          <DataTable maxHeight={404}>
+          {/* A phone gets a list, not a stacked table. Nine columns as nine
+              labelled lines is a 190px card a village; as a row with its
+              earnings on the right and the rest as small print it is half
+              that, and reads as a list of villages rather than as a table
+              that has been folded up. */}
+          <div className="sm:hidden">
+            {visibleVillages.length === 0 ? (
+              <p className="px-4 py-8 text-center text-[13px] text-[var(--fg-muted)]">
+                {villageRows.length === 0
+                  ? "No villages in scope yet — add one in Settings, or widen the All Villages scope."
+                  : `No village matches “${villageQuery}”.`}
+              </p>
+            ) : (
+              <div className="divide-y divide-[var(--border-subtle)]">
+                {(showAllVillages || villageQuery.trim()
+                  ? visibleVillages
+                  : visibleVillages.slice(0, PHONE_ROWS)
+                ).map((r) => (
+                  <VillagePhoneRow
+                    key={r.key}
+                    r={r}
+                    onOpen={r.siteId ? () => openVillage(r.siteId) : null}
+                  />
+                ))}
+              </div>
+            )}
+          </div>
+
+          <DataTable maxHeight={404} className="max-sm:hidden!">
             <thead>
               <tr>
                 <SortTh label="Village" sortKey="name" sort={sort} onSort={toggleSort} />
@@ -751,60 +821,34 @@ export default function Dashboard() {
                     : `No village matches “${villageQuery}”.`}
                 </TableMessage>
               ) : (
-                visibleVillages.map((r, i) => (
+                visibleVillages.map((r) => (
                   <tr
                     key={r.key}
                     onClick={r.siteId ? () => openVillage(r.siteId) : undefined}
-                    // On a phone this row is a compact card, and only the first
-                    // few show until "Show all" — unless a search is narrowing
-                    // the list, when every match should be on screen.
-                    className={[
-                      r.siteId ? "cursor-pointer" : "",
-                      phoneRowClass(i, showAllVillages || !!villageQuery.trim()),
-                    ].join(" ")}
+                    className={r.siteId ? "cursor-pointer" : ""}
                     title={r.siteId ? `Open ${r.name}` : undefined}
                   >
-                    <Td className={PHONE_CARD.title}>
+                    <Td>
                       <span className="flex items-center gap-2.5 min-w-0">
                         <StatusDot online={r.online} hasNet={r.hasNet} source={r.onlineSource} sl={r.sl} />
                         {/* No onClick of its own: the row carries it now, and a
                             nested handler would fire, then bubble, opening the
                             village twice. */}
-                        <RecordCell
-                          title={
-                            <>
-                              {r.name}
-                              {r.siteId && <PhoneChevron className="max-sm:inline-block align-[-3px] ml-0.5" />}
-                            </>
-                          }
-                          subtitle={r.hostname}
-                          mono
-                        />
+                        <RecordCell title={r.name} subtitle={r.hostname} mono />
                       </span>
                     </Td>
-                    <Td align="right" className={`tabular-nums ${PHONE_CARD.stat}`}>{fmtNum(r.vouchers)}</Td>
-                    <Td align="right" className={`tabular-nums ${PHONE_CARD.stat}`}>{fmtNum(r.active)}</Td>
-                    <Td align="right" strong className={`tabular-nums ${PHONE_CARD.stat}`}>{fmtNum(r.live)}</Td>
-                    {/* The card's headline on a phone, carrying the sales count
-                        whose own column it hides there. */}
-                    <Td
-                      align="right"
-                      strong
-                      className={`tabular-nums ${PHONE_CARD.aside} max-sm:flex-col! max-sm:items-end! max-sm:gap-0.5!`}
-                    >
-                      <span>{fmtMoney(r.revenue)}</span>
-                      <span className="sm:hidden text-[11.5px] font-normal text-[var(--fg-muted)]">
-                        {fmtNum(r.sales)} sale{r.sales === 1 ? "" : "s"}
-                      </span>
-                    </Td>
-                    <Td align="right" className={`tabular-nums ${PHONE_CARD.hide}`}>{fmtNum(r.sales)}</Td>
-                    <Td align="right" className={PHONE_CARD.stat}>
+                    <Td align="right" className="tabular-nums">{fmtNum(r.vouchers)}</Td>
+                    <Td align="right" className="tabular-nums">{fmtNum(r.active)}</Td>
+                    <Td align="right" strong className="tabular-nums">{fmtNum(r.live)}</Td>
+                    <Td align="right" strong className="tabular-nums">{fmtMoney(r.revenue)}</Td>
+                    <Td align="right" className="tabular-nums">{fmtNum(r.sales)}</Td>
+                    <Td align="right">
                       <StarlinkDataCell sl={r.sl} />
                     </Td>
-                    <Td align="right" className={PHONE_CARD.stat}>
+                    <Td align="right">
                       <VoucherDataCell soldQ={r.soldQ} usedQ={r.soldUsedQ} sold={r.sold} />
                     </Td>
-                    <Td align="right" className={PHONE_CARD.stat}>
+                    <Td align="right">
                       {r.hasNet ? (
                         <span
                           className="flex flex-col items-end"
@@ -846,7 +890,10 @@ export default function Dashboard() {
             <SalesTotals state={mb} />
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
               <SalesByHourPanel state={mb} />
-              <RevenueByVillagePanel state={mb} />
+              {/* Hidden on a phone: the village revenue detail immediately
+                  below renders the same ranking as bars WITH the figures, so
+                  side by side they would be the same chart twice. */}
+              <RevenueByVillagePanel state={mb} className="max-sm:hidden!" />
             </div>
             <VillageRevenuePanel state={mb} />
             {/* All-time totals come from /portal-config/revenue, which is not
@@ -890,7 +937,7 @@ export default function Dashboard() {
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
               <Panel title="Package distribution" subtitle="Voucher pool by plan" icon={<Activity size={15} />} tone="indigo">
                 {pieData.length === 0 ? (
-                  <EmptyState className="max-sm:py-8" icon={PackageOpen} title="No data available" />
+                  <EmptyState className="max-sm:py-8" icon={phone ? null : PackageOpen} title="No data available" />
                 ) : (
                   <>
                     <div className="relative mx-auto" style={{ width: 196, height: 196 }}>
@@ -935,7 +982,7 @@ export default function Dashboard() {
             {/* Per-plan utilisation. Click a plan to open the voucher list. */}
             <Panel title="Plan utilisation" subtitle="Share active, share of allocation consumed" icon={<Wifi size={15} />} tone="teal">
               {scopedPackageStats.length === 0 ? (
-                <EmptyState className="max-sm:py-8" icon={PackageOpen} title="No packages in this category" />
+                <EmptyState className="max-sm:py-8" icon={phone ? null : PackageOpen} title="No packages in this category" />
               ) : (
                 <div className="grid grid-cols-1 xl:grid-cols-2 gap-3">
                   {scopedPackageStats.map((pkg, i) => {
@@ -1033,7 +1080,7 @@ export default function Dashboard() {
             <div className="grid grid-cols-1 lg:grid-cols-[1fr_1.4fr] gap-5">
               <Panel title="Status breakdown" subtitle="The whole voucher pool" icon={<CheckCircle size={15} />} tone="blue">
                 {statusData.length === 0 ? (
-                  <EmptyState className="max-sm:py-8" icon={PackageOpen} title="No data available" />
+                  <EmptyState className="max-sm:py-8" icon={phone ? null : PackageOpen} title="No data available" />
                 ) : (
                   <>
                     <div className="relative mx-auto" style={{ width: 196, height: 196 }}>
@@ -1058,7 +1105,7 @@ export default function Dashboard() {
 
               <Panel title="Quota by package" subtitle="Allocated · Consumed (GB) per plan" icon={<TrendingUp size={15} />} tone="teal">
                 {quotaBarData.length === 0 ? (
-                  <EmptyState className="max-sm:py-8" icon={PackageOpen} title="No data available" />
+                  <EmptyState className="max-sm:py-8" icon={phone ? null : PackageOpen} title="No data available" />
                 ) : (
                   <>
                     <ChartStat
@@ -1067,18 +1114,31 @@ export default function Dashboard() {
                       caption={`of ${formatQuota(metrics.totalQuota)} allocated across ${fmtNum(quotaBarData.length)} plan${quotaBarData.length === 1 ? "" : "s"}`}
                     />
                     {phone ? (
-                      // Sideways on a phone: plan names read along the axis in
-                      // full width instead of tilted, clipped and overlapping.
-                      <ResponsiveContainer width="100%" height={Math.max(160, quotaBarData.length * 56 + 32)}>
-                        <BarChart data={quotaBarData} layout="vertical" barGap={3} barCategoryGap="24%" margin={{ top: 4, right: 12, bottom: 0, left: 0 }}>
-                          <CartesianGrid {...gridProps(ct)} horizontal={false} vertical />
-                          <XAxis type="number" {...axisX(ct)} tickFormatter={(v) => `${v} GB`} />
-                          <YAxis type="category" dataKey="name" {...axisY(ct, { width: 96 })} tickFormatter={(v) => shortLabel(v, 13)} />
-                          <Tooltip content={<ChartTooltip valueFormatter={(v) => `${fmtNum(v)} GB`} />} cursor={{ fill: ct.cursor }} />
-                          <Bar dataKey="allocated" name="Allocated" fill={CHART_COLORS.slate} radius={[0, 6, 6, 0]} maxBarSize={14} isAnimationActive={false} />
-                          <Bar dataKey="consumed" name="Consumed" fill={CHART_COLORS.brand} radius={[0, 6, 6, 0]} maxBarSize={14} isAnimationActive={false} />
-                        </BarChart>
-                      </ResponsiveContainer>
+                      // Sideways bars still put the plan name on a 96px axis,
+                      // where "Monthly Wi-Fi unlimited-night…" is an ellipsis
+                      // and the two bars are 14px of a 375px screen. A meter a
+                      // plan says the same thing in words the width can hold:
+                      // what it has used, of what it was given.
+                      <div className="-mt-1 divide-y divide-[var(--border-subtle)]">
+                        {quotaBarData.map((q) => (
+                          <PhoneBarRow
+                            key={q.name}
+                            inset={false}
+                            label={q.name}
+                            value={`${fmtNum(q.consumed)} / ${fmtNum(q.allocated)} GB`}
+                            amount={q.consumed}
+                            total={q.allocated}
+                            color={usageColor(q.allocated ? Math.round((q.consumed / q.allocated) * 100) : 0)}
+                            sub={
+                              <PhoneFacts
+                                items={[
+                                  { v: `${q.allocated ? Math.round((q.consumed / q.allocated) * 100) : 0}%`, l: "of its allocation" },
+                                ]}
+                              />
+                            }
+                          />
+                        ))}
+                      </div>
                     ) : (
                     <ResponsiveContainer width="100%" height={300}>
                       <BarChart data={quotaBarData} barGap={4} barCategoryGap={BAR_CATEGORY_GAP} margin={{ top: 8, right: 12, bottom: 24, left: 0 }}>
@@ -1098,10 +1158,14 @@ export default function Dashboard() {
                       </BarChart>
                     </ResponsiveContainer>
                     )}
-                    <LegendRows>
-                      <LegendRow color={CHART_COLORS.slate} label="Allocated" value={formatQuota(metrics.totalQuota)} />
-                      <LegendRow color={CHART_COLORS.brand} label="Consumed" value={formatQuota(metrics.totalDataUsage)} />
-                    </LegendRows>
+                    {/* The phone's meters are not a two-series chart, and the
+                        headline above already states both totals. */}
+                    {!phone && (
+                      <LegendRows>
+                        <LegendRow color={CHART_COLORS.slate} label="Allocated" value={formatQuota(metrics.totalQuota)} />
+                        <LegendRow color={CHART_COLORS.brand} label="Consumed" value={formatQuota(metrics.totalDataUsage)} />
+                      </LegendRows>
+                    )}
                   </>
                 )}
               </Panel>
@@ -1122,7 +1186,7 @@ export default function Dashboard() {
             }
           >
             {syncTrendData.length === 0 ? (
-              <EmptyState className="max-sm:py-8" icon={Clock} title="No sync history yet" description="Run a sync to pull fresh voucher data." />
+              <EmptyState className="max-sm:py-8" icon={phone ? null : Clock} title="No sync history yet" description="Run a sync to pull fresh voucher data." />
             ) : (
               <>
                 {/* `updated` is collected per sync but never plotted, so it is
@@ -1134,6 +1198,39 @@ export default function Dashboard() {
                     lastSync ? ` · last sync ${new Date(lastSync.sync_started_at).toLocaleString()}` : ""
                   }`}
                 />
+                {/* Seven syncs on one day all label themselves "Sep 17", so a
+                    phone lists them by the time they ran instead — which is
+                    what you came to this tab to check. */}
+                {phone ? (
+                  <div className="-mt-1 divide-y divide-[var(--border-subtle)]">
+                    {syncLogs.slice(0, 7).map((log) => (
+                      <div key={log.id ?? log.sync_started_at} className="py-2.5">
+                        <div className="flex items-center gap-3 min-w-0">
+                          <span className="flex-1 min-w-0 truncate text-[13.5px] font-medium text-[var(--fg-primary)]">
+                            {new Date(log.sync_started_at).toLocaleString(undefined, {
+                              day: "numeric", month: "short", hour: "2-digit", minute: "2-digit",
+                            })}
+                          </span>
+                          {log.status === "failed" ? (
+                            <StatusPill tone="danger">Failed</StatusPill>
+                          ) : (
+                            <span className="shrink-0 text-[13.5px] font-semibold tabular-nums text-[var(--fg-primary)]">
+                              {fmtNum(log.total_processed || 0)}
+                            </span>
+                          )}
+                        </div>
+                        <PhoneFacts
+                          className="mt-1"
+                          items={[
+                            { v: fmtNum(log.total_new || 0), l: "new" },
+                            { v: fmtNum(log.total_updated || 0), l: "updated" },
+                            log.total_archived ? { v: fmtNum(log.total_archived), l: "archived" } : null,
+                          ]}
+                        />
+                      </div>
+                    ))}
+                  </div>
+                ) : (
                 <ResponsiveContainer width="100%" height={260}>
                   <AreaChart data={syncTrendData} margin={{ top: 8, right: 8, left: -12, bottom: 0 }}>
                     <defs>
@@ -1148,10 +1245,16 @@ export default function Dashboard() {
                     <Area type="monotone" dataKey="new" name="New" stroke={CHART_COLORS.green} strokeWidth={2} fill="url(#syncNew)" isAnimationActive={false} />
                   </AreaChart>
                 </ResponsiveContainer>
-                <LegendRows>
-                  <LegendRow color={CHART_COLORS.blue} label="Processed" value={fmtNum(syncTrendData.reduce((a, s) => a + s.processed, 0))} />
-                  <LegendRow color={CHART_COLORS.green} label="New" value={fmtNum(syncTrendData.reduce((a, s) => a + s.new, 0))} />
-                </LegendRows>
+                )}
+                {/* Swatches for the two series of the area chart above — which
+                    a phone does not draw, so on a phone they key nothing. The
+                    list already prints processed and new per sync. */}
+                {!phone && (
+                  <LegendRows>
+                    <LegendRow color={CHART_COLORS.blue} label="Processed" value={fmtNum(syncTrendData.reduce((a, s) => a + s.processed, 0))} />
+                    <LegendRow color={CHART_COLORS.green} label="New" value={fmtNum(syncTrendData.reduce((a, s) => a + s.new, 0))} />
+                  </LegendRows>
+                )}
               </>
             )}
           </Panel>
@@ -1219,7 +1322,30 @@ export default function Dashboard() {
             </div>
 
             <div className="rounded-xl border border-[var(--border-default)] overflow-hidden">
-              <DataTable>
+              {/* In a bottom sheet a voucher is two lines: which one and what
+                  state it is in, then what it has used of what it was sold. */}
+              <PhoneList>
+                {(drillDownData.vouchers || []).slice(0, 15).map((v) => (
+                  <div key={v.uuid} className="px-4 py-3 flex flex-col gap-1.5">
+                    <div className="flex items-center gap-3 min-w-0">
+                      <span className="min-w-0 flex-1 truncate font-mono text-[12.5px] font-semibold">
+                        <span className="px-1.5 py-0.5 rounded bg-[var(--brand-soft)] text-[var(--brand-fg-on-soft)]">
+                          {v.voucher_code}
+                        </span>
+                      </span>
+                      <VoucherStatusPill status={v.status} />
+                    </div>
+                    <PhoneFacts
+                      items={[
+                        { v: `${v.current_clients}/${v.max_clients}`, l: "clients" },
+                        { v: `${formatDuration(v.used_time)}/${formatDuration(v.time_period)}`, l: "time" },
+                        { v: `${formatQuota(v.used_quota)} of ${formatQuota(v.quota)}`, l: "" },
+                      ]}
+                    />
+                  </div>
+                ))}
+              </PhoneList>
+              <DataTable className="max-sm:hidden!">
                 <thead>
                   <tr>
                     <Th>Code</Th>
@@ -1231,24 +1357,18 @@ export default function Dashboard() {
                 </thead>
                 <tbody>
                   {(drillDownData.vouchers || []).slice(0, 15).map((v) => (
-                    // Its own tracks rather than PHONE_CARD's thirds: in a bottom
-                    // sheet a third is too narrow for "117 MB / 1.0 GB", so the
-                    // short figures take what they need and data takes the rest.
-                    <tr
-                      key={v.uuid}
-                      className="max-sm:grid! max-sm:grid-cols-[auto_auto_minmax(0,1fr)] max-sm:gap-x-5! max-sm:gap-y-3!"
-                    >
-                      <Td className="max-sm:col-span-2 max-sm:self-center">
+                    <tr key={v.uuid}>
+                      <Td>
                         <span className="font-mono text-[12.5px] font-semibold px-1.5 py-0.5 rounded bg-[var(--brand-soft)] text-[var(--brand-fg-on-soft)]">
                           {v.voucher_code}
                         </span>
                       </Td>
-                      <Td className="max-sm:col-start-3 max-sm:row-start-1 max-sm:self-center max-sm:justify-end! max-sm:before:hidden!">
+                      <Td>
                         <VoucherStatusPill status={v.status} />
                       </Td>
-                      <Td align="right" mono className={PHONE_CARD.cell}>{v.current_clients}/{v.max_clients}</Td>
-                      <Td align="right" mono className={`${PHONE_CARD.cell} max-sm:whitespace-nowrap!`}>{formatDuration(v.used_time)} / {formatDuration(v.time_period)}</Td>
-                      <Td align="right" mono className={PHONE_CARD.cell}>{formatQuota(v.used_quota)} / {formatQuota(v.quota)}</Td>
+                      <Td align="right" mono>{v.current_clients}/{v.max_clients}</Td>
+                      <Td align="right" mono>{formatDuration(v.used_time)} / {formatDuration(v.time_period)}</Td>
+                      <Td align="right" mono>{formatQuota(v.used_quota)} / {formatQuota(v.quota)}</Td>
                     </tr>
                   ))}
                 </tbody>
@@ -1312,6 +1432,62 @@ function AttentionPill({ tone, icon, count, label, title, onClick }) {
       <span className="font-semibold tabular-nums">{fmtNum(count)}</span>
       <span className="opacity-90">{label}</span>
       {onClick && <ArrowUpRight size={13} className="shrink-0 opacity-70" />}
+    </Tag>
+  );
+}
+
+/**
+ * One village, as a phone list row.
+ *
+ * The desktop table's nine columns become three lines: the village and what it
+ * earned in the window, where it is and how many sales that was, then the
+ * figures that qualify those two. Nothing from the table is dropped — a village
+ * with no Starlink kit or no collector sample simply carries one fact fewer,
+ * where the stacked card printed a labelled "—".
+ */
+function VillagePhoneRow({ r, onOpen }) {
+  const Tag = onOpen ? "button" : "div";
+  const purchasedGb = r.soldQ ? r.soldQ / 1024 : 0;
+  const usedGb = (r.soldUsedQ || 0) / 1024;
+  const sl = r.sl;
+  return (
+    <Tag
+      type={onOpen ? "button" : undefined}
+      onClick={onOpen || undefined}
+      className={
+        "w-full text-left px-4 py-3 flex flex-col gap-1.5 " +
+        (onOpen ? "active:bg-[var(--bg-surface)] transition-colors" : "")
+      }
+    >
+      <span className="flex items-center gap-2 min-w-0">
+        <StatusDot online={r.online} hasNet={r.hasNet} source={r.onlineSource} sl={r.sl} />
+        <span className="flex-1 min-w-0 truncate text-[14px] font-semibold text-[var(--fg-primary)]">
+          {r.name}
+        </span>
+        <span className="shrink-0 text-[14px] font-semibold tabular-nums text-[var(--fg-primary)]">
+          {fmtMoney(r.revenue)}
+        </span>
+        {onOpen && <PhoneChevron />}
+      </span>
+      <span className="flex items-center gap-3 min-w-0 text-[11.5px] text-[var(--fg-muted)]">
+        <span className="flex-1 min-w-0 truncate font-mono">{r.hostname}</span>
+        <span className="shrink-0 tabular-nums">
+          {fmtNum(r.sales)} sale{r.sales === 1 ? "" : "s"}
+        </span>
+      </span>
+      <PhoneFacts
+        items={[
+          { v: fmtNum(r.live), l: "live" },
+          { v: `${fmtNum(r.active)}/${fmtNum(r.vouchers)}`, l: "active" },
+          purchasedGb
+            ? r.soldUsedQ
+              ? { v: `${fmtGb(usedGb)}/${fmtGb(purchasedGb)} GB`, l: "used" }
+              : { v: `${fmtGb(purchasedGb)} GB`, l: "sold" }
+            : null,
+          sl?.configured && sl.usedGb != null ? { v: `${fmtGb(sl.usedGb)} GB`, l: "Starlink" } : null,
+          r.uptimePct != null ? { v: `${r.uptimePct}%`, l: "uptime" } : null,
+        ]}
+      />
     </Tag>
   );
 }

@@ -15,7 +15,7 @@
 //     package filter, so it costs nothing, and each tile drills into the list by
 //     setting the status filter.
 
-import { useEffect, useState, useCallback, useMemo } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, useCallback, useMemo } from "react";
 import { useParams, useNavigate, useSearchParams } from "react-router-dom";
 import { AnimatePresence, motion } from "framer-motion";
 import toast from "react-hot-toast";
@@ -24,7 +24,9 @@ import {
   Sparkles,
   Trash2,
   Ban,
+  Check,
   CheckCircle,
+  ChevronRight,
   X,
   Phone,
   ExternalLink,
@@ -60,6 +62,7 @@ import {
   Th,
   Td,
 } from "../components/ui";
+import { usePhone } from "../components/ui/phone";
 
 export default function VouchersPage() {
   const { uuid: routeUuid } = useParams();
@@ -67,6 +70,7 @@ export default function VouchersPage() {
   const [searchParams] = useSearchParams();
   const { isAdmin } = useAuth();
   const { activeSite, activeGroupId, sites, visibleSiteIds } = useSite();
+  const phone = usePhone();
 
   // Query params that scope requests to the current view: a single village
   // (groupId), the visible subset of the "All Villages" display filter
@@ -117,6 +121,11 @@ export default function VouchersPage() {
 
   // Selection
   const [selected, setSelected] = useState(new Set());
+  // Phone only: selecting is a mode, the way it is in a mail or photos app. A
+  // checkbox on every row is desktop furniture — it costs a column of chrome on
+  // every card for something an operator does once a week, and it makes a
+  // one-tap list into a two-target one. Desktop keeps its checkbox column.
+  const [selectMode, setSelectMode] = useState(false);
 
   // Modals
   const [detailUuid, setDetailUuid] = useState(routeUuid || null);
@@ -173,6 +182,16 @@ export default function VouchersPage() {
   useEffect(() => {
     if (routeUuid) setDetailUuid(routeUuid);
   }, [routeUuid]);
+
+  // Phone: a selection only covers the rows it was made on. Once the page or
+  // any filter changes, those rows are gone from the screen while the sticky
+  // bar would still act on them — an invisible selection is how the wrong
+  // vouchers get deleted. Drop it with the list it belonged to. Selection MODE
+  // stays on, so an operator who is mid-task keeps the checkmarks and starts
+  // again. Desktop keeps its cross-page selection unchanged.
+  useEffect(() => {
+    if (phone) setSelected(new Set());
+  }, [phone, page, statusFilter, packageFilter, searchQuery, phoneFilter, viewMode, scopeParams, soldFrom, soldTo]);
 
   // Debounced search
   const [searchInput, setSearchInput] = useState("");
@@ -232,6 +251,38 @@ export default function VouchersPage() {
     setPage(1);
   };
 
+  // The same four figures the KPI tiles carry, plus the two states that only
+  // the dropdown had. On a phone they are the filter itself (see below).
+  const statusChips = useMemo(
+    () => [
+      { value: "", label: "All", count: scopeTotals.total },
+      { value: "1", label: "Unused", count: scopeTotals.unused },
+      { value: "2", label: "In use", count: scopeTotals.active },
+      { value: "3", label: "Expired", count: scopeTotals.expired },
+      { value: "sold", label: "Sold" },
+      { value: "0", label: "Inactive" },
+    ],
+    [scopeTotals]
+  );
+
+  // The chip row is wider than a phone screen, and a status can arrive from the
+  // URL rather than from a tap (a dashboard card drilling in to ?status=0), in
+  // which case the selected chip sits past the right edge and the page reads as
+  // unfiltered. Same treatment the Tabs strip got: bring the active chip into
+  // view, clear of the edge, whenever the filter changes. A no-op on desktop,
+  // where the strip is display:none and both widths are 0.
+  const chipStripRef = useRef(null);
+  useLayoutEffect(() => {
+    const el = chipStripRef.current;
+    const btn = el?.querySelector("[data-active]");
+    if (!btn || el.scrollWidth <= el.clientWidth) return;
+    const EDGE = 12; // leave the chip clear of the track's edge
+    const s = el.getBoundingClientRect();
+    const b = btn.getBoundingClientRect();
+    if (b.left < s.left + EDGE) el.scrollLeft += b.left - s.left - EDGE;
+    else if (b.right > s.right - EDGE) el.scrollLeft += b.right - s.right + EDGE;
+  }, [statusFilter, viewMode, statusChips]);
+
   const toggleSelect = (uuid) => {
     setSelected((prev) => {
       const next = new Set(prev);
@@ -247,17 +298,40 @@ export default function VouchersPage() {
 
   const handleBulk = (action) => {
     const labels = { delete: "delete", disable: "disable", enable: "enable" };
+    const n = selected.size;
     setConfirm({
-      title: `${labels[action]} ${selected.size} voucher(s)?`,
+      // The phone's confirm sheet is the whole screen's headline, where a
+      // lower-case "disable 3 voucher(s)?" reads as a bug. Desktop's wording
+      // is left exactly as it was.
+      title: phone
+        ? `${labels[action].charAt(0).toUpperCase() + labels[action].slice(1)} ${n} voucher${n === 1 ? "" : "s"}?`
+        : `${labels[action]} ${n} voucher(s)?`,
       message: `This will ${labels[action]} the selected vouchers.`,
       variant: action === "enable" ? "info" : "danger",
       confirmLabel: labels[action].charAt(0).toUpperCase() + labels[action].slice(1),
       onConfirm: async () => {
         setConfirm(null);
         try {
-          await voucherApi.bulk(action, [...selected]);
-          toast.success(`Bulk ${labels[action]} completed`);
-          setSelected(new Set());
+          // The endpoint answers 200 whatever happens and reports the outcome
+          // in the body: it walks the uuids one at a time and counts them. A
+          // flat "Bulk disable completed" told an operator three vouchers had
+          // been disabled when the call had disabled none of them, which is
+          // worse than an error — they walk away believing the estate changed.
+          const res = await voucherApi.bulk(action, [...selected]);
+          const done = Number(res?.processed ?? 0);
+          const failed = Number(res?.failed ?? 0);
+          const verb = `${labels[action]}d`; // deleted / disabled / enabled
+          const noun = (n) => `${n} voucher${n === 1 ? "" : "s"}`;
+          if (failed && !done) {
+            toast.error(`Could not ${labels[action]} ${noun(failed)}${res?.errors?.[0] ? ` — ${res.errors[0]}` : ""}`);
+          } else if (failed) {
+            toast.error(`${noun(done)} ${verb}, ${failed} failed`);
+          } else {
+            toast.success(`${noun(done)} ${verb}`);
+          }
+          // Keep the selection when nothing changed, so a retry is one tap
+          // rather than picking the same rows again.
+          if (done) setSelected(new Set());
           fetchVouchers();
         } catch (err) {
           toast.error(err.message);
@@ -279,25 +353,43 @@ export default function VouchersPage() {
   const totalPages = Math.ceil(total / limit);
   const hasFilters = statusFilter || packageFilter || searchInput || phoneInput;
   // The filters folded behind the phone "Filters" button, counted so a
-  // narrowed list never looks unexplained.
-  const foldedFilterCount = [phoneInput, statusFilter, packageFilter].filter(Boolean).length;
+  // narrowed list never looks unexplained. Status is not among them on a phone:
+  // it is on screen as the chip row.
+  const foldedFilterCount = [phoneInput, packageFilter].filter(Boolean).length;
   const allOnPageSelected = vouchers.length > 0 && selected.size === vouchers.length;
   const colCount = isAdmin ? 10 : 9;
+
+  // Leaving selection mode drops the selection with it: an invisible selection
+  // that a later bulk action would act on is how the wrong vouchers get deleted.
+  const exitSelectMode = () => {
+    setSelectMode(false);
+    setSelected(new Set());
+  };
 
   return (
     <PageShell>
       <PageHeader
         eyebrow={activeSite ? `Village · ${activeSite.name}` : "Inventory"}
         title="Vouchers"
+        // A phone says this figure twice already — the "All 80" chip in the row
+        // below and the panel's own "80 records · page 1 of 4" — so the hero
+        // keeps only the button that acts on the page. Desktop is unchanged.
         subtitle={
-          viewMode === "historical"
-            ? `${total.toLocaleString()} archived vouchers`
-            : `${total.toLocaleString()} voucher${total === 1 ? "" : "s"}${
-                hasFilters ? " matching the current filters" : " in scope"
-              }`
+          phone
+            ? null
+            : viewMode === "historical"
+              ? `${total.toLocaleString()} archived vouchers`
+              : `${total.toLocaleString()} voucher${total === 1 ? "" : "s"}${
+                  hasFilters ? " matching the current filters" : " in scope"
+                }`
         }
         icon={<Ticket size={22} />}
         tone="indigo"
+        // With no sentence, the phone hero is the Generate button alone, and
+        // the header's column gap still spaces it from the (empty, sr-only)
+        // title block — 16px of dead card above the button. Close it on
+        // phones only; desktop keeps its subtitle and its spacing.
+        className="max-sm:[&>div]:gap-0"
         actions={
           isAdmin && (
             <Button
@@ -313,8 +405,11 @@ export default function VouchersPage() {
       />
 
       {/* Stock at a glance. "Unused" is the number that decides whether a village
-          can still sell, so it sits next to the total rather than in the table. */}
-      <KpiGrid cols={4}>
+          can still sell, so it sits next to the total rather than in the table.
+          Phones get the same figures as the chip row in the toolbar below: four
+          tiles that exist to be tapped are two rows of cards doing a filter's
+          job, and they pushed the list a screen and a half down. */}
+      <KpiGrid cols={4} className="max-sm:hidden">
         <StatCard
           label="Vouchers in scope"
           value={scopeTotals.total.toLocaleString()}
@@ -444,7 +539,7 @@ export default function VouchersPage() {
           className="max-sm:order-1 max-sm:[&>button]:flex-1 max-sm:[&>button]:justify-center"
         />
 
-        <div className={"w-44 max-sm:order-2 " + (filtersOpen ? "" : "max-sm:hidden")}>
+        <div className="w-44 max-sm:hidden!">
           <Select
             value={statusFilter}
             onChange={(e) => {
@@ -503,6 +598,51 @@ export default function VouchersPage() {
         )}
       </Toolbar>
 
+      {/* Phone: status is a row of chips carrying the stock figures, not a
+          dropdown — it is this page's most-used filter and its most-read
+          number, and as chips it is both at once, on one line, immediately
+          above the list it narrows. The track scrolls sideways so the page
+          never does; the negative margin lets it run to the screen edges
+          while the first chip still lines up with the cards. */}
+      <div
+        ref={chipStripRef}
+        className="sm:hidden -mx-3 px-3 overflow-x-auto overscroll-x-contain scrollbar-none"
+        role="group"
+        aria-label="Filter by status"
+      >
+        <div className="flex w-max items-center gap-2">
+          {statusChips.map((c) => {
+            const active = statusFilter === c.value;
+            return (
+              <button
+                key={c.value || "all"}
+                type="button"
+                data-active={active || undefined}
+                aria-pressed={active}
+                onClick={() => applyStatus(c.value)}
+                className={
+                  "inline-flex h-9 shrink-0 items-center gap-1.5 rounded-full border px-3.5 " +
+                  "text-[12.5px] font-semibold font-display transition-colors " +
+                  (active
+                    ? "border-transparent bg-[var(--brand-soft)] text-[var(--brand-fg-on-soft)]"
+                    : "border-[var(--border-default)] bg-[var(--bg-elevated)] text-[var(--fg-secondary)] active:bg-[var(--surface-pressed)]")
+                }
+              >
+                {c.label}
+                {/* The figures describe the live inventory, so they are left
+                    off while the archive is on screen rather than counting
+                    something the list is not showing. */}
+                {c.count != null && viewMode !== "historical" && (
+                  <span className={"tabular-nums text-[11.5px] font-bold " + (active ? "" : "text-[var(--fg-muted)]")}>
+                    {c.count.toLocaleString()}
+                  </span>
+                )}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
       {/* ----- List ----- */}
       {loading ? (
         <SkeletonTable rows={8} cols={colCount} />
@@ -553,6 +693,19 @@ export default function VouchersPage() {
           icon={<Ticket size={15} />}
           tone="indigo"
           padding={false}
+          actions={
+            isAdmin ? (
+              <Button
+                variant={selectMode ? "brand-ghost" : "secondary"}
+                size="xs"
+                className="sm:hidden"
+                onClick={() => (selectMode ? exitSelectMode() : setSelectMode(true))}
+                aria-pressed={selectMode}
+              >
+                {selectMode ? "Done" : "Select"}
+              </Button>
+            ) : null
+          }
         >
           {/* Bulk bar sits inside the card, directly above the rows it acts on —
               loose above the table it read as a page-level banner. */}
@@ -607,24 +760,26 @@ export default function VouchersPage() {
             )}
           </AnimatePresence>
 
-          {/* The header row — and its select-all box — is hidden once the rows
-              become cards, so a phone gets its own select-all line. The whole
-              line is the label, so it is one easy tap. */}
-          {isAdmin && (
-            <label className="sm:hidden flex items-center justify-between gap-3 min-h-11 px-4 border-b border-[var(--border-subtle)] bg-[var(--surface-sunken)] cursor-pointer">
-              <span className="text-[12.5px] font-semibold text-[var(--fg-secondary)] font-display">
-                {allOnPageSelected ? "Deselect all on this page" : `Select all ${vouchers.length} on this page`}
-              </span>
-              <input
-                type="checkbox"
-                checked={allOnPageSelected}
-                onChange={toggleAll}
-                className="accent-[var(--brand)] cursor-pointer"
+          {/* Phone list. Not the stacked table: ten columns folded into ten
+              labelled lines is a 450px card per voucher, and twenty of those
+              is nine thousand pixels of scrolling for a list you are meant to
+              scan. The four things an operator reads in a village — which code,
+              what state, which plan and who bought it, how much is left — on
+              three lines; everything else is one tap away in the record. */}
+          <div className="sm:hidden divide-y divide-[var(--border-subtle)]">
+            {vouchers.map((v) => (
+              <VoucherPhoneCard
+                key={v.uuid}
+                voucher={v}
+                selectMode={isAdmin && selectMode}
+                selected={selected.has(v.uuid)}
+                onOpen={() => openDetail(v.uuid)}
+                onToggle={() => toggleSelect(v.uuid)}
               />
-            </label>
-          )}
+            ))}
+          </div>
 
-          <DataTable>
+          <DataTable className="max-sm:hidden!">
             <thead>
               <tr>
                 {isAdmin && (
@@ -647,10 +802,6 @@ export default function VouchersPage() {
                 <Th align="right">Data</Th>
                 <Th>Created</Th>
                 <Th align="right">Usage</Th>
-                {/* Phone-only column (hidden from sm up, header and cells alike,
-                    so the desktop grid is unchanged). Its empty header leaves
-                    the card line unlabelled and full width. */}
-                <Th className="sm:hidden!" />
               </tr>
             </thead>
             <tbody>
@@ -663,13 +814,8 @@ export default function VouchersPage() {
                     key={v.uuid}
                     onClick={() => openDetail(v.uuid)}
                     className={
-                      // Phone: the card keeps its normal right padding — only
-                      // the title line needs to clear the checkbox (below) —
-                      // and a selected card tints whole, not cell by cell.
-                      "cursor-pointer max-sm:pr-4! " +
-                      (isSelected
-                        ? "[&>td]:bg-[var(--brand-soft)] max-sm:[&>td]:bg-transparent max-sm:bg-[var(--brand-soft)]"
-                        : "")
+                      // Tint the cells, not the row (see above).
+                      "cursor-pointer " + (isSelected ? "[&>td]:bg-[var(--brand-soft)]" : "")
                     }
                   >
                     {isAdmin && (
@@ -677,12 +823,7 @@ export default function VouchersPage() {
                       // included — must swallow the click, or ticking a box
                       // would also open the record. It still inherits
                       // .sf-table's cell padding.
-                      // On a phone the cell is the card's top-right corner; its
-                      // padding makes a 36px hit area around the 20px box.
-                      <td
-                        className="w-10 max-sm:w-auto! max-sm:p-2! max-sm:top-[5px]! max-sm:right-2!"
-                        onClick={(e) => e.stopPropagation()}
-                      >
+                      <td className="w-10" onClick={(e) => e.stopPropagation()}>
                         <input
                           type="checkbox"
                           checked={isSelected}
@@ -692,43 +833,39 @@ export default function VouchersPage() {
                         />
                       </td>
                     )}
-                    <Td nowrap className={"max-sm:items-center! " + (isAdmin ? "max-sm:pr-10!" : "")}>
-                      <span className="font-mono text-[13px] font-semibold tracking-tight text-[var(--fg-primary)] truncate block max-sm:ml-0! max-sm:text-[15px]">
+                    <Td nowrap>
+                      <span className="font-mono text-[13px] font-semibold tracking-tight text-[var(--fg-primary)] truncate block">
                         {v.voucher_code}
-                      </span>
-                      {/* Phone: the status rides on the title line. */}
-                      <span className="sm:hidden! max-sm:ml-auto! shrink-0">
-                        <StatusBadge status={v.status} />
                       </span>
                     </Td>
                     <Td>
-                      <span className="block truncate max-w-[180px] max-sm:max-w-none">{v.package_name || "—"}</span>
+                      <span className="block truncate max-w-[180px]">{v.package_name || "—"}</span>
                     </Td>
-                    <Td className="max-sm:hidden!">
+                    <Td>
                       <StatusBadge status={v.status} />
                     </Td>
-                    <Td mono nowrap className={v.payer_phone ? "" : "max-sm:hidden!"}>
+                    <Td mono nowrap>
                       {v.payer_phone || "—"}
                     </Td>
-                    <Td align="right" nowrap className="tabular-nums max-sm:hidden!">
+                    <Td align="right" nowrap className="tabular-nums">
                       <span className="font-semibold text-[var(--fg-primary)]">{v.current_clients}</span>
                       <span className="text-[var(--fg-subtle)] mx-0.5">/</span>
                       <span>{v.max_clients}</span>
                     </Td>
-                    <Td align="right" nowrap className="tabular-nums max-sm:hidden!">
+                    <Td align="right" nowrap className="tabular-nums">
                       <span className="font-semibold text-[var(--fg-primary)]">{formatMin(v.used_time)}</span>
                       <span className="text-[var(--fg-subtle)] mx-0.5">/</span>
                       <span>{formatMin(v.time_period)}</span>
                     </Td>
-                    <Td align="right" nowrap className="tabular-nums max-sm:hidden!">
+                    <Td align="right" nowrap className="tabular-nums">
                       <span className="font-semibold text-[var(--fg-primary)]">{formatMB(v.used_quota)}</span>
                       <span className="text-[var(--fg-subtle)] mx-0.5">/</span>
                       <span>{formatMB(v.quota)}</span>
                     </Td>
-                    <Td muted nowrap className="tabular-nums max-sm:hidden!">
+                    <Td muted nowrap className="tabular-nums">
                       {v.create_time ? fmtShortDate(Number(v.create_time)) : "—"}
                     </Td>
-                    <Td align="right" nowrap className="max-sm:hidden!">
+                    <Td align="right" nowrap>
                       <a
                         href={usageUrl(v)}
                         target="_blank"
@@ -740,31 +877,6 @@ export default function VouchersPage() {
                         <ExternalLink size={12} /> Usage
                       </a>
                     </Td>
-                    {/* Phone-only: consumption as a three-up strip, then the
-                        created date and the usage-page link as a real button. */}
-                    <td className="sm:hidden!">
-                      <div className="w-full flex flex-col gap-2.5 pt-0.5">
-                        <div className="grid grid-cols-3 rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-surface)] divide-x divide-[var(--border-subtle)]">
-                          <UsageFigure label="Clients" used={v.current_clients ?? 0} of={v.max_clients ?? 0} />
-                          <UsageFigure label="Time" used={formatMin(v.used_time)} of={formatMin(v.time_period)} />
-                          <UsageFigure label="Data" used={formatMB(v.used_quota)} of={formatMB(v.quota)} />
-                        </div>
-                        <div className="flex items-center justify-between gap-3">
-                          <span className="text-[12px] text-[var(--fg-muted)] tabular-nums">
-                            {v.create_time ? `Created ${fmtShortDate(Number(v.create_time))}` : "Created —"}
-                          </span>
-                          <a
-                            href={usageUrl(v)}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            onClick={(e) => e.stopPropagation()}
-                            className="inline-flex shrink-0 items-center gap-1.5 h-9 px-3.5 rounded-full border border-[var(--input-border)] bg-[var(--surface)] text-[12.5px] font-semibold text-[var(--fg-secondary)] shadow-[var(--shadow-xs)] active:bg-[var(--surface-pressed)] font-display"
-                          >
-                            <ExternalLink size={13} /> Usage page
-                          </a>
-                        </div>
-                      </div>
-                    </td>
                   </tr>
                 );
               })}
@@ -775,11 +887,21 @@ export default function VouchersPage() {
         </Panel>
       )}
 
+      {/* Room for the bar to hover over at the end of the list, so the page
+          controls under the last card are never left behind it. Without it the
+          bar is still stuck when the page bottoms out and sits on top of the
+          pager. Only while there is a bar to make room for. */}
+      {isAdmin && (selectMode || selected.size > 0) && vouchers.length > 0 && (
+        <div aria-hidden="true" className="sm:hidden h-16 shrink-0" />
+      )}
+
       {/* Phone bulk bar. Sticky, not fixed: it rides the bottom of the screen
           while the list scrolls, then settles into its own place below the
-          pagination, so at the end of the page it covers nothing. */}
+          pagination, so at the end of the page it covers nothing. It is the
+          whole of selection mode's chrome — count, select-all, and the three
+          things you can do — so the list above it stays a list. */}
       <AnimatePresence>
-        {isAdmin && selected.size > 0 && (
+        {isAdmin && (selectMode || selected.size > 0) && vouchers.length > 0 && (
           <motion.div
             initial={{ y: 16, opacity: 0 }}
             animate={{ y: 0, opacity: 1 }}
@@ -789,22 +911,40 @@ export default function VouchersPage() {
             role="region"
             aria-label="Bulk actions"
           >
-            <div className="flex items-center justify-between gap-3 mb-2.5 pl-1">
+            <div className="flex items-center justify-between gap-2 mb-2.5 pl-1">
               <span className="text-[13px] font-semibold text-[var(--fg-primary)] font-display">
-                {selected.size} selected
+                {selected.size ? `${selected.size} selected` : "Tap vouchers to select"}
               </span>
-              <Button variant="ghost" size="xs" onClick={() => setSelected(new Set())} iconLeft={<X size={13} />}>
-                Clear
+              <Button variant="ghost" size="xs" onClick={toggleAll}>
+                {allOnPageSelected ? "Clear page" : `Select all ${vouchers.length}`}
               </Button>
             </div>
             <div className="grid grid-cols-3 gap-2">
-              <Button variant="secondary" size="sm" onClick={() => handleBulk("enable")} iconLeft={<CheckCircle size={13} />}>
+              <Button
+                variant="secondary"
+                size="sm"
+                disabled={!selected.size}
+                onClick={() => handleBulk("enable")}
+                iconLeft={<CheckCircle size={13} />}
+              >
                 Enable
               </Button>
-              <Button variant="secondary" size="sm" onClick={() => handleBulk("disable")} iconLeft={<Ban size={13} />}>
+              <Button
+                variant="secondary"
+                size="sm"
+                disabled={!selected.size}
+                onClick={() => handleBulk("disable")}
+                iconLeft={<Ban size={13} />}
+              >
                 Disable
               </Button>
-              <Button variant="danger" size="sm" onClick={() => handleBulk("delete")} iconLeft={<Trash2 size={13} />}>
+              <Button
+                variant="danger"
+                size="sm"
+                disabled={!selected.size}
+                onClick={() => handleBulk("delete")}
+                iconLeft={<Trash2 size={13} />}
+              >
                 Delete
               </Button>
             </div>
@@ -853,13 +993,93 @@ export default function VouchersPage() {
 
 /* ------------ Local helpers ------------------------------------------------ */
 
-// One figure in the phone card's usage strip: used on top, the allowance under.
-function UsageFigure({ label, used, of }) {
+/**
+ * One voucher as a phone row.
+ *
+ * Three lines, fixed: the code with its state, what it is and who bought it,
+ * and the three consumption figures. The whole row is the tap target — in
+ * selection mode it toggles instead of opening, which is why the checkmark is
+ * drawn rather than a real checkbox: two targets in one row means half the taps
+ * land on the wrong one.
+ */
+function VoucherPhoneCard({ voucher: v, selectMode, selected, onOpen, onToggle }) {
+  const act = () => (selectMode ? onToggle() : onOpen());
   return (
-    <div className="min-w-0 px-2.5 py-2">
-      <div className="text-[10px] font-bold uppercase tracking-[0.06em] text-[var(--fg-muted)] font-display">{label}</div>
-      <div className="mt-0.5 text-[14px] font-semibold text-[var(--fg-primary)] tabular-nums leading-tight break-words">{used}</div>
-      <div className="text-[11.5px] text-[var(--fg-muted)] tabular-nums leading-tight break-words">of {of}</div>
+    <div
+      role="button"
+      tabIndex={0}
+      aria-pressed={selectMode ? selected : undefined}
+      aria-label={
+        selectMode ? `${selected ? "Deselect" : "Select"} ${v.voucher_code}` : `Open ${v.voucher_code}`
+      }
+      onClick={act}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          act();
+        }
+      }}
+      className={
+        "flex items-center gap-3 px-4 py-3 transition-colors active:bg-[var(--surface-pressed)] " +
+        (selected ? "bg-[var(--brand-soft)]" : "")
+      }
+    >
+      {selectMode && (
+        <span
+          aria-hidden="true"
+          className={
+            "grid h-[22px] w-[22px] shrink-0 place-items-center rounded-full border transition-colors " +
+            (selected
+              ? "border-[var(--brand)] bg-[var(--brand)] text-[var(--text-on-brand)]"
+              : "border-[var(--border-strong)]")
+          }
+        >
+          {selected && <Check size={13} strokeWidth={3} />}
+        </span>
+      )}
+
+      <span className="min-w-0 flex-1">
+        <span className="flex items-center gap-2">
+          <span className="truncate font-mono text-[15px] font-semibold tracking-tight text-[var(--fg-primary)]">
+            {v.voucher_code}
+          </span>
+          <span className="ml-auto shrink-0">
+            <StatusBadge status={v.status} />
+          </span>
+        </span>
+        {/* The payer phone has its own end of the line rather than trailing the
+            package name through the same ellipsis: "Monthly Wi-Fi unlimited-
+            night streaming bundle" used to eat the number entirely, and who
+            bought a voucher is half of why you opened the list. Only the
+            package name truncates. */}
+        <span className="mt-1 flex items-baseline gap-2 text-[12.5px] text-[var(--fg-secondary)]">
+          <span className="min-w-0 flex-1 truncate">{v.package_name || "No package"}</span>
+          {v.payer_phone && (
+            <span className="shrink-0 font-mono text-[12px] tabular-nums text-[var(--fg-muted)]">
+              {v.payer_phone}
+            </span>
+          )}
+        </span>
+        {/* Fixed tracks, not justify-between: with the figures spaced by their
+            own widths the middle and right ones landed at a different x in
+            every row, so the column could not be read down the list. The first
+            two are sized to their longest value ("10/10 devices", "23h of
+            365d"); data, the widest figure, takes the rest, so "1023MB of
+            100.0GB" still fits on a 320px screen where equal thirds cut it. */}
+        <span className="mt-1.5 grid grid-cols-[4.25rem_3.75rem_minmax(0,1fr)] gap-2 text-[11.5px] tabular-nums text-[var(--fg-muted)]">
+          <span className="truncate">
+            {v.current_clients ?? 0}/{v.max_clients ?? 0} devices
+          </span>
+          <span className="truncate">
+            {formatMin(v.used_time)} of {formatMin(v.time_period)}
+          </span>
+          <span className="truncate">
+            {formatMB(v.used_quota)} of {formatMB(v.quota)}
+          </span>
+        </span>
+      </span>
+
+      {!selectMode && <ChevronRight size={16} aria-hidden="true" className="shrink-0 text-[var(--fg-subtle)]" />}
     </div>
   );
 }

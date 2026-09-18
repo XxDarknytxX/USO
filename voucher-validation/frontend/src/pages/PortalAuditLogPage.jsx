@@ -17,6 +17,7 @@ import { FileText, ChevronDown, ChevronUp, RotateCcw, RefreshCw, SlidersHorizont
 
 import { portalAuditApi } from "../services/api";
 import Pagination from "../components/shared/Pagination";
+import { usePhone } from "../components/ui/phone";
 import {
   Badge,
   Button,
@@ -135,6 +136,9 @@ function JsonViewer({ data }) {
 }
 
 export default function PortalAuditLogPage() {
+  // Below 640px this page is a feed, not a table — a different component, not
+  // a narrower one. Media queries cannot swap which markup renders.
+  const phone = usePhone();
   const [logs, setLogs] = useState([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
@@ -193,38 +197,69 @@ export default function PortalAuditLogPage() {
 
   return (
     <PageShell>
+      {/* On a phone the app bar already names the screen, and the count and
+          Refresh live on the list itself — so the hero would be a card of
+          prose between the bar and the work. It stands down entirely. */}
       <PageHeader
         eyebrow="Portal"
         title="Portal Logs"
-        subtitle={`${total.toLocaleString()} event${total !== 1 ? "s" : ""} — every payment, handshake, voucher and auth step the portal recorded.`}
+        subtitle={
+          phone
+            ? null
+            : `${total.toLocaleString()} event${total !== 1 ? "s" : ""} — every payment, handshake, voucher and auth step the portal recorded.`
+        }
         icon={<FileText size={22} />}
         tone="blue"
         actions={
-          <Button variant="secondary" size="sm" onClick={fetchLogs} iconLeft={<RefreshCw size={14} />}>
-            Refresh
-          </Button>
+          phone ? null : (
+            <Button variant="secondary" size="sm" onClick={fetchLogs} iconLeft={<RefreshCw size={14} />}>
+              Refresh
+            </Button>
+          )
         }
       />
 
       <Toolbar>
-        <Select
-          value={eventType}
-          onChange={(e) => {
-            setEventType(e.target.value);
-            setPage(1);
-          }}
-          style={{ ...PILL, width: 210 }}
-          // !important outranks the inline pill width, so the box fills its row.
-          className="max-sm:w-full! max-sm:h-10!"
-          aria-label="Filter by event type"
-        >
-          <option value="">All events</option>
-          {EVENT_TYPES.map((t) => (
-            <option key={t} value={t}>
-              {formatEventLabel(t)}
-            </option>
-          ))}
-        </Select>
+        {/* `contents` on desktop, so the select stays an ordinary item of the
+            filter strip. On a phone the select and the fold button share one
+            row — the search above them is the control that gets a row of its
+            own, because it is the one a forensic lookup starts with. */}
+        <div className="contents max-sm:flex max-sm:order-1 max-sm:items-center max-sm:gap-2">
+          {/* Select renders its own relative wrapper, and that wrapper is the
+              flex item here — so the width has to be asked for on a box of
+              ours around it, not on the <select>. */}
+          <div className="contents max-sm:block max-sm:min-w-0 max-sm:flex-1">
+          <Select
+            value={eventType}
+            onChange={(e) => {
+              setEventType(e.target.value);
+              setPage(1);
+            }}
+            style={{ ...PILL, width: 210 }}
+            // !important outranks the inline pill width, so the box fills its row.
+            className="max-sm:w-full! max-sm:h-10! max-sm:min-w-0 max-sm:flex-1"
+            aria-label="Filter by event type"
+          >
+            <option value="">All events</option>
+            {EVENT_TYPES.map((t) => (
+              <option key={t} value={t}>
+                {formatEventLabel(t)}
+              </option>
+            ))}
+          </Select>
+          </div>
+
+          <Button
+            variant="secondary"
+            size="sm"
+            className="sm:hidden shrink-0 h-10!"
+            iconLeft={<SlidersHorizontal size={13} />}
+            onClick={() => setMoreFilters((v) => !v)}
+            aria-expanded={moreFilters}
+          >
+            {moreFilters ? "Fewer" : `Filters${foldedActive ? ` · ${foldedActive}` : ""}`}
+          </Button>
+        </div>
 
         <SearchInput
           value={transactionId}
@@ -275,17 +310,6 @@ export default function PortalAuditLogPage() {
           </DateRange>
         </div>
 
-        <Button
-          variant="secondary"
-          size="sm"
-          className="sm:hidden max-sm:order-1"
-          iconLeft={<SlidersHorizontal size={13} />}
-          onClick={() => setMoreFilters((v) => !v)}
-          aria-expanded={moreFilters}
-        >
-          {moreFilters ? "Fewer filters" : `More filters${foldedActive ? ` · ${foldedActive}` : ""}`}
-        </Button>
-
         {hasFilters && (
           <Button
             variant="ghost"
@@ -301,10 +325,21 @@ export default function PortalAuditLogPage() {
 
       <Panel
         title="Event log"
-        subtitle="Newest first. Open a row for the full payload."
+        subtitle={
+          phone
+            ? `${total.toLocaleString()} event${total !== 1 ? "s" : ""}, newest first`
+            : "Newest first. Open a row for the full payload."
+        }
         icon={<FileText size={15} />}
         tone="blue"
         padding={false}
+        actions={
+          phone ? (
+            <Button variant="secondary" size="sm" onClick={fetchLogs} iconLeft={<RefreshCw size={13} />}>
+              Refresh
+            </Button>
+          ) : null
+        }
       >
         {loading ? (
           <div className="p-5 space-y-2.5">
@@ -318,6 +353,17 @@ export default function PortalAuditLogPage() {
             title="No audit events"
             description={hasFilters ? "Try widening the filters." : "Events will appear as portal traffic flows."}
           />
+        ) : phone ? (
+          <ul>
+            {logs.map((log) => (
+              <PhoneLogRow
+                key={log.id}
+                log={log}
+                isExpanded={expandedRow === log.id}
+                onToggle={() => toggleRow(log.id)}
+              />
+            ))}
+          </ul>
         ) : (
           <DataTable>
             <thead>
@@ -355,34 +401,18 @@ export default function PortalAuditLogPage() {
 function LogRow({ log, isExpanded, onToggle }) {
   return (
     <>
-      {/* On a phone the row is a card whose title line is the event and when it
-          happened — the chevron cell is the card's first cell, so it carries
-          them — and the Timestamp/Event rows stand down. An empty voucher is
-          not worth a line of its own there, and the source system (the same
-          for nearly every row) moves into the opened detail. */}
       <tr onClick={onToggle} className="cursor-pointer" aria-expanded={isExpanded}>
         <Td>
           {/* Colour on a child, not on Td: two text-colour utilities on one
               element resolve by stylesheet order, which is not ours to pick. */}
-          <span className="text-[var(--fg-muted)] max-sm:hidden">
+          <span className="text-[var(--fg-muted)]">
             {isExpanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
           </span>
-          <span className="sm:hidden flex w-full items-center gap-2 min-w-0">
-            <Badge tone={EVENT_TONES[log.event_type] || "neutral"}>
-              {formatEventLabel(log.event_type)}
-            </Badge>
-            <span className="ml-auto text-[12px] text-[var(--fg-muted)] tabular-nums whitespace-nowrap">
-              {formatShortTimestamp(log.event_timestamp)}
-            </span>
-            <span className="shrink-0 text-[var(--fg-muted)]">
-              {isExpanded ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
-            </span>
-          </span>
         </Td>
-        <Td nowrap muted className="max-sm:hidden!">
+        <Td nowrap muted>
           {formatTimestamp(log.event_timestamp)}
         </Td>
-        <Td className="max-sm:hidden!">
+        <Td>
           <Badge tone={EVENT_TONES[log.event_type] || "neutral"}>
             {formatEventLabel(log.event_type)}
           </Badge>
@@ -391,22 +421,19 @@ function LogRow({ log, isExpanded, onToggle }) {
           <span className="text-[var(--brand-fg-on-soft)]">{log.transaction_id || "—"}</span>
         </Td>
         <Td nowrap>{log.plan_key || "—"}</Td>
-        <Td mono strong nowrap className={log.voucher_code ? undefined : "max-sm:hidden!"}>
+        <Td mono strong nowrap>
           {log.voucher_code || "—"}
         </Td>
         <Td align="right" nowrap className="tabular-nums">
           {log.amount != null ? `$${Number(log.amount).toFixed(2)}` : "—"}
         </Td>
         <Td mono>{log.customer_phone || "—"}</Td>
-        <Td muted className="max-sm:hidden!">
-          {log.source_system || "—"}
-        </Td>
+        <Td muted>{log.source_system || "—"}</Td>
       </tr>
 
       <AnimatePresence>
         {isExpanded && (
-          // A phone card pads its row; the detail sits flush under the card.
-          <tr className="max-sm:p-0!">
+          <tr>
             {/* sf-table pads every cell; the expansion supplies its own padding
                 and must sit flush, and inline is the only padding the table's
                 own rule cannot win back. */}
@@ -418,35 +445,7 @@ function LogRow({ log, isExpanded, onToggle }) {
                 transition={{ duration: 0.2 }}
                 className="overflow-hidden"
               >
-                {/* text-left: a phone card centres a full-width cell. */}
-                <div className="px-6 py-5 max-sm:px-4 max-sm:py-4 max-sm:border-t-0 text-left bg-[var(--bg-surface)] border-t border-[var(--border-subtle)]">
-                  {log.event_data?.message && (
-                    <div className="mb-5 rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-elevated)] px-4 py-3">
-                      <span className="text-label block mb-1">Summary</span>
-                      <p className="text-[13px] text-[var(--fg-primary)]">{log.event_data.message}</p>
-                    </div>
-                  )}
-
-                  {/* Two-up on a phone for the short identifiers; anything long
-                      (a session, a user agent, a date) takes the whole row. */}
-                  <div className="grid grid-cols-2 md:grid-cols-3 gap-x-4 md:gap-x-6 gap-y-4 mb-5">
-                    <DetailItem label="Event ID" value={log.id} />
-                    <DetailItem label="Source" value={log.source_system} className="sm:hidden" />
-                    <DetailItem label="Session ID" value={log.session_id} wide />
-                    <DetailItem label="User Group ID" value={log.user_group_id} />
-                    <DetailItem label="Source IP" value={log.source_ip} />
-                    <DetailItem label="Client IP" value={log.event_data?.clientIp} />
-                    <DetailItem label="User Agent" value={log.event_data?.userAgent} wide />
-                    <DetailItem label="Received at" value={formatTimestamp(log.received_at)} wide />
-                    <DetailItem label="Event timestamp" value={formatTimestamp(log.event_timestamp)} wide />
-                    {log.event_data?.error && <DetailItem label="Error" value={log.event_data.error} wide />}
-                  </div>
-
-                  <div>
-                    <span className="text-label block mb-2">Event data</span>
-                    <JsonViewer data={log.event_data} />
-                  </div>
-                </div>
+                <LogDetail log={log} />
               </motion.div>
             </td>
           </tr>
@@ -456,7 +455,132 @@ function LogRow({ log, isExpanded, onToggle }) {
   );
 }
 
+/**
+ * One event on a phone: two lines. What happened and when, then the
+ * identifiers that make the event findable — transaction, plan, number — with
+ * the amount opposite. Everything else is in the payload a tap opens.
+ *
+ * The stacked-table card put each of those on a labelled line of its own, so a
+ * page of fifty events ran eleven thousand pixels and every row looked like
+ * every other. A log is read by scanning down the event column, which is what
+ * this restores.
+ */
+function PhoneLogRow({ log, isExpanded, onToggle }) {
+  const meta = [log.transaction_id, log.plan_key, log.customer_phone].filter(Boolean);
+  return (
+    <li className="border-b border-[var(--border-subtle)] last:border-b-0">
+      <button
+        type="button"
+        onClick={onToggle}
+        aria-expanded={isExpanded}
+        className="w-full px-4 py-3 flex flex-col gap-1.5 text-left active:bg-[var(--bg-surface)] transition-colors"
+      >
+        <span className="flex items-center gap-2 min-w-0">
+          <Badge tone={EVENT_TONES[log.event_type] || "neutral"}>{formatEventLabel(log.event_type)}</Badge>
+          <span className="ml-auto shrink-0 text-[11.5px] text-[var(--fg-muted)] tabular-nums">
+            {formatShortTimestamp(log.event_timestamp)}
+          </span>
+          <span className="shrink-0 text-[var(--fg-muted)]">
+            {isExpanded ? <ChevronUp size={15} /> : <ChevronDown size={15} />}
+          </span>
+        </span>
+
+        <span className="flex items-baseline gap-3 min-w-0">
+          <span className="min-w-0 flex-1 text-[12.5px] leading-snug text-[var(--fg-muted)] [overflow-wrap:anywhere]">
+            {/* Only the transaction id may break mid-word — an M-PAiSA
+                reference can outrun the line. The plan and the number after it
+                are each kept whole, so a long id pushes "monthly-1" to the next
+                line instead of leaving "mo" on this one. The zero-width space
+                after each dot is where that break goes, leaving the dot at the
+                end of the line rather than opening the next. */}
+            {meta.length ? (
+              meta.map((part, i) =>
+                i === 0 ? (
+                  <span key={part + i} className="font-mono text-[var(--brand-fg-on-soft)]">
+                    {part}
+                  </span>
+                ) : (
+                  <span key={part + i}>
+                    <span className="px-1 opacity-60">·</span>
+                    {"\u200B"}
+                    <span className="whitespace-nowrap">{part}</span>
+                  </span>
+                )
+              )
+            ) : (
+              "No transaction against this event"
+            )}
+          </span>
+          {log.amount != null && (
+            <span className="shrink-0 text-[13px] font-semibold tabular-nums text-[var(--fg-primary)]">
+              ${Number(log.amount).toFixed(2)}
+            </span>
+          )}
+        </span>
+
+        {log.voucher_code && (
+          <span className="inline-flex w-fit items-center rounded-md bg-[var(--brand-soft)] px-1.5 py-0.5 font-mono text-[11.5px] font-semibold text-[var(--brand-fg-on-soft)]">
+            {log.voucher_code}
+          </span>
+        )}
+      </button>
+
+      <AnimatePresence>
+        {isExpanded && (
+          <motion.div
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: "auto", opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            transition={{ duration: 0.2 }}
+            className="overflow-hidden"
+          >
+            <LogDetail log={log} />
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </li>
+  );
+}
+
+/** The opened event, identical either side of the breakpoint. */
+function LogDetail({ log }) {
+  return (
+    <div className="px-6 py-5 max-sm:px-4 max-sm:py-4 text-left bg-[var(--bg-surface)] border-t border-[var(--border-subtle)]">
+      {log.event_data?.message && (
+        <div className="mb-5 rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-elevated)] px-4 py-3">
+          <span className="text-label block mb-1">Summary</span>
+          <p className="text-[13px] text-[var(--fg-primary)]">{log.event_data.message}</p>
+        </div>
+      )}
+
+      {/* Two-up on a phone for the short identifiers; anything long (a session,
+          a user agent, a date) takes the whole row. */}
+      <div className="grid grid-cols-2 md:grid-cols-3 gap-x-4 md:gap-x-6 gap-y-4 mb-5">
+        <DetailItem label="Event ID" value={log.id} />
+        <DetailItem label="Source" value={log.source_system} className="sm:hidden" />
+        <DetailItem label="Session ID" value={log.session_id} wide />
+        <DetailItem label="User Group ID" value={log.user_group_id} />
+        <DetailItem label="Source IP" value={log.source_ip} />
+        <DetailItem label="Client IP" value={log.event_data?.clientIp} />
+        <DetailItem label="User Agent" value={log.event_data?.userAgent} wide />
+        <DetailItem label="Received at" value={formatTimestamp(log.received_at)} wide />
+        <DetailItem label="Event timestamp" value={formatTimestamp(log.event_timestamp)} wide />
+        {log.event_data?.error && <DetailItem label="Error" value={log.event_data.error} wide />}
+      </div>
+
+      <div>
+        <span className="text-label block mb-2">Event data</span>
+        <JsonViewer data={log.event_data} />
+      </div>
+    </div>
+  );
+}
+
 function DetailItem({ label, value, wide = false, className = "" }) {
+  // A phone card leaves a line out rather than print "CLIENT IP —"; the opened
+  // event follows the same rule, or half the panel is dashes.
+  const phone = usePhone();
+  if (phone && (value == null || value === "")) return null;
   return (
     <div className={`min-w-0 ${wide ? "max-md:col-span-2" : ""} ${className}`}>
       <span className="text-label">{label}</span>

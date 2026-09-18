@@ -32,6 +32,7 @@ import {
 
 import { portalAuditApi, portalConfigApi } from "../services/api";
 import Pagination from "../components/shared/Pagination";
+import { usePhone } from "../components/ui/phone";
 import {
   Badge,
   Button,
@@ -45,6 +46,7 @@ import {
   Select,
   Input,
   StatusPill,
+  ObjectTile,
   DataTable,
   Th,
   Td,
@@ -147,9 +149,24 @@ function formatDate(iso) {
   }
 }
 
-/** A session id short enough for a phone card's subtitle line. */
-function shortSession(id) {
-  return id.length > 16 ? `${id.slice(0, 16)}…` : id;
+/**
+ * A session id cut to what fits beside the transaction id on a phone card.
+ * Cut here rather than left to `text-overflow`, because a Ruijie token is one
+ * unbroken 44-character word: the browser would lay the whole word out and
+ * clip it, which is invisible to a reader and to anything measuring the page.
+ * The desktop row does the same thing at 20 characters, where there is more
+ * room for it.
+ */
+const shortSession = (id) => (id.length > 18 ? id.slice(0, 18) + "…" : id);
+
+/** Phone card: the year and the seconds are noise on a line already carrying
+ *  the plan, the number and the event count. */
+function formatShortDate(iso) {
+  try {
+    return format(new Date(iso), "MMM d, HH:mm");
+  } catch {
+    return iso || "—";
+  }
 }
 
 function formatLabel(s) {
@@ -160,6 +177,10 @@ function formatLabel(s) {
 }
 
 export default function TransactionFlowPage() {
+  // Below 640px a transaction is a card, not a table row, and the status
+  // filter is a strip of chips rather than a select — different components,
+  // which is not something a media query can choose between.
+  const phone = usePhone();
   const [transactions, setTransactions] = useState([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
@@ -173,7 +194,7 @@ export default function TransactionFlowPage() {
   const [transactionId, setTransactionId] = useState(() => searchParams.get("transactionId") || "");
   const [sessionId, setSessionId] = useState(() => searchParams.get("sessionId") || "");
   const [voucherCode, setVoucherCode] = useState(() => searchParams.get("voucherCode") || "");
-  const [phone, setPhone] = useState(() => searchParams.get("phone") || "");
+  const [customerPhone, setCustomerPhone] = useState(() => searchParams.get("phone") || "");
   const [status, setStatus] = useState(() => searchParams.get("status") || "");
   const [startDate, setStartDate] = useState(() => searchParams.get("startDate") || "");
   const [endDate, setEndDate] = useState(() => searchParams.get("endDate") || "");
@@ -191,7 +212,7 @@ export default function TransactionFlowPage() {
       if (transactionId.trim()) params.transactionId = transactionId.trim();
       if (sessionId.trim()) params.sessionId = sessionId.trim();
       if (voucherCode.trim()) params.voucherCode = voucherCode.trim();
-      if (phone.trim()) params.phone = phone.trim();
+      if (customerPhone.trim()) params.phone = customerPhone.trim();
       if (status) params.status = status;
       if (startDate) params.startDate = startDate;
       if (endDate) params.endDate = endDate;
@@ -203,7 +224,7 @@ export default function TransactionFlowPage() {
     } finally {
       setLoading(false);
     }
-  }, [page, limit, transactionId, sessionId, voucherCode, phone, status, startDate, endDate]);
+  }, [page, limit, transactionId, sessionId, voucherCode, customerPhone, status, startDate, endDate]);
 
   useEffect(() => {
     fetchFlows();
@@ -211,14 +232,14 @@ export default function TransactionFlowPage() {
 
   const totalPages = Math.ceil(total / limit);
   const hasFilters =
-    transactionId.trim() || sessionId.trim() || voucherCode.trim() || phone.trim() || status || startDate || endDate;
+    transactionId.trim() || sessionId.trim() || voucherCode.trim() || customerPhone.trim() || status || startDate || endDate;
   const foldedActive = [sessionId.trim(), voucherCode.trim(), startDate, endDate].filter(Boolean).length;
 
   const clearFilters = () => {
     setTransactionId("");
     setSessionId("");
     setVoucherCode("");
-    setPhone("");
+    setCustomerPhone("");
     setStatus("");
     setStartDate("");
     setEndDate("");
@@ -227,16 +248,25 @@ export default function TransactionFlowPage() {
 
   return (
     <PageShell>
+      {/* The app bar names the screen on a phone, and the count and Refresh sit
+          on the list itself — so the hero would be a card of prose between the
+          bar and the work. It stands down entirely. */}
       <PageHeader
         eyebrow="Portal"
         title="Txn Flows"
-        subtitle={`${total.toLocaleString()} transaction${total !== 1 ? "s" : ""} — every step from payment to internet access.`}
+        subtitle={
+          phone
+            ? null
+            : `${total.toLocaleString()} transaction${total !== 1 ? "s" : ""} — every step from payment to internet access.`
+        }
         icon={<GitBranch size={22} />}
         tone="blue"
         actions={
-          <Button variant="secondary" size="sm" onClick={fetchFlows} iconLeft={<RefreshCw size={14} />}>
-            Refresh
-          </Button>
+          phone ? null : (
+            <Button variant="secondary" size="sm" onClick={fetchFlows} iconLeft={<RefreshCw size={14} />}>
+              Refresh
+            </Button>
+          )
         }
       />
 
@@ -253,11 +283,12 @@ export default function TransactionFlowPage() {
           }}
           placeholder="Transaction ID…"
           width="w-48"
+          className="max-sm:order-1"
         />
         <div
           className={
             "contents " +
-            (moreFilters ? "max-sm:flex max-sm:flex-col max-sm:gap-2.5 max-sm:order-2" : "max-sm:hidden")
+            (moreFilters ? "max-sm:flex max-sm:flex-col max-sm:gap-2.5 max-sm:order-4" : "max-sm:hidden")
           }
         >
           <SearchInput
@@ -281,33 +312,59 @@ export default function TransactionFlowPage() {
             className="max-sm:w-full"
           />
         </div>
-        <SearchInput
-          value={phone}
-          onChange={(e) => {
-            setPhone(e.target.value);
-            setPage(1);
-          }}
-          placeholder="Phone number…"
-          width="w-44"
-        />
-        <Select
-          value={status}
-          onChange={(e) => {
-            setStatus(e.target.value);
-            setPage(1);
-          }}
-          style={{ ...PILL, width: 190 }}
-          // !important outranks the inline pill width, so the box fills its row.
-          className="max-sm:w-full! max-sm:h-10!"
-          aria-label="Filter by status"
-        >
-          {STATUS_OPTIONS.map((o) => (
-            <option key={o.value} value={o.value}>
-              {o.label}
-            </option>
-          ))}
-        </Select>
-        <div className={moreFilters ? "contents max-sm:block max-sm:order-2" : "contents max-sm:hidden"}>
+        {/* `contents` on desktop, so the number search stays an ordinary item
+            of the strip; on a phone it shares its row with the fold button. */}
+        <div className="contents max-sm:flex max-sm:order-2 max-sm:items-center max-sm:gap-2">
+          <SearchInput
+            value={customerPhone}
+            onChange={(e) => {
+              setCustomerPhone(e.target.value);
+              setPage(1);
+            }}
+            placeholder="Phone number…"
+            width="w-44"
+            className="max-sm:min-w-0 max-sm:flex-1"
+          />
+          <Button
+            variant="secondary"
+            size="sm"
+            className="sm:hidden shrink-0 h-10!"
+            iconLeft={<SlidersHorizontal size={13} />}
+            onClick={() => setMoreFilters((v) => !v)}
+            aria-expanded={moreFilters}
+          >
+            {moreFilters ? "Fewer" : `Filters${foldedActive ? ` · ${foldedActive}` : ""}`}
+          </Button>
+        </div>
+        {/* Eleven statuses in a select say nothing about what the list can be
+            narrowed to. As a strip of chips they are readable at a glance and
+            one tap away, which is how triage on a phone actually goes. */}
+        {phone ? (
+          <StatusChips
+            value={status}
+            onChange={(v) => {
+              setStatus(v);
+              setPage(1);
+            }}
+          />
+        ) : (
+          <Select
+            value={status}
+            onChange={(e) => {
+              setStatus(e.target.value);
+              setPage(1);
+            }}
+            style={{ ...PILL, width: 190 }}
+            aria-label="Filter by status"
+          >
+            {STATUS_OPTIONS.map((o) => (
+              <option key={o.value} value={o.value}>
+                {o.label}
+              </option>
+            ))}
+          </Select>
+        )}
+        <div className={moreFilters ? "contents max-sm:block max-sm:order-5" : "contents max-sm:hidden"}>
           <DateRange>
             <DateFilter
               label="From"
@@ -327,23 +384,13 @@ export default function TransactionFlowPage() {
             />
           </DateRange>
         </div>
-        <Button
-          variant="secondary"
-          size="sm"
-          className="sm:hidden max-sm:order-1"
-          iconLeft={<SlidersHorizontal size={13} />}
-          onClick={() => setMoreFilters((v) => !v)}
-          aria-expanded={moreFilters}
-        >
-          {moreFilters ? "Fewer filters" : `More filters${foldedActive ? ` · ${foldedActive}` : ""}`}
-        </Button>
         {hasFilters && (
           <Button
             variant="ghost"
             size="sm"
             iconLeft={<RotateCcw size={13} />}
             onClick={clearFilters}
-            className="max-sm:order-3"
+            className="max-sm:order-6"
           >
             Clear all
           </Button>
@@ -352,10 +399,21 @@ export default function TransactionFlowPage() {
 
       <Panel
         title="Transactions"
-        subtitle="Open a row for its event timeline. An amber rail marks a payment with no voucher against it."
+        subtitle={
+          phone
+            ? `${total.toLocaleString()} transaction${total !== 1 ? "s" : ""}, newest first`
+            : "Open a row for its event timeline. An amber rail marks a payment with no voucher against it."
+        }
         icon={<GitBranch size={15} />}
         tone="blue"
         padding={false}
+        actions={
+          phone ? (
+            <Button variant="secondary" size="sm" onClick={fetchFlows} iconLeft={<RefreshCw size={13} />}>
+              Refresh
+            </Button>
+          ) : null
+        }
       >
         {loading ? (
           <div className="p-5 space-y-2.5">
@@ -369,6 +427,19 @@ export default function TransactionFlowPage() {
             title="No transactions"
             description={hasFilters ? "Try clearing filters." : "Transactions will appear as the portal processes payments."}
           />
+        ) : phone ? (
+          <ul>
+            {transactions.map((txn) => (
+              <PhoneFlowRow
+                key={txn.transactionId}
+                txn={txn}
+                isExpanded={expandedTxn === txn.transactionId}
+                onToggle={() =>
+                  setExpandedTxn((prev) => (prev === txn.transactionId ? null : txn.transactionId))
+                }
+              />
+            ))}
+          </ul>
         ) : (
           <DataTable>
             <thead>
@@ -413,48 +484,19 @@ function TransactionRow({ txn, isExpanded, onToggle }) {
 
   return (
     <>
-      {/* On a phone the row is a card. Its first cell — the chevron here — is
-          the card's title, so it carries the transaction, its amount and the
-          event count, and the Transaction and Amount rows stand down. The
-          amber rail moves from that cell to the whole card's left edge. */}
-      <tr
-        onClick={onToggle}
-        aria-expanded={isExpanded}
-        className={
-          "cursor-pointer" + (txn.paidUnclaimed ? " max-sm:shadow-[inset_3px_0_0_var(--warning-fg)]" : "")
-        }
-      >
+      <tr onClick={onToggle} aria-expanded={isExpanded} className="cursor-pointer">
         {/* "Paid but no voucher" used to tint the whole card amber. A tinted row
             loses its tint to the table's hover rule, so the alert became a left
             rail — which survives hover and still reads down the column. A raw
             <td> here because the rail is an inline style and Td takes none;
             .sf-table still supplies the cell padding. */}
         <td
-          className="text-[var(--fg-muted)] max-sm:shadow-none!"
+          className="text-[var(--fg-muted)]"
           style={txn.paidUnclaimed ? { boxShadow: "inset 3px 0 0 var(--warning-fg)" } : undefined}
         >
-          <span className="max-sm:hidden">
-            {isExpanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
-          </span>
-          <span className="sm:hidden flex w-full items-center gap-3 min-w-0">
-            <span className="min-w-0 flex-1">
-              <RecordCell
-                tone={TONE_TILE[cfg.tone] || "slate"}
-                icon={<Icon size={14} />}
-                title={txn.transactionId}
-                subtitle={`${txn.sessionId ? shortSession(txn.sessionId) : "No session"} · ${txn.eventCount} event${
-                  txn.eventCount !== 1 ? "s" : ""
-                }`}
-                mono
-              />
-            </span>
-            <span className="shrink-0 font-semibold text-[14px] text-[var(--fg-primary)] tabular-nums">
-              {txn.amount != null ? `$${Number(txn.amount).toFixed(2)}` : "—"}
-            </span>
-            {isExpanded ? <ChevronUp size={16} className="shrink-0" /> : <ChevronDown size={16} className="shrink-0" />}
-          </span>
+          <span>{isExpanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}</span>
         </td>
-        <Td className="max-sm:hidden!">
+        <Td>
           <RecordCell
             tone={TONE_TILE[cfg.tone] || "slate"}
             icon={<Icon size={14} />}
@@ -464,7 +506,7 @@ function TransactionRow({ txn, isExpanded, onToggle }) {
           />
         </Td>
         <Td>
-          <div className="flex flex-wrap items-center gap-1.5 max-sm:justify-end">
+          <div className="flex flex-wrap items-center gap-1.5">
             <StatusPill tone={cfg.tone}>{cfg.label}</StatusPill>
             {txn.paidUnclaimed && (
               <StatusPill tone="warning" dot={false}>
@@ -488,16 +530,14 @@ function TransactionRow({ txn, isExpanded, onToggle }) {
         </Td>
         <Td>{txn.planKey || "—"}</Td>
         <Td mono>{txn.customerPhone || "—"}</Td>
-        <Td align="right" nowrap strong className="tabular-nums max-sm:hidden!">
+        <Td align="right" nowrap strong className="tabular-nums">
           {txn.amount != null ? `$${Number(txn.amount).toFixed(2)}` : "—"}
         </Td>
         <Td nowrap muted>
-          {/* One wrapper: a phone card would otherwise spread the date and the
-              count to opposite ends of the line. The count is in the card's
-              title there. */}
+          {/* When it started and how much happened travel together. */}
           <span className="block">
             {formatDate(txn.startedAt)}
-            <span className="block text-[11.5px] text-[var(--fg-muted)] tabular-nums max-sm:hidden">
+            <span className="block text-[11.5px] text-[var(--fg-muted)] tabular-nums">
               {txn.eventCount} event{txn.eventCount !== 1 ? "s" : ""}
             </span>
           </span>
@@ -506,8 +546,7 @@ function TransactionRow({ txn, isExpanded, onToggle }) {
 
       <AnimatePresence>
         {isExpanded && (
-          // A phone card pads its row; the timeline sits flush under the card.
-          <tr className="max-sm:p-0!">
+          <tr>
             {/* sf-table pads every cell; the timeline supplies its own padding
                 and must sit flush, and inline is the only padding the table's
                 own rule cannot win back. */}
@@ -519,24 +558,185 @@ function TransactionRow({ txn, isExpanded, onToggle }) {
                 transition={{ duration: 0.22 }}
                 className="overflow-hidden"
               >
-                {/* text-left: a phone card centres a full-width cell. */}
-                <div className="border-t border-[var(--border-subtle)] max-sm:border-t-0 bg-[var(--bg-surface)] px-6 py-6 max-sm:px-4 max-sm:py-5 text-left">
-                  <p className="text-label mb-5">
-                    Event timeline · {txn.eventCount} event{txn.eventCount !== 1 ? "s" : ""}
-                  </p>
-
-                  <ol className="relative max-w-3xl">
-                    {txn.events.map((ev, i) => (
-                      <TimelineStep key={ev.id || i} event={ev} isLast={i === txn.events.length - 1} />
-                    ))}
-                  </ol>
-                </div>
+                <Timeline txn={txn} />
               </motion.div>
             </td>
           </tr>
         )}
       </AnimatePresence>
     </>
+  );
+}
+
+/**
+ * One transaction on a phone. Three lines: what it is and what it cost, how it
+ * ended, and the customer details that identify it — instead of the six
+ * labelled lines a stacked table gave each row, which made thirty of them four
+ * thousand pixels of identical grey labels.
+ *
+ * Tapping opens the same timeline the table row opens.
+ */
+function PhoneFlowRow({ txn, isExpanded, onToggle }) {
+  const cfg = STATUS_CFG[txn.overallStatus] || STATUS_CFG.in_progress;
+  const Icon = cfg.icon;
+  const meta = [txn.planKey, txn.customerPhone, formatShortDate(txn.startedAt)].filter(Boolean);
+
+  return (
+    <li className="border-b border-[var(--border-subtle)] last:border-b-0">
+      <button
+        type="button"
+        onClick={onToggle}
+        aria-expanded={isExpanded}
+        // The amber rail for a payment with no voucher against it, as on the
+        // desktop row — an alert that survives being tapped.
+        className={
+          "w-full px-4 py-3 flex flex-col gap-2 text-left active:bg-[var(--bg-surface)] transition-colors " +
+          (txn.paidUnclaimed ? "shadow-[inset_3px_0_0_var(--warning-fg)]" : "")
+        }
+      >
+        <span className="flex items-center gap-2.5 min-w-0">
+          <ObjectTile tone={TONE_TILE[cfg.tone] || "slate"} size="sm">
+            <Icon size={14} />
+          </ObjectTile>
+          <span className="min-w-0 flex-1">
+            <span className="block font-mono text-[13.5px] font-semibold text-[var(--fg-primary)] [overflow-wrap:anywhere]">
+              {txn.transactionId}
+            </span>
+            {/* The session id, as on the desktop row — this page filters by it
+                and other screens drill in on it, so the card cannot be the one
+                place it is missing. Truncated rather than wrapped: a Ruijie
+                token is 40-odd characters and the id above it is the line that
+                earns the room. The word keeps it from reading as the rest of
+                the transaction id. */}
+            <span className="mt-0.5 block truncate text-[11px] leading-snug text-[var(--fg-muted)]">
+              {txn.sessionId ? (
+                <>
+                  Session <span className="font-mono">{shortSession(txn.sessionId)}</span>
+                </>
+              ) : (
+                "No session"
+              )}
+            </span>
+          </span>
+          <span className="shrink-0 text-[14px] font-semibold tabular-nums text-[var(--fg-primary)]">
+            {txn.amount != null ? `$${Number(txn.amount).toFixed(2)}` : "—"}
+          </span>
+          <span className="shrink-0 text-[var(--fg-muted)]">
+            {isExpanded ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+          </span>
+        </span>
+
+        <span className="flex flex-wrap items-center gap-1.5">
+          <StatusPill tone={cfg.tone}>{cfg.label}</StatusPill>
+          {txn.paidUnclaimed && (
+            <StatusPill tone="warning" dot={false}>
+              Paid · no voucher
+            </StatusPill>
+          )}
+          {txn.claimed && (
+            <Badge tone="brand" icon={<Ticket size={11} />}>
+              {txn.voucherCode || "Voucher claimed"}
+            </Badge>
+          )}
+        </span>
+
+        {/* Each fact stays whole ("Sep 18, 09:12" does not split at its
+            comma); the zero-width space after each dot is where the line may
+            break instead, so a dot ends a line rather than opening one. */}
+        <span className="text-[12px] leading-snug text-[var(--fg-muted)] [overflow-wrap:anywhere]">
+          {[...meta, `${txn.eventCount} event${txn.eventCount !== 1 ? "s" : ""}`].map((part, i) => (
+            <span key={part + i}>
+              {i > 0 && <span className="px-1 opacity-60">·</span>}
+              {i > 0 && "\u200B"}
+              <span className="whitespace-nowrap">{part}</span>
+            </span>
+          ))}
+        </span>
+      </button>
+
+      <AnimatePresence>
+        {isExpanded && (
+          <motion.div
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: "auto", opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            transition={{ duration: 0.22 }}
+            className="overflow-hidden"
+          >
+            <Timeline txn={txn} />
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </li>
+  );
+}
+
+/** The opened transaction's steps, the same either side of the breakpoint. */
+function Timeline({ txn }) {
+  return (
+    <div className="border-t border-[var(--border-subtle)] bg-[var(--bg-surface)] px-6 py-6 max-sm:px-4 max-sm:py-5 text-left">
+      <p className="text-label mb-5 max-sm:mb-4">
+        Event timeline · {txn.eventCount} event{txn.eventCount !== 1 ? "s" : ""}
+      </p>
+
+      <ol className="relative max-w-3xl">
+        {txn.events.map((ev, i) => (
+          <TimelineStep key={ev.id || i} event={ev} isLast={i === txn.events.length - 1} />
+        ))}
+      </ol>
+    </div>
+  );
+}
+
+/**
+ * The status filter on a phone: every status as a chip, scrolling sideways.
+ * Bleeds to the card's edges so the strip reads as something to flick, and so
+ * the first chip still lines up with the search boxes above it.
+ */
+function StatusChips({ value, onChange }) {
+  // Two boxes, because the Toolbar makes each of its children exactly its
+  // width (w-full, !important): a strip that was itself the child could pull
+  // its left edge out with a negative margin but not its right, so it stopped
+  // a gutter short of the card and cut the last chip off in mid-air. The outer
+  // box takes the row; the inner one, an ordinary block, is free to be 24px
+  // wider than it.
+  return (
+    <div className="max-sm:order-3">
+      <div className="flex gap-2 overflow-x-auto scrollbar-none -mx-3 px-3">
+        {STATUS_OPTIONS.map((o) => {
+          const active = o.value === value;
+          // Paid with no voucher is the one state on this page that costs a
+          // customer money, and every chip selects in brand red — so selecting
+          // the worst one looked like selecting "Success". It takes the amber it
+          // already wears everywhere else on the page: the rail down the left of
+          // such a row, and the "Paid · no voucher" pill on the row itself. A
+          // second red would have been the same red at a glance.
+          const alarm = o.value === "paid_unclaimed";
+          return (
+            <button
+              key={o.value}
+              type="button"
+              aria-pressed={active}
+              onClick={() => onChange(o.value)}
+              // The border colours need `!`: main.css paints every element's
+              // border with an unlayered `* { border-color }`, which outranks
+              // any layered utility — so without it the amber chip wore the
+              // same grey ring as an unselected one.
+              className={
+                "shrink-0 h-9 px-3.5 rounded-full border text-[12.5px] font-semibold whitespace-nowrap transition-colors " +
+                (active
+                  ? alarm
+                    ? "bg-[var(--warning-soft)] text-[var(--warning-fg)] border-[var(--warning-border)]!"
+                    : "bg-[var(--brand-soft)] text-[var(--brand-fg-on-soft)] border-transparent!"
+                  : "bg-[var(--bg-surface)] text-[var(--fg-secondary)] border-[var(--border-default)]")
+              }
+            >
+              {o.value === "" ? "All" : o.label}
+            </button>
+          );
+        })}
+      </div>
+    </div>
   );
 }
 

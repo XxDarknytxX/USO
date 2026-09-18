@@ -25,14 +25,10 @@ import { voucherApi, networkApi, portalConfigApi } from "../../services/api";
 import PlanBreakdown from "../../components/PlanBreakdown";
 import StarlinkPanel from "../../components/StarlinkPanel";
 import StarlinkTelemetry from "../../components/StarlinkTelemetry";
-import MonthPicker from "../../components/MonthPicker";
+import MonthPicker, { MonthPickerChips } from "../../components/MonthPicker";
 import { useMonthlyBreakdown } from "../../hooks/useMonthlyBreakdown";
-import {
-  hasSalesHistory, BreakdownEmpty,
-  RevenueTrendPanel, RevenuePlanMix, SalesTotals, RiskTotals,
-  SalesByHourPanel, SoldByPlanPanel, OutcomesPanel, PlansPurchasedPanel,
-  PHONE_CARD, usePhone, shortLabel,
-} from "../../components/MonthlyBreakdown";
+import { hasSalesHistory, BreakdownEmpty, RevenueTrendPanel, RevenuePlanMix, SalesTotals, RiskTotals, SalesByHourPanel, SoldByPlanPanel, OutcomesPanel, PlansPurchasedPanel } from "../../components/MonthlyBreakdown";
+import { PhoneFacts, PhoneList, usePhone } from "../../components/ui/phone";
 import {
   PageShell, PageHeader, KpiGrid, StatCard, Panel, Tabs, Button,
   DataTable, Th, Td, RecordCell, StatusPill, EmptyState,
@@ -62,6 +58,7 @@ const hourLabel = (t) => {
 };
 
 const DEVICE_ICON = { gateway: RouterIcon, ap: Wifi, switch: Server, other: Cpu };
+const DEVICE_LABEL = { gateway: "Gateway", ap: "Access point", switch: "Switch", other: "Device" };
 const DEVICE_TONE = { gateway: "indigo", ap: "teal", switch: "violet", other: "slate" };
 
 export default function SiteDashboard({ groupId, site }) {
@@ -200,6 +197,10 @@ export default function SiteDashboard({ groupId, site }) {
       Left: Number(p.unused || 0),
     }))
     .slice(0, 8);
+  // The denominator for the phone list's bars, which label themselves "% of
+  // the village" — so every plan counts, not just the eight drawn. With eight
+  // or fewer plans (every village today) the drawn bars add up to the whole.
+  const pkgBarTotal = pkg.reduce((a, p) => a + Number(p.active || 0) + Number(p.expired || 0) + Number(p.unused || 0), 0);
   const trendPts = (data?.trend?.points || []).map((p) => ({
     t: hourLabel(p.t),
     clients: p.clients,
@@ -242,6 +243,7 @@ export default function SiteDashboard({ groupId, site }) {
           tone="navy"
           actions={headerActions}
         />
+        <MonthPickerChips state={mb} />
         <SkeletonKpis count={4} />
         <div className="grid grid-cols-1 lg:grid-cols-[1.6fr_1fr] gap-5">
           <SkeletonCard height="h-[400px]" />
@@ -269,6 +271,10 @@ export default function SiteDashboard({ groupId, site }) {
         tone="navy"
         actions={headerActions}
       />
+
+      {/* The window every figure below is scoped to — a row of its own on a
+          phone, where the header has no width to spare. */}
+      <MonthPickerChips state={mb} />
 
       {/* Only shown when the link is actually down — the Network KPI already
           says "Online" the rest of the time. */}
@@ -317,13 +323,22 @@ export default function SiteDashboard({ groupId, site }) {
           icon={<DollarSign size={18} />}
           color="accent"
           sub={`${fmtNum(mb.totals.transactions || 0)} sale${mb.totals.transactions === 1 ? "" : "s"} · ${fmtMoney(mb.totals.avgSale)} avg`}
+          // Five tiles two-up leave an orphan. The lead figure takes the full
+          // width instead, which makes the other four an even 2x2.
+          className="max-sm:col-span-2"
         />
         <StatCard
           label="Vouchers sold"
           value={fmtNum(mb.totals.sold || 0)}
           icon={<TrendingUp size={18} />}
           color="violet"
-          sub={`${fmtNum(mb.totals.customers || 0)} customers · ${mb.label || "month"}`}
+          // The window is on the chips above; repeating it wrapped the line.
+          sub={
+            <>
+              {fmtNum(mb.totals.customers || 0)} customers
+              <span className="max-sm:hidden"> · {mb.label || "month"}</span>
+            </>
+          }
         />
         <StatCard
           label="Live users"
@@ -354,13 +369,17 @@ export default function SiteDashboard({ groupId, site }) {
           icon={<HardDrive size={18} />}
           color="teal"
           sub={
-            purchased.sales
-              ? `${fmtNum(purchased.sales)} sale${purchased.sales === 1 ? "" : "s"} · ${mb.label || "this month"}`
-              : `nothing sold · ${mb.label || "this month"}`
+            <>
+              {purchased.sales
+                ? `${fmtNum(purchased.sales)} sale${purchased.sales === 1 ? "" : "s"}`
+                : "nothing sold"}
+              <span className="max-sm:hidden"> · {mb.label || "this month"}</span>
+            </>
           }
           onClick={isAdmin ? () => openVouchers(null) : undefined}
-          // Fifth of five in a two-up grid: full width rather than an orphan.
-          className="max-lg:col-span-2"
+          // Fifth of five: full width on a tablet's two-up grid. A phone has no
+          // orphan to absorb — the Revenue tile spans there instead.
+          className="sm:max-lg:col-span-2"
         />
       </KpiGrid>
 
@@ -469,7 +488,7 @@ export default function SiteDashboard({ groupId, site }) {
             <div className="grid grid-cols-1 lg:grid-cols-[1fr_1.4fr] gap-5">
               <Panel title="Vouchers by status" subtitle="The whole pool for this village" icon={<Ticket size={15} />} tone="blue">
                 {statusData.length === 0 ? (
-                  <EmptyState className="max-sm:py-8" icon={Ticket} title="No vouchers" description="This village has no vouchers yet." />
+                  <EmptyState className="max-sm:py-8" icon={phone ? null : Ticket} title="No vouchers" description="This village has no vouchers yet." />
                 ) : (
                   <>
                     {/* Donut with the total stated in the hole, so the chart
@@ -496,7 +515,7 @@ export default function SiteDashboard({ groupId, site }) {
 
               <Panel title="By package" subtitle="Active · Expired · Left, per plan" icon={<Ticket size={15} />} tone="teal">
                 {pkgBar.length === 0 ? (
-                  <EmptyState className="max-sm:py-8" icon={PackageOpen} title="No packages" />
+                  <EmptyState className="max-sm:py-8" icon={phone ? null : PackageOpen} title="No packages" />
                 ) : (
                   <>
                     <ChartStat
@@ -505,20 +524,61 @@ export default function SiteDashboard({ groupId, site }) {
                       caption={`Across ${fmtNum(pkgBar.length)} plan${pkgBar.length === 1 ? "" : "s"}`}
                     />
                     {phone ? (
-                      // Sideways on a phone: plan names read along the axis
-                      // instead of tilted into each other.
-                      <ResponsiveContainer width="100%" height={Math.max(150, pkgBar.length * 44 + 32)}>
-                        <BarChart data={pkgBar} layout="vertical" margin={{ top: 4, right: 12, left: 0, bottom: 0 }} barCategoryGap="30%">
-                          <CartesianGrid {...gridProps(ct)} horizontal={false} vertical />
-                          <XAxis type="number" {...axisX(ct)} allowDecimals={false} />
-                          <YAxis type="category" dataKey="name" {...axisY(ct, { width: 96 })} tickFormatter={(v) => shortLabel(v, 13)} />
-                          <Tooltip content={<ChartTooltip valueFormatter={fmtNum} />} cursor={{ fill: ct.cursor }} />
-                          {/* Every segment rounded at its end, as the upright chart rounds every top. */}
-                          <Bar dataKey="Active" stackId="a" fill={STATUS_COLORS.active} radius={[0, 5, 5, 0]} maxBarSize={18} isAnimationActive={false} />
-                          <Bar dataKey="Expired" stackId="a" fill={CHART_COLORS.amber} radius={[0, 5, 5, 0]} maxBarSize={18} isAnimationActive={false} />
-                          <Bar dataKey="Left" stackId="a" fill={STATUS_COLORS.unused} radius={[0, 5, 5, 0]} maxBarSize={18} isAnimationActive={false} />
-                        </BarChart>
-                      </ResponsiveContainer>
+                      // A 96px category axis turns every plan longer than
+                      // thirteen characters into an ellipsis. The same split
+                      // reads as one bar a plan with the counts written out.
+                      <div className="-mt-1 divide-y divide-[var(--border-subtle)]">
+                        {pkgBar.map((p) => {
+                          const rowTotal = p.Active + p.Expired + p.Left;
+                          // The stacked chart this replaces sizes a plan's bar
+                          // by its share of the village and splits it inside.
+                          // Filling the track and splitting THAT drew every
+                          // plan 100% wide, so a plan of 2 and a plan of 3 were
+                          // identical blocks in different colours.
+                          const share = pkgBarTotal > 0 ? (rowTotal / pkgBarTotal) * 100 : 0;
+                          return (
+                            <div key={p.name} className="py-2.5">
+                              <div className="flex items-baseline gap-3">
+                                <span className="flex-1 min-w-0 text-[13.5px] font-medium leading-snug text-[var(--fg-primary)] line-clamp-2">
+                                  {p.name}
+                                </span>
+                                <span className="shrink-0 text-[13.5px] font-semibold tabular-nums text-[var(--fg-primary)]">
+                                  {fmtNum(rowTotal)}
+                                </span>
+                              </div>
+                              <div className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-[var(--bg-surface)]">
+                                <div className="flex h-full rounded-full overflow-hidden" style={{ width: `${share}%` }}>
+                                  {[
+                                    { k: "Active", v: p.Active, c: STATUS_COLORS.active },
+                                    { k: "Expired", v: p.Expired, c: CHART_COLORS.amber },
+                                    { k: "Left", v: p.Left, c: STATUS_COLORS.unused },
+                                  ].map((seg) =>
+                                    seg.v > 0 && rowTotal > 0 ? (
+                                      <span
+                                        key={seg.k}
+                                        className="h-full"
+                                        style={{ width: `${(seg.v / rowTotal) * 100}%`, background: seg.c }}
+                                      />
+                                    ) : null
+                                  )}
+                                </div>
+                              </div>
+                              <PhoneFacts
+                                className="mt-1.5"
+                                items={[
+                                  { v: fmtNum(p.Active), l: "active" },
+                                  p.Expired ? { v: fmtNum(p.Expired), l: "expired" } : null,
+                                  { v: fmtNum(p.Left), l: "left" },
+                                  // The bar is now a share of the village, so
+                                  // say which share rather than leaving it to
+                                  // be measured against the row above.
+                                  { v: `${Math.round(share)}%`, l: "of the village" },
+                                ]}
+                              />
+                            </div>
+                          );
+                        })}
+                      </div>
                     ) : (
                     <ResponsiveContainer width="100%" height={252}>
                       <BarChart data={pkgBar} margin={{ top: 4, right: 8, left: -12, bottom: 0 }} barCategoryGap={BAR_CATEGORY_GAP}>
@@ -552,22 +612,25 @@ export default function SiteDashboard({ groupId, site }) {
                 value={internetUp == null ? "Unknown" : internetUp ? "Online" : "Offline"}
                 icon={internetUp ? <Wifi size={18} /> : <WifiOff size={18} />}
                 color={internetUp == null ? "slate" : internetUp ? "emerald" : "rose"}
-                sub={publicIp}
+                // Phone-only fallbacks keep every two-up pair the same height:
+                // a sub-less tile was stretched to its neighbour's and carried
+                // ~28px of nothing. Desktop keeps the subs it had.
+                sub={publicIp || (phone ? "no public IP" : "")}
               />
-              <StatCard label="Clients online" value={fmtNum(clients)} icon={<Users size={18} />} color="blue" />
+              <StatCard label="Clients online" value={fmtNum(clients)} icon={<Users size={18} />} color="blue" sub={phone ? "connected now" : undefined} />
               <StatCard label="Access points" value={apTotal ? `${apOnline}/${apTotal}` : "—"} icon={<Radio size={18} />} color="violet" sub="online" />
               <StatCard
                 label="Uptime 24h"
                 value={uptimePct == null ? "—" : `${uptimePct}%`}
                 icon={<Activity size={18} />}
                 color={uptimePct == null ? "slate" : uptimePct >= 99 ? "emerald" : uptimePct >= 90 ? "amber" : "rose"}
-                sub={usageBytes == null ? "" : `${fmtBytes(usageBytes)} through the gateway`}
+                sub={usageBytes == null ? (phone ? "gateway link" : "") : `${fmtBytes(usageBytes)} through the gateway`}
               />
             </KpiGrid>
 
             <Panel title="Clients" subtitle="Last 24 hours" icon={<Activity size={15} />} tone="navy">
               {trendPts.length === 0 ? (
-                <EmptyState className="max-sm:py-8" icon={Activity} title="No trend data yet" description="The monitor collects a sample every ~5 minutes." />
+                <EmptyState className="max-sm:py-8" icon={phone ? null : Activity} title="No trend data yet" description="The monitor collects a sample every ~5 minutes." />
               ) : (
                 <>
                   <ChartStat
@@ -600,13 +663,49 @@ export default function SiteDashboard({ groupId, site }) {
                 <div className="p-5">
                   <EmptyState
                     className="max-sm:py-8"
-                    icon={Server}
+                    icon={phone ? null : Server}
                     title={health ? "No devices reported" : "Couldn't reach Ruijie Cloud"}
                     description={health ? "" : "The live device list is temporarily unavailable."}
                   />
                 </div>
               ) : (
-                <DataTable>
+                <>
+                {/* A phone reads the kit as a list: what it is and whether it
+                    is up, then its serial, model and address as small print.
+                    Six labelled lines a device was a card taller than the
+                    screen for a village with four access points. */}
+                <PhoneList>
+                  {devices.map((d, i) => {
+                    const Icon = DEVICE_ICON[d.type] || Cpu;
+                    return (
+                      <div key={d.sn || i} className="px-4 py-3 flex flex-col gap-1.5">
+                        <div className="flex items-center gap-2.5 min-w-0">
+                          <span className="min-w-0 flex-1">
+                            <RecordCell
+                              tone={DEVICE_TONE[d.type] || "slate"}
+                              icon={<Icon size={14} />}
+                              title={d.name || d.sn}
+                              subtitle={d.sn && d.name ? d.sn : undefined}
+                              mono
+                            />
+                          </span>
+                          <StatusPill tone={d.online ? "success" : "danger"}>
+                            {d.online ? "Online" : "Offline"}
+                          </StatusPill>
+                        </div>
+                        <PhoneFacts
+                          items={[
+                            { v: DEVICE_LABEL[d.type] || "Device" },
+                            d.clientCount == null ? null : { v: fmtNum(d.clientCount), l: "clients" },
+                            d.model ? { v: d.model } : null,
+                            d.mgmtIp || d.publicIp ? { v: d.mgmtIp || d.publicIp } : null,
+                          ]}
+                        />
+                      </div>
+                    );
+                  })}
+                </PhoneList>
+                <DataTable className="max-sm:hidden!">
                   <thead>
                     <tr>
                       <Th>Device</Th>
@@ -621,8 +720,8 @@ export default function SiteDashboard({ groupId, site }) {
                     {devices.map((d, i) => {
                       const Icon = DEVICE_ICON[d.type] || Cpu;
                       return (
-                        <tr key={d.sn || i} className={PHONE_CARD.row}>
-                          <Td className={PHONE_CARD.title}>
+                        <tr key={d.sn || i}>
+                          <Td>
                             <RecordCell
                               tone={DEVICE_TONE[d.type] || "slate"}
                               icon={<Icon size={14} />}
@@ -631,18 +730,19 @@ export default function SiteDashboard({ groupId, site }) {
                               mono
                             />
                           </Td>
-                          <Td className={`capitalize ${PHONE_CARD.statWide}`}>{d.type}</Td>
-                          <Td className={PHONE_CARD.aside}>
+                          <Td className="capitalize">{d.type}</Td>
+                          <Td>
                             <StatusPill tone={d.online ? "success" : "danger"}>{d.online ? "Online" : "Offline"}</StatusPill>
                           </Td>
-                          <Td align="right" className={`tabular-nums ${PHONE_CARD.statWide}`}>{d.clientCount ?? "—"}</Td>
-                          <Td className={PHONE_CARD.statWide}>{d.model || "—"}</Td>
-                          <Td mono muted className={PHONE_CARD.statWide}>{d.mgmtIp || d.publicIp || "—"}</Td>
+                          <Td align="right" className="tabular-nums">{d.clientCount ?? "—"}</Td>
+                          <Td>{d.model || "—"}</Td>
+                          <Td mono muted>{d.mgmtIp || d.publicIp || "—"}</Td>
                         </tr>
                       );
                     })}
                   </tbody>
                 </DataTable>
+                </>
               )}
             </Panel>
           </div>

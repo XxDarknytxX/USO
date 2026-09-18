@@ -13,7 +13,7 @@ import { useParams, useNavigate, useSearchParams } from "react-router-dom";
 import toast from "react-hot-toast";
 import {
   ArrowLeft, RefreshCw, FileText, Upload, Download, Trash2, Camera,
-  AlertTriangle, CheckCircle2, CircleDashed, MapPin, Clock, History,
+  AlertTriangle, CheckCircle2, ChevronRight, CircleDashed, MapPin, Clock, History,
   Send, Lock, Save, ShieldCheck, CalendarCheck, CalendarClock, ListChecks, X,
 } from "lucide-react";
 import { maintenanceApi, openDocument, downscaleImage } from "../services/api";
@@ -23,6 +23,7 @@ import {
   DataTable, Th, Td, StatusPill, ObjectTile,
   Button, EmptyState, Field, Input, Select, Textarea, Modal,
 } from "../components/ui";
+import { usePhone } from "../components/ui/phone";
 import PhotoThumb from "../components/maintenance/PhotoThumb";
 
 const COND = {
@@ -33,6 +34,12 @@ const COND = {
 };
 
 const CONDITION_OPTIONS = ["ok", "attention", "faulty", "na"].map((v) => ({ value: v, label: COND[v].label }));
+// Four options share a phone's width, and "Needs attention" is most of it. The
+// pill says the word the engineer is choosing between; the condition is written
+// out in full everywhere it is READ.
+const CONDITION_OPTIONS_PHONE = CONDITION_OPTIONS.map((o) =>
+  o.value === "attention" ? { ...o, label: "Attention" } : o
+);
 
 // Short names for the tab strip only. The server's full component labels head
 // every card and report; these exist purely so eight tabs fit on one line.
@@ -77,6 +84,89 @@ function ConditionDot({ condition, never }) {
   );
 }
 
+/* ─────────────────────── Phone: the village's standing ───────────────────────
+ * Five KPI tiles are five cards two-up on a phone: the better part of two
+ * screens before the reader reaches the components, with "Never serviced" set
+ * as a 28px figure and "Components inspect…" cut off in its own label. The same
+ * five facts fit one card: the standing as the headline, the rest as small
+ * label-over-value tiles, and the paperwork as the row that opens it.
+ */
+
+/** One tile of the phone summary. A button when it goes somewhere. */
+function SummaryTile({ label, value, hint, onClick }) {
+  const inner = (
+    <>
+      <span className="text-label">{label}</span>
+      <span className="mt-1 flex items-baseline gap-1.5">
+        <span className="text-[15px] font-semibold leading-none tabular-nums text-[var(--fg-primary)]">{value}</span>
+        {onClick && <ChevronRight size={14} aria-hidden="true" className="ml-auto text-[var(--fg-subtle)]" />}
+      </span>
+      {hint && <span className="mt-1 block text-[11px] leading-snug text-[var(--fg-muted)]">{hint}</span>}
+    </>
+  );
+  // Top of the tile, not its middle: one tile of a pair carries a hint and the
+  // other does not, and centring floated the shorter one so the two labels —
+  // and the two figures under them — sat on different lines.
+  const cls = "flex min-h-[4.25rem] flex-col justify-start bg-[var(--bg-elevated)] px-4 py-3 text-left";
+  return onClick ? (
+    <button type="button" onClick={onClick} className={`${cls} focus-ring`}>{inner}</button>
+  ) : (
+    <div className={cls}>{inner}</div>
+  );
+}
+
+function PhoneServiceSummary({ svc, docStats, summary, onOpenDocs }) {
+  const bad = svc.neverServiced || svc.overdue;
+  return (
+    <div className="overflow-hidden rounded-xl border border-[var(--border-default)] bg-[var(--bg-elevated)] shadow-[var(--shadow-card)]">
+      <div className="flex items-center gap-3 px-4 py-3.5">
+        <ObjectTile tone={bad ? "red" : "green"} size="lg">
+          {bad ? <AlertTriangle size={18} /> : <ShieldCheck size={18} />}
+        </ObjectTile>
+        <div className="min-w-0">
+          <p className="text-[17px] font-semibold leading-tight tracking-tight text-[var(--fg-primary)]">
+            {svc.neverServiced ? "Never serviced" : svc.overdue ? "Overdue" : "In window"}
+          </p>
+          <p className="mt-0.5 text-[12px] leading-snug text-[var(--fg-muted)]">
+            {svc.neverServiced
+              ? docStats.handover
+                ? "handover pack on file, no report yet"
+                : "no report has ever been filed"
+              : svc.overallCondition
+                ? `last overall: ${COND[svc.overallCondition]?.label || svc.overallCondition}`
+                : `${svc.intervalMonths}-month cycle`}
+          </p>
+        </div>
+      </div>
+      <div className="grid grid-cols-2 gap-px border-t border-[var(--border-subtle)] bg-[var(--border-subtle)]">
+        <SummaryTile label="Last serviced" value={fmtDate(svc.lastVisitDate)} hint={svc.lastEngineer || null} />
+        <SummaryTile
+          label="Next due"
+          value={svc.neverServiced ? "—" : fmtDate(svc.nextDue)}
+          hint={`every ${svc.intervalMonths} months`}
+        />
+        <SummaryTile
+          label="Components"
+          value={`${summary.inspected} / ${summary.total}`}
+          hint={
+            summary.faulty
+              ? `${summary.faulty} faulty`
+              : summary.attention
+                ? `${summary.attention} need attention`
+                : "all healthy"
+          }
+        />
+        <SummaryTile
+          label="Documents"
+          value={docStats.total ? String(docStats.total) : "None"}
+          hint={docStats.total ? (docStats.handover ? "handover pack on file" : "no handover pack") : "nothing filed"}
+          onClick={onOpenDocs}
+        />
+      </div>
+    </div>
+  );
+}
+
 /** A component's current condition, said the same way on every surface. */
 function ComponentPill({ component: c }) {
   if (c.neverInspected) return <StatusPill tone="neutral">Never inspected</StatusPill>;
@@ -90,6 +180,9 @@ export default function VillageProfilePage() {
   const { isAdmin, isEngineer } = useAuth();
   // Admins and engineers both service; nobody else reaches this route.
   const canService = isAdmin || isEngineer;
+  // The summary and the component list are laid out differently on a phone, not
+  // just sized differently; see PhoneServiceSummary.
+  const phone = usePhone();
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState("");
@@ -190,7 +283,15 @@ export default function VillageProfilePage() {
       />
 
       {/* Service standing, stated once at the top rather than inferred from the tabs. */}
-      {svc && (
+      {svc && phone && (
+        <PhoneServiceSummary
+          svc={svc}
+          docStats={docStats}
+          summary={data.summary}
+          onOpenDocs={() => selectTab("documents")}
+        />
+      )}
+      {svc && !phone && (
         <KpiGrid cols={5}>
           <StatCard
             label="Service status"
@@ -275,6 +376,68 @@ export default function VillageProfilePage() {
             }
           />
         </Panel>
+      ) : tab === "overview" && phone ? (
+        /* One card, six rows. Six separate cards were six headings, six status
+           pills and six "No photos" footers — most of a screen each, for a list
+           whose job is to say which component to open. */
+        <div className="overflow-hidden rounded-xl border border-[var(--border-default)] bg-[var(--bg-elevated)] shadow-[var(--shadow-card)]">
+          {components.map((c) => {
+            const C = COND[c.condition];
+            const RowIcon = c.neverInspected ? CircleDashed : C?.Icon || CircleDashed;
+            return (
+              <div key={c.key} className="border-t border-[var(--border-subtle)] first:border-t-0">
+                <button
+                  onClick={() => selectTab(c.key)}
+                  className="flex w-full items-start gap-3 px-4 py-3 text-left focus-ring"
+                  title={`Open ${c.label}`}
+                >
+                  <ObjectTile tone={c.neverInspected ? "slate" : C?.tile || "slate"} size="sm">
+                    <RowIcon size={15} />
+                  </ObjectTile>
+                  <span className="min-w-0 flex-1">
+                    <span className="flex items-start gap-2">
+                      <span className="min-w-0 flex-1 font-display text-[13.5px] font-semibold leading-snug text-[var(--fg-primary)]">
+                        {c.label}
+                      </span>
+                      <ChevronRight size={16} aria-hidden="true" className="mt-0.5 shrink-0 text-[var(--fg-subtle)]" />
+                    </span>
+                    <span className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1">
+                      <ComponentPill component={c} />
+                      <span className="text-[11.5px] text-[var(--fg-muted)]">
+                        {c.neverInspected ? "no record" : `${fmtDate(c.lastInspected)} · ${c.engineerName || "—"}`}
+                      </span>
+                    </span>
+                    {c.notes && (
+                      <span className="mt-1.5 line-clamp-2 text-[12px] leading-relaxed text-[var(--fg-secondary)]">
+                        {c.notes}
+                      </span>
+                    )}
+                  </span>
+                </button>
+                {/* A thumbnail is itself a button, so the strip is the row's
+                    sibling rather than inside it. Absent when there are none:
+                    "No photos" is not worth a line on a phone. */}
+                {c.photos.length > 0 && (
+                  <div className="flex items-center gap-1.5 px-4 pb-3 pl-[3.75rem]">
+                    {c.photos.slice(0, 4).map((p) => (
+                      <PhotoThumb
+                        key={p.id}
+                        photoId={p.id}
+                        size="xs"
+                        onOpen={(url) => setLightbox({ url, caption: c.label })}
+                      />
+                    ))}
+                    {c.photos.length > 4 && (
+                      <span className="inline-flex h-14 items-center rounded-[12px] border border-[var(--border-default)] bg-[var(--bg-surface)] px-2 text-[11px] font-semibold tabular-nums text-[var(--fg-muted)]">
+                        +{c.photos.length - 4}
+                      </span>
+                    )}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
       ) : tab === "overview" ? (
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
           {components.map((c) => {
@@ -383,6 +546,7 @@ export default function VillageProfilePage() {
 }
 
 function ComponentTab({ component: c, projectId, canService, onOpenPhoto, onChanged }) {
+  const phone = usePhone();
   const C = COND[c.condition];
   const draft = c.draft;
   // Serviceable unless this component was already filed on the CURRENT open
@@ -512,9 +676,39 @@ function ComponentTab({ component: c, projectId, canService, onOpenPhoto, onChan
               </tr>
             </thead>
             <tbody>
-              {c.history.map((h, i) => (
+              {c.history.map((h, i) => {
+                // A phone card: when and in what state, then who and how many
+                // photos, then the note. The labelled-lines fallback spent five
+                // lines repeating column headings down the history.
+                if (phone) {
+                  return (
+                    <tr key={`${h.visitId}-${i}`}>
+                      <Td>
+                        <span className="flex w-full flex-col gap-1.5">
+                          <span className="flex items-center justify-between gap-3">
+                            <span className="text-[13.5px] font-semibold text-[var(--fg-primary)]">
+                              {fmtDate(h.submittedAt)}
+                            </span>
+                            <StatusPill tone={COND[h.condition]?.tone || "neutral"}>
+                              {COND[h.condition]?.label || h.condition}
+                            </StatusPill>
+                          </span>
+                          <span className="text-[11.5px] text-[var(--fg-muted)]">
+                            {[h.engineerName, `${h.photoCount} photo${h.photoCount === 1 ? "" : "s"}`]
+                              .filter(Boolean)
+                              .join(" · ")}
+                          </span>
+                          {h.notes && (
+                            <span className="text-[12px] leading-relaxed text-[var(--fg-secondary)]">{h.notes}</span>
+                          )}
+                        </span>
+                      </Td>
+                    </tr>
+                  );
+                }
+                return (
                 <tr key={`${h.visitId}-${i}`}>
-                  <Td nowrap className="max-sm:font-semibold max-sm:text-[var(--fg-primary)]">{fmtDate(h.submittedAt)}</Td>
+                  <Td nowrap>{fmtDate(h.submittedAt)}</Td>
                   <Td>
                     <StatusPill tone={COND[h.condition]?.tone || "neutral"}>
                       {COND[h.condition]?.label || h.condition}
@@ -522,15 +716,14 @@ function ComponentTab({ component: c, projectId, canService, onOpenPhoto, onChan
                   </Td>
                   <Td>{h.engineerName || "—"}</Td>
                   <Td align="right" className="tabular-nums">{h.photoCount}</Td>
-                  {/* One truncated line in the table; a phone card shows the whole
-                      note, left-aligned under its label, or drops an empty one. */}
-                  <Td
-                    className={`sm:max-w-[320px] sm:truncate max-sm:flex-col max-sm:gap-1! max-sm:text-left! ${h.notes ? "" : "max-sm:hidden!"}`}
-                  >
-                    <span title={h.notes || ""} className="max-sm:ml-0!">{h.notes || "—"}</span>
+                  {/* One truncated line in the table; the phone card above
+                      shows the note whole. */}
+                  <Td className="sm:max-w-[320px] sm:truncate">
+                    <span title={h.notes || ""}>{h.notes || "—"}</span>
                   </Td>
                 </tr>
-              ))}
+                );
+              })}
             </tbody>
           </DataTable>
         </Panel>
@@ -567,6 +760,7 @@ function Fact({ label, value }) {
  * turn the village page into a form you have to scroll past to read the site.
  */
 function ServiceComponentModal({ component: c, projectId, onClose, onChanged, onOpenPhoto }) {
+  const phone = usePhone();
   const draft = c.draft;
   const [condition, setCondition] = useState(draft?.condition || "");
   const [notes, setNotes] = useState(draft?.notes || "");
@@ -684,7 +878,12 @@ function ServiceComponentModal({ component: c, projectId, onClose, onChanged, on
         />
         <div className="flex flex-col gap-5">
           <Field label="Condition">
-            <Segmented options={CONDITION_OPTIONS} value={condition} onChange={setCondition} className={PHONE_SEGMENTED} />
+            <Segmented
+              options={phone ? CONDITION_OPTIONS_PHONE : CONDITION_OPTIONS}
+              value={condition}
+              onChange={setCondition}
+              className={PHONE_SEGMENTED}
+            />
           </Field>
 
           <Field
@@ -695,25 +894,52 @@ function ServiceComponentModal({ component: c, projectId, onClose, onChanged, on
           </Field>
 
           <Field label="Photos" hint="Taken on this visit. Required unless the component is N/A.">
-            <div className="flex flex-wrap items-center gap-2.5">
-              {photos.map((p) => (
-                <PhotoThumb
-                  key={p.id}
-                  photoId={p.id}
-                  onRemove={removePhoto}
-                  onOpen={(url) => onOpenPhoto?.(url, c.label)}
-                />
-              ))}
-              <Button
-                variant="secondary"
-                size="sm"
-                onClick={() => fileRef.current?.click()}
-                loading={uploading}
-                iconLeft={!uploading && <Camera size={13} />}
-              >
-                Add photo
-              </Button>
-            </div>
+            {/* The camera is the point of this form on a phone, so it is a tile
+                in the grid the size of a photo rather than a small button after
+                one. `capture` on the input opens the camera straight away. */}
+            {phone ? (
+              <div className="grid grid-cols-3 gap-2">
+                {photos.map((p) => (
+                  <div key={p.id} className="relative aspect-square">
+                    <PhotoThumb
+                      photoId={p.id}
+                      size="fill"
+                      onRemove={removePhoto}
+                      onOpen={(url) => onOpenPhoto?.(url, c.label)}
+                    />
+                  </div>
+                ))}
+                <button
+                  type="button"
+                  onClick={() => fileRef.current?.click()}
+                  disabled={uploading}
+                  className="flex aspect-square flex-col items-center justify-center gap-1.5 rounded-[12px] border-2 border-dashed border-[var(--border-strong)] bg-[var(--bg-surface)] text-[var(--fg-muted)] focus-ring active:bg-[var(--surface-pressed)] disabled:opacity-60"
+                >
+                  {uploading ? <RefreshCw size={20} className="animate-spin" /> : <Camera size={20} />}
+                  <span className="text-[11px] font-semibold">{uploading ? "Adding…" : "Take photo"}</span>
+                </button>
+              </div>
+            ) : (
+              <div className="flex flex-wrap items-center gap-2.5">
+                {photos.map((p) => (
+                  <PhotoThumb
+                    key={p.id}
+                    photoId={p.id}
+                    onRemove={removePhoto}
+                    onOpen={(url) => onOpenPhoto?.(url, c.label)}
+                  />
+                ))}
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => fileRef.current?.click()}
+                  loading={uploading}
+                  iconLeft={!uploading && <Camera size={13} />}
+                >
+                  Add photo
+                </Button>
+              </div>
+            )}
           </Field>
         </div>
       </Modal.Body>
@@ -738,6 +964,7 @@ function ServiceComponentModal({ component: c, projectId, onClose, onChanged, on
 }
 
 function DocumentsTab({ projectId, documents, categories, isAdmin, canUpload, onChanged, uploadOpen, setUploadOpen }) {
+  const phone = usePhone();
   const grouped = useMemo(() => {
     const m = {};
     for (const d of documents) (m[d.category] ||= []).push(d);
@@ -763,7 +990,11 @@ function DocumentsTab({ projectId, documents, categories, isAdmin, canUpload, on
     <div className="flex flex-col gap-4">
       <Panel
         title="Site documents"
-        subtitle="Handover packs, as-builts, warranties and permits — the paperwork that belongs to the village rather than to any one visit."
+        subtitle={
+          phone
+            ? "Handover packs, as-builts, warranties and permits."
+            : "Handover packs, as-builts, warranties and permits — the paperwork that belongs to the village rather than to any one visit."
+        }
         icon={<FileText size={15} />}
         tone="navy"
         // Viewers read site paperwork but cannot add to it — the server refuses
@@ -802,36 +1033,77 @@ function DocumentsTab({ projectId, documents, categories, isAdmin, canUpload, on
                     <span className="flex-1 h-px bg-[var(--border-subtle)]" />
                   </div>
                   <div className="flex flex-col gap-2">
-                    {grouped[cat.key].map((d) => (
+                    {grouped[cat.key].map((d) =>
+                      /* On a phone the card IS the control: tapping it opens
+                         the file, so the Open button goes and only the delete
+                         stays — and the file's details get a line of their own
+                         rather than trailing the title as a fifth line. */
+                      phone ? (
+                        <div
+                          key={d.id}
+                          className="flex items-start gap-1 rounded-xl border border-[var(--border-default)] bg-[var(--bg-elevated)] shadow-[var(--shadow-xs)]"
+                        >
+                          <button
+                            type="button"
+                            onClick={() => open(d)}
+                            className="flex min-w-0 flex-1 items-start gap-3 rounded-xl p-3 text-left focus-ring"
+                          >
+                            <ObjectTile tone="navy" size="sm">
+                              <FileText size={15} />
+                            </ObjectTile>
+                            <span className="min-w-0 flex-1">
+                              <span className="block font-display text-[13px] font-semibold leading-snug text-[var(--fg-primary)] [overflow-wrap:anywhere]">
+                                {d.title}
+                              </span>
+                              <span className="mt-0.5 block text-[11.5px] leading-snug text-[var(--fg-muted)]">
+                                {fmtBytes(d.bytes)} · {fmtDate(d.uploadedAt)}
+                              </span>
+                              {d.notes && (
+                                <span className="mt-0.5 line-clamp-2 text-[11.5px] leading-snug text-[var(--fg-muted)]">
+                                  {d.notes}
+                                </span>
+                              )}
+                            </span>
+                            <Download size={16} aria-hidden="true" className="mt-1.5 shrink-0 text-[var(--fg-subtle)]" />
+                          </button>
+                          {isAdmin && (
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="mr-1.5 mt-1.5 shrink-0"
+                              onClick={() => remove(d)}
+                              aria-label={`Delete ${d.title}`}
+                              iconLeft={<Trash2 size={13} />}
+                            />
+                          )}
+                        </div>
+                      ) : (
                       <div
                         key={d.id}
-                        className="flex flex-wrap items-center gap-3 p-3 max-sm:items-start rounded-xl border border-[var(--border-default)] bg-[var(--bg-elevated)] shadow-[var(--shadow-xs)] transition-[border-color,box-shadow] duration-150 hover:border-[var(--border-hover)] hover:shadow-[var(--shadow-sm)]"
+                        className="flex flex-wrap items-center gap-3 p-3 rounded-xl border border-[var(--border-default)] bg-[var(--bg-elevated)] shadow-[var(--shadow-xs)] transition-[border-color,box-shadow] duration-150 hover:border-[var(--border-hover)] hover:shadow-[var(--shadow-sm)]"
                       >
                         {/* The document itself opens the document: the Open
                             button stays for the obvious affordance, but nobody
-                            should have to find it to read the file.
-                            A phone wraps the title and file details instead of
-                            cutting both to a few characters, and puts the
-                            buttons on their own full-width line underneath. */}
+                            should have to find it to read the file. */}
                         <button
                           type="button"
                           onClick={() => open(d)}
                           title={`Open ${d.title}`}
-                          className="flex min-w-0 flex-1 items-center gap-3 rounded-lg text-left focus-ring max-sm:items-start"
+                          className="flex min-w-0 flex-1 items-center gap-3 rounded-lg text-left focus-ring"
                         >
                           <ObjectTile tone="navy" size="sm">
                             <FileText size={15} />
                           </ObjectTile>
                           <span className="min-w-0 flex-1">
-                            <span className="block text-[13px] font-semibold text-[var(--fg-primary)] truncate max-sm:whitespace-normal max-sm:[overflow-wrap:anywhere] font-display">{d.title}</span>
-                            <span className="block text-[11.5px] text-[var(--fg-muted)] truncate max-sm:whitespace-normal max-sm:[overflow-wrap:anywhere]">
+                            <span className="block text-[13px] font-semibold text-[var(--fg-primary)] truncate font-display">{d.title}</span>
+                            <span className="block text-[11.5px] text-[var(--fg-muted)] truncate">
                               {d.fileName || "file"} · {fmtBytes(d.bytes)} · {fmtDate(d.uploadedAt)}
                               {d.notes ? ` · ${d.notes}` : ""}
                             </span>
                           </span>
                         </button>
-                        <div className="contents max-sm:flex max-sm:w-full max-sm:items-center max-sm:gap-2">
-                          <Button variant="secondary" size="sm" className="max-sm:flex-1" onClick={() => open(d)} iconLeft={<Download size={13} />}>
+                        <div className="contents">
+                          <Button variant="secondary" size="sm" onClick={() => open(d)} iconLeft={<Download size={13} />}>
                             Open
                           </Button>
                           {isAdmin && (
@@ -846,7 +1118,8 @@ function DocumentsTab({ projectId, documents, categories, isAdmin, canUpload, on
                           )}
                         </div>
                       </div>
-                    ))}
+                      )
+                    )}
                   </div>
                 </div>
               ))}
@@ -867,6 +1140,10 @@ function DocumentsTab({ projectId, documents, categories, isAdmin, canUpload, on
 }
 
 function UploadDocumentModal({ projectId, categories, onClose, onDone }) {
+  // The sheet a phone gets is the same form, but its first control is a file
+  // picker: see the File field below for why that one is built by hand.
+  const phone = usePhone();
+  const fileRef = useRef(null);
   const [title, setTitle] = useState("");
   const [category, setCategory] = useState("handover");
   const [notes, setNotes] = useState("");
@@ -898,13 +1175,42 @@ function UploadDocumentModal({ projectId, categories, onClose, onDone }) {
       <Modal.Header eyebrow="Site documents" title="Upload a document" icon={Upload} onClose={busy ? undefined : onClose} />
       <Modal.Body>
         <div className="flex flex-col gap-5">
-          <Field label="File" hint="PDF, image, Word or Excel. Up to 100 MB.">
+          <Field label="File" hint={phone ? null : "PDF, image, Word or Excel. Up to 100 MB."}>
+            {/* A phone never sees the browser's own file control: it is a small
+                grey button with the chosen filename crushed beside it, and it is
+                the FIRST thing in this sheet. Hidden input, and the control is a
+                full-width target that names what has been picked — the same
+                shape as the "Take photo" tile in the inspection sheet. */}
             <input
+              ref={fileRef}
               type="file"
               accept=".pdf,.jpg,.jpeg,.png,.webp,.doc,.docx,.xls,.xlsx,application/pdf,image/*"
               onChange={(e) => setFile(e.target.files?.[0] || null)}
-              className="block w-full text-[12.5px] text-[var(--fg-secondary)] max-sm:file:py-2.5 max-sm:file:px-4 file:mr-3 file:py-1.5 file:px-3 file:rounded-full file:border file:border-[var(--border-default)] file:bg-[var(--surface)] file:text-[var(--fg-primary)] file:text-[12px] file:font-semibold"
+              className={
+                phone
+                  ? "hidden"
+                  : "block w-full text-[12.5px] text-[var(--fg-secondary)] file:mr-3 file:py-1.5 file:px-3 file:rounded-full file:border file:border-[var(--border-default)] file:bg-[var(--surface)] file:text-[var(--fg-primary)] file:text-[12px] file:font-semibold"
+              }
             />
+            {phone && (
+              <button
+                type="button"
+                onClick={() => fileRef.current?.click()}
+                className="flex w-full items-center gap-3 rounded-xl border border-dashed border-[var(--border-strong)] bg-[var(--bg-surface)] px-4 py-3 text-left focus-ring active:bg-[var(--surface-pressed)]"
+              >
+                <ObjectTile tone={file ? "navy" : "slate"} size="md">
+                  {file ? <FileText size={16} /> : <Upload size={16} />}
+                </ObjectTile>
+                <span className="min-w-0 flex-1">
+                  <span className="block font-display text-[13px] font-semibold leading-snug text-[var(--fg-primary)] [overflow-wrap:anywhere]">
+                    {file ? file.name : "Choose a file"}
+                  </span>
+                  <span className="mt-0.5 block text-[11.5px] leading-snug text-[var(--fg-muted)]">
+                    {file ? `${fmtBytes(file.size)} · tap to change` : "PDF, image, Word or Excel · up to 100 MB"}
+                  </span>
+                </span>
+              </button>
+            )}
           </Field>
           <Field label="Category">
             <Select value={category} onChange={(e) => setCategory(e.target.value)}>

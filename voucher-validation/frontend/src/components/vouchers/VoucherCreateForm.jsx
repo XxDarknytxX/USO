@@ -225,27 +225,30 @@ function ProfileCard({ group, selected, onSelect }) {
       onClick={onSelect}
       whileTap={{ scale: 0.99 }}
       className={
-        "group text-left p-3 rounded-xl border transition-[border-color,background-color,box-shadow] duration-150 focus-ring " +
+        // Phone: the rows are the whole first decision and there can be a
+        // dozen of them, so they are a list — no object tile, tighter box —
+        // and the quantity step below stays within reach of one scroll.
+        "group text-left p-3 max-sm:px-3.5 max-sm:py-2.5 rounded-xl border transition-[border-color,background-color,box-shadow] duration-150 focus-ring " +
         (selected
           ? "border-[var(--brand)] bg-[var(--brand-soft)] shadow-[0_0_0_3px_var(--brand-soft)]"
           : "border-[var(--border-default)] bg-[var(--bg-elevated)] hover:border-[var(--border-hover)] hover:bg-[var(--bg-surface)]")
       }
     >
-      <div className="flex items-start gap-2.5">
-        <ObjectTile tone={selected ? "brand" : "indigo"} size="sm">
+      <div className="flex items-start gap-2.5 max-sm:items-center">
+        <ObjectTile tone={selected ? "brand" : "indigo"} size="sm" className="max-sm:hidden">
           <Ticket size={14} />
         </ObjectTile>
         <span className="min-w-0 flex-1">
           <span
             className={
-              "block text-[13px] font-semibold tracking-tight truncate font-display " +
+              "block text-[13px] max-sm:text-[14px] font-semibold tracking-tight truncate font-display " +
               (selected ? "text-[var(--brand-fg-on-soft)]" : "text-[var(--fg-primary)]")
             }
           >
             {group.name || group.userGroupName}
           </span>
 
-          <span className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11.5px] text-[var(--fg-muted)]">
+          <span className="mt-1.5 max-sm:mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11.5px] text-[var(--fg-muted)]">
             {group.timePeriod != null && (
               <span className="flex items-center gap-1 tabular-nums">
                 <Clock size={11} /> {formatTime(group.timePeriod)}
@@ -271,13 +274,16 @@ function ProfileCard({ group, selected, onSelect }) {
 
         <span
           className={
-            "shrink-0 mt-0.5 w-4 h-4 rounded-full border flex items-center justify-center transition-colors " +
+            "shrink-0 mt-0.5 max-sm:mt-0 w-4 h-4 max-sm:w-[22px] max-sm:h-[22px] rounded-full border flex items-center justify-center transition-colors " +
             (selected
               ? "border-[var(--brand)] bg-[var(--brand)] text-[var(--text-on-brand)]"
               : "border-[var(--border-strong)] bg-transparent text-transparent group-hover:border-[var(--fg-muted)]")
           }
         >
-          <Check size={10} strokeWidth={3} />
+          {/* The phone's circle is a thumb-sized 22px, so its tick is drawn to
+              match rather than sitting lost in the middle of it. */}
+          <Check size={10} strokeWidth={3} className="max-sm:hidden" />
+          <Check size={13} strokeWidth={3} className="sm:hidden" />
         </span>
       </div>
     </motion.button>

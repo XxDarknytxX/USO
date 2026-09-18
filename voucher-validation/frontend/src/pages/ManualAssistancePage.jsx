@@ -11,6 +11,7 @@
 // list below is the work itself.
 
 import { useEffect, useMemo, useState, useCallback } from "react";
+import { format } from "date-fns";
 import toast from "react-hot-toast";
 import {
   LifeBuoy,
@@ -24,6 +25,7 @@ import {
   CreditCard,
 } from "lucide-react";
 import { portalConfigApi } from "../services/api";
+import { usePhone } from "../components/ui/phone";
 import {
   PageHeader,
   Panel,
@@ -44,15 +46,35 @@ import {
   Td,
   TableMessage,
   RecordCell,
+  ObjectTile,
 } from "../components/ui";
 
 const fmtMoney = (n) =>
   "$" + Number(n || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const fmtDate = (d) => (d ? new Date(d).toLocaleString() : "—");
+/**
+ * Phone card: the year and the seconds are noise on a queue worked the same day.
+ *
+ * Deliberately date-fns rather than toLocaleString: the Txn Flows card beside
+ * this one prints the same shape, and a locale-formatted time gave 09:02 AM
+ * next to its 15:16 — two clocks on two cards of the same queue. `format` also
+ * fixes the field order, which the locale would otherwise flip (18 Sep / Sep 18).
+ */
+const fmtWhen = (d) => {
+  if (!d) return "—";
+  try {
+    return format(new Date(d), "MMM d, HH:mm");
+  } catch {
+    return "—";
+  }
+};
 
 const COLUMNS = 6;
 
 export default function ManualAssistancePage() {
+  // Below 640px a case is a card with its two actions along the foot, and the
+  // KPI rail is one four-figure grid — different components, not smaller ones.
+  const phone = usePhone();
   const [cases, setCases] = useState([]);
   const [unresolved, setUnresolved] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -149,19 +171,42 @@ export default function ManualAssistancePage() {
 
   return (
     <PageShell>
+      {/* On a phone the app bar names the screen and Refresh sits on the queue
+          it reloads, so the hero would be a card of prose between the bar and
+          the work. It stands down entirely. */}
       <PageHeader
         eyebrow="Support"
         title="Manual Assistance"
-        subtitle="Customers who paid but auth failed — hand them their reserved voucher, then mark sorted."
+        subtitle={
+          phone
+            ? null
+            : "Customers who paid but auth failed — hand them their reserved voucher, then mark sorted."
+        }
         icon={<LifeBuoy size={22} />}
         tone="orange"
         actions={
-          <Button variant="secondary" size="sm" onClick={load} iconLeft={<RefreshCw size={14} />}>
-            Refresh
-          </Button>
+          phone ? null : (
+            <Button variant="secondary" size="sm" onClick={load} iconLeft={<RefreshCw size={14} />}>
+              Refresh
+            </Button>
+          )
         }
       />
 
+      {/* Four tiles two-up, each with a caption, filled most of a phone screen
+          before the queue itself. The same four figures, no captions, in a
+          quarter of the height — the captions were explaining labels that say
+          it already. */}
+      {phone ? (
+        <PhoneSummary
+          items={[
+            { label: "Open cases", value: unresolved },
+            { label: "Value in view", value: fmtMoney(stats.value) },
+            { label: "Vouchers reserved", value: stats.reserved },
+            { label: "No email on file", value: stats.noEmail },
+          ]}
+        />
+      ) : (
       <KpiGrid>
         <StatCard
           label="Open cases"
@@ -192,6 +237,7 @@ export default function ManualAssistancePage() {
           color="slate"
         />
       </KpiGrid>
+      )}
 
       <Toolbar>
         <Segmented
@@ -212,17 +258,36 @@ export default function ManualAssistancePage() {
           placeholder="Search phone, transaction, voucher…"
           width="w-72"
         />
-        <span className="ml-auto text-[12px] text-[var(--fg-muted)] tabular-nums">
+        {/* The count moves into the queue's own subtitle on a phone, where a
+            line of its own in the filter card is a row wasted. */}
+        <span className="ml-auto text-[12px] text-[var(--fg-muted)] tabular-nums max-sm:hidden!">
           {shown.length} of {cases.length} {viewLabel}
         </span>
       </Toolbar>
 
       <Panel
         title="Case queue"
-        subtitle="Oldest first from the portal. Copy or email the reserved code, then mark sorted."
+        subtitle={
+          // The phone line states the order the API actually returns —
+          // unresolved first, newest first within each (portalConfigController,
+          // ORDER BY resolved, created_at DESC) — and drops "all" from "5 of
+          // 5 all cases".
+          phone
+            ? `${shown.length} of ${cases.length} ${statusFilter === "all" ? "cases" : viewLabel}, ${
+                statusFilter === "all" ? "open first, then newest" : "newest first"
+              }`
+            : "Oldest first from the portal. Copy or email the reserved code, then mark sorted."
+        }
         icon={<LifeBuoy size={15} />}
         tone="orange"
         padding={false}
+        actions={
+          phone ? (
+            <Button variant="secondary" size="sm" onClick={load} iconLeft={<RefreshCw size={13} />}>
+              Refresh
+            </Button>
+          ) : null
+        }
       >
         {loading ? (
           <div className="p-5 space-y-2.5">
@@ -236,6 +301,25 @@ export default function ManualAssistancePage() {
             title={statusFilter === "open" ? "No open cases" : "No cases"}
             description={statusFilter === "open" ? "Every paid customer got connected." : ""}
           />
+        ) : phone ? (
+          shown.length === 0 ? (
+            <p className="px-4 py-10 text-center text-[13px] text-[var(--fg-muted)]">
+              No case matches “{query.trim()}”.
+            </p>
+          ) : (
+            <ul>
+              {shown.map((c) => (
+                <PhoneCaseRow
+                  key={c.transactionId}
+                  c={c}
+                  resolving={resolving === c.transactionId}
+                  onCopy={() => copy(c.voucherCode)}
+                  onEmail={() => openEmail(c)}
+                  onResolve={() => resolve(c.transactionId)}
+                />
+              ))}
+            </ul>
+          )
         ) : (
           <DataTable>
             <thead>
@@ -256,34 +340,17 @@ export default function ManualAssistancePage() {
                 <TableMessage colSpan={COLUMNS}>No case matches “{query.trim()}”.</TableMessage>
               ) : (
                 shown.map((c) => (
-                  // On a phone each case is a card: the customer with what
-                  // they paid opposite on the title line, then the code to
-                  // hand over, and the two actions as a full-width pair at the
-                  // foot — the part of the card a thumb is nearest.
                   <tr key={c.transactionId}>
                     <Td>
-                      <span className="flex items-start gap-3 min-w-0 max-sm:w-full">
-                        <span className="min-w-0 flex-1">
-                          <RecordCell
-                            tone="orange"
-                            icon={<Phone size={14} />}
-                            title={c.customerPhone || "Unknown number"}
-                            subtitle={c.transactionId}
-                            mono
-                          />
-                        </span>
-                        {/* Capped, so a long plan name wraps under the amount
-                            rather than squeezing the transaction id into a
-                            column of fragments. */}
-                        <span className="sm:hidden shrink-0 max-w-[42%] text-right">
-                          <span className="block font-semibold text-[var(--fg-primary)] tabular-nums">
-                            {fmtMoney(c.amount)}
-                          </span>
-                          <span className="block text-[11.5px] text-[var(--fg-muted)]">{c.planName || "—"}</span>
-                        </span>
-                      </span>
+                      <RecordCell
+                        tone="orange"
+                        icon={<Phone size={14} />}
+                        title={c.customerPhone || "Unknown number"}
+                        subtitle={c.transactionId}
+                        mono
+                      />
                     </Td>
-                    <Td align="right" nowrap className="max-sm:hidden!">
+                    <Td align="right" nowrap>
                       <span className="font-semibold text-[var(--fg-primary)] tabular-nums">
                         {fmtMoney(c.amount)}
                       </span>
@@ -316,8 +383,8 @@ export default function ManualAssistancePage() {
                         <StatusPill tone="warning">Open</StatusPill>
                       )}
                     </Td>
-                    <Td align="right" className="max-sm:before:hidden! max-sm:pt-1.5!">
-                      <div className="flex items-center justify-end gap-2 max-sm:w-full! max-sm:[&>*]:flex-1 max-sm:[&>*]:basis-0">
+                    <Td align="right">
+                      <div className="flex items-center justify-end gap-2">
                         {/* Only offered when we actually have an address for
                             this number — there is nothing to email otherwise.
                             The reason is shown rather than the button simply
@@ -335,7 +402,7 @@ export default function ManualAssistancePage() {
                             </Button>
                           ) : (
                             <span
-                              className="text-[11.5px] text-[var(--fg-muted)] whitespace-nowrap max-sm:whitespace-normal max-sm:text-left"
+                              className="text-[11.5px] text-[var(--fg-muted)] whitespace-nowrap"
                               title="Add this number under M-PAiSA Mapping to email their code"
                             >
                               No email on file
@@ -426,5 +493,125 @@ export default function ManualAssistancePage() {
         </Modal>
       )}
     </PageShell>
+  );
+}
+
+/* ───────────────────────── Phone ───────────────────────── */
+
+/**
+ * The page's four figures as one hairline grid. A phone gets the numbers
+ * without the captions, above the queue rather than instead of it.
+ */
+function PhoneSummary({ items }) {
+  return (
+    <div className="grid grid-cols-2 gap-px overflow-hidden rounded-xl border border-[var(--border-default)] bg-[var(--border-subtle)] shadow-[var(--shadow-card)]">
+      {items.map((it) => (
+        <div key={it.label} className="bg-[var(--bg-elevated)] px-3.5 py-3">
+          <p className="text-label truncate">{it.label}</p>
+          <p className="mt-1.5 text-[20px] font-semibold leading-none tracking-tight tabular-nums text-[var(--fg-primary)]">
+            {it.value}
+          </p>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/**
+ * One case on a phone. Who to call and what they paid, the code to read out,
+ * then the two things to do about it as a full-width pair at the foot — the
+ * part of the card a thumb is nearest.
+ */
+function PhoneCaseRow({ c, resolving, onCopy, onEmail, onResolve }) {
+  // Built before the row is, because the row is drawn only when it holds a
+  // button. A sorted case with nothing left to email has none, and a row with
+  // nothing in it — or with only the "No email on file" note, which explains a
+  // missing button to nobody — left a band of card under "Created …" that read
+  // as something failing to load. Email is only offered when we actually have
+  // an address for this number; the reason is shown rather than the button
+  // simply vanishing, so it is clear a mapping would fix it.
+  const canEmail = Boolean(c.voucherCode && c.customerEmail);
+  const noEmail = Boolean(c.voucherCode && !c.customerEmail);
+  const emailAction = canEmail ? (
+    <Button variant="secondary" size="sm" iconLeft={<Mail size={13} />} onClick={onEmail}>
+      Email code
+    </Button>
+  ) : null;
+  const resolveAction = !c.resolved ? (
+    <Button
+      variant="secondary"
+      size="sm"
+      loading={resolving}
+      iconLeft={!resolving && <CheckCircle2 size={13} />}
+      onClick={onResolve}
+    >
+      Mark sorted
+    </Button>
+  ) : null;
+
+  return (
+    <li className="border-b border-[var(--border-subtle)] last:border-b-0 px-4 py-3.5">
+      <div className="flex items-start gap-2.5 min-w-0">
+        <ObjectTile tone="orange" size="sm" className="mt-0.5">
+          <Phone size={14} />
+        </ObjectTile>
+        <div className="min-w-0 flex-1">
+          <p className="font-mono text-[14px] font-semibold text-[var(--fg-primary)] [overflow-wrap:anywhere]">
+            {c.customerPhone || "Unknown number"}
+          </p>
+          <p className="mt-0.5 text-[11.5px] text-[var(--fg-muted)] [overflow-wrap:anywhere]">
+            <span className="font-mono">{c.transactionId}</span>
+            {c.planName && <span> · {c.planName}</span>}
+          </p>
+        </div>
+        <div className="shrink-0 text-right">
+          <p className="text-[15px] font-semibold tabular-nums text-[var(--fg-primary)]">{fmtMoney(c.amount)}</p>
+          <p className="mt-1">
+            {c.resolved ? (
+              <StatusPill tone="success">Sorted</StatusPill>
+            ) : (
+              <StatusPill tone="warning">Open</StatusPill>
+            )}
+          </p>
+        </div>
+      </div>
+
+      {/* The code is the point of the case: full width, and the whole pill
+          copies it. */}
+      {c.voucherCode && (
+        <button
+          onClick={onCopy}
+          title="Copy code"
+          className="mt-2.5 flex w-full items-center justify-center gap-2 rounded-lg bg-[var(--brand-soft)] px-3 py-2 font-mono text-[14px] font-semibold text-[var(--brand-fg-on-soft)] active:opacity-80 transition-opacity"
+        >
+          <Ticket size={13} />
+          {c.voucherCode}
+          <Copy size={12} className="opacity-60" />
+        </button>
+      )}
+
+      {/* With no button to stand beside, the note rides on the date line. */}
+      <p className="mt-2 text-[11.5px] text-[var(--fg-muted)]">
+        Created {fmtWhen(c.createdAt)}
+        {noEmail && !resolveAction && (
+          <span title="Add this number under M-PAiSA Mapping to email their code"> · No email on file</span>
+        )}
+      </p>
+
+      {(emailAction || resolveAction) && (
+        <div className="mt-2.5 flex items-center gap-2 [&>*]:flex-1 [&>*]:basis-0">
+          {emailAction ||
+            (noEmail && (
+              <span
+                className="text-[11.5px] text-[var(--fg-muted)]"
+                title="Add this number under M-PAiSA Mapping to email their code"
+              >
+                No email on file
+              </span>
+            ))}
+          {resolveAction}
+        </div>
+      )}
+    </li>
   );
 }

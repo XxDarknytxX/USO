@@ -27,6 +27,7 @@ import {
 } from "../utils/allocation";
 import { useAuth } from "../hooks/useAuth";
 import { useSite } from "../hooks/useSite";
+import { usePhone } from "../components/ui/phone";
 import toast from "react-hot-toast";
 import {
   Globe,
@@ -66,6 +67,7 @@ import {
   Toolbar,
   SearchInput,
   StatusPill,
+  ObjectTile,
   DataTable,
   Th,
   Td,
@@ -243,6 +245,9 @@ function planDrift(plan, entry) {
 // Main Page Component
 // ---------------------------------------------------------------------------
 export default function PortalConfigPage() {
+  // Below 640px a plan is a card and the KPI rail is one instrument strip —
+  // different components, not narrower ones.
+  const phone = usePhone();
   const { isAdmin } = useAuth();
   const { activeGroupId, visibleSiteIds, sites, activeSite, isGlobal } = useSite();
 
@@ -390,21 +395,41 @@ export default function PortalConfigPage() {
 
   return (
     <PageShell>
+      {/* On a phone the app bar names the screen and New plan sits on the
+          catalogue it adds to, so the hero — a paragraph and a button — would
+          only push the plans down a screen. It stands down. */}
       <PageHeader
         eyebrow="Portal"
         title="Portal Plans"
-        subtitle="What the captive portal offers, and the Ruijie user group each offer draws its vouchers from."
+        subtitle={
+          phone
+            ? null
+            : "What the captive portal offers, and the Ruijie user group each offer draws its vouchers from."
+        }
         icon={<Globe size={22} />}
         tone="violet"
         actions={
-          isAdmin && (
+          isAdmin && !phone ? (
             <Button variant="primary" size="md" iconLeft={<Plus size={14} />} onClick={handleCreate}>
               New plan
             </Button>
-          )
+          ) : null
         }
       />
 
+      {/* Four tiles two-up filled half a phone screen with captions nobody
+          reads on the way to the list. The same four figures read as one
+          instrument strip in a tenth of the space. */}
+      {phone ? (
+        <PhoneSummary
+          items={[
+            { label: "Plans", value: plans.length },
+            { label: "Live", value: stats.active },
+            { label: "Featured", value: stats.featured },
+            { label: "Vouchers", value: stats.stock == null ? "—" : stats.stock.toLocaleString() },
+          ]}
+        />
+      ) : (
       <KpiGrid>
         <StatCard
           label="Plans configured"
@@ -435,6 +460,7 @@ export default function PortalConfigPage() {
           color="indigo"
         />
       </KpiGrid>
+      )}
 
       <Toolbar>
         <SearchInput
@@ -443,46 +469,69 @@ export default function PortalConfigPage() {
           placeholder="Search plans, keys, user groups…"
           width="w-72"
         />
-        <Select
-          value={categoryFilter}
-          onChange={(e) => setCategoryFilter(e.target.value)}
-          style={{ ...PILL, width: 180 }}
-          // The inline pill width would leave the box short of its full-width
-          // row on a phone; !important is what outranks an inline style.
-          className="max-sm:w-full! max-sm:h-10!"
-          aria-label="Filter by category"
-        >
-          <option value="">All categories</option>
-          {CATEGORIES.map((cat) => (
-            <option key={cat} value={cat}>
-              {cat.charAt(0).toUpperCase() + cat.slice(1)}
-            </option>
-          ))}
-        </Select>
-        {hasFilters && (
-          <Button
-            variant="ghost"
-            size="sm"
-            iconLeft={<X size={13} />}
-            onClick={() => {
-              setCategoryFilter("");
-              setQuery("");
-            }}
+        {/* `contents` on desktop, so both stay ordinary items of the filter
+            strip; on a phone the category and Clear share one row. */}
+        <div className="contents max-sm:flex max-sm:items-center max-sm:gap-2">
+          {/* Select renders its own relative wrapper, and that wrapper is the
+              flex item here — so the width has to be asked for on a box of
+              ours around it, not on the <select>. */}
+          <div className="contents max-sm:block max-sm:min-w-0 max-sm:flex-1">
+          <Select
+            value={categoryFilter}
+            onChange={(e) => setCategoryFilter(e.target.value)}
+            style={{ ...PILL, width: 180 }}
+            // The inline pill width would leave the box short of its full-width
+            // row on a phone; !important is what outranks an inline style.
+            className="max-sm:w-full! max-sm:h-10! max-sm:min-w-0 max-sm:flex-1"
+            aria-label="Filter by category"
           >
-            Clear
-          </Button>
-        )}
-        <span className="ml-auto text-[12px] text-[var(--fg-muted)] tabular-nums">
+            <option value="">All categories</option>
+            {CATEGORIES.map((cat) => (
+              <option key={cat} value={cat}>
+                {cat.charAt(0).toUpperCase() + cat.slice(1)}
+              </option>
+            ))}
+          </Select>
+          </div>
+          {hasFilters && (
+            <Button
+              variant="ghost"
+              size="sm"
+              iconLeft={<X size={13} />}
+              onClick={() => {
+                setCategoryFilter("");
+                setQuery("");
+              }}
+              className="max-sm:shrink-0 max-sm:h-10!"
+            >
+              Clear
+            </Button>
+          )}
+        </div>
+        {/* The count moves into the catalogue's own subtitle on a phone, where
+            a line of its own in the filter card is a row wasted. */}
+        <span className="ml-auto text-[12px] text-[var(--fg-muted)] tabular-nums max-sm:hidden!">
           {visiblePlans.length} of {plans.length} plan{plans.length !== 1 ? "s" : ""} · {scopeLabel}
         </span>
       </Toolbar>
 
       <Panel
         title="Plan catalogue"
-        subtitle="Sort order decides the running order on the portal."
+        subtitle={
+          phone
+            ? `${visiblePlans.length} of ${plans.length} plan${plans.length !== 1 ? "s" : ""} · ${scopeLabel}`
+            : "Sort order decides the running order on the portal."
+        }
         icon={<Layers size={15} />}
         tone="violet"
         padding={false}
+        actions={
+          phone && isAdmin ? (
+            <Button variant="primary" size="sm" iconLeft={<Plus size={13} />} onClick={handleCreate}>
+              New plan
+            </Button>
+          ) : null
+        }
       >
         {loading ? (
           <LoadingTable />
@@ -503,6 +552,26 @@ export default function PortalConfigPage() {
               )
             }
           />
+        ) : phone ? (
+          visiblePlans.length === 0 ? (
+            <p className="px-4 py-10 text-center text-[13px] text-[var(--fg-muted)]">
+              No plan matches “{query.trim()}”.
+            </p>
+          ) : (
+            <ul>
+              {visiblePlans.map((plan) => (
+                <PhonePlanRow
+                  key={plan._id || plan.id}
+                  plan={plan}
+                  isAdmin={isAdmin}
+                  drift={isAdmin ? planDrift(plan, groupsByVillage[villageKey(plan.groupId)]) : []}
+                  onEdit={() => handleEdit(plan)}
+                  onDelete={() => handleDelete(plan)}
+                  onToggleActive={() => handleToggleActive(plan)}
+                />
+              ))}
+            </ul>
+          )
         ) : (
           <DataTable>
             <thead>
@@ -521,15 +590,9 @@ export default function PortalConfigPage() {
                 <TableMessage colSpan={colSpan}>No plan matches “{query.trim()}”.</TableMessage>
               ) : (
                 visiblePlans.map((plan) => (
-                  // On a phone each plan is a card: name and key on the left of
-                  // the title line with price and category opposite, then the
-                  // Ruijie side, then one footer of the live switch and the
-                  // row's actions. Category, Price and (for an admin) Active
-                  // stand down as rows of their own — they are already on the
-                  // card — which takes the card from seven lines to four.
                   <tr key={plan._id || plan.id}>
                     <Td>
-                      <div className="flex items-center gap-2 min-w-0 max-sm:w-full max-sm:items-start">
+                      <div className="flex items-center gap-2 min-w-0">
                         <RecordCell
                           tone={CATEGORY_TILES[plan.category] || "violet"}
                           icon={<Layers size={14} />}
@@ -538,29 +601,18 @@ export default function PortalConfigPage() {
                           mono
                         />
                         {Boolean(plan.popular) && (
-                          <span title="Popular" className="shrink-0 text-[var(--warning-fg)] max-sm:mt-1">
+                          <span title="Popular" className="shrink-0 text-[var(--warning-fg)]">
                             <Star size={12} className="fill-current" strokeWidth={1.5} />
                           </span>
                         )}
-                        <span className="sm:hidden ml-auto shrink-0 flex flex-col items-end gap-1 pl-2">
-                          <span className="whitespace-nowrap">
-                            <span className="text-[11.5px] text-[var(--fg-muted)]">{plan.currency || "FJD"} </span>
-                            <span className="font-semibold text-[var(--fg-primary)] tabular-nums">
-                              {Number(plan.price || 0).toFixed(2)}
-                            </span>
-                          </span>
-                          <StatusPill tone={CATEGORY_TONES[plan.category] || "neutral"} dot={false}>
-                            {plan.category}
-                          </StatusPill>
-                        </span>
                       </div>
                     </Td>
-                    <Td className="max-sm:hidden!">
+                    <Td>
                       <StatusPill tone={CATEGORY_TONES[plan.category] || "neutral"} dot={false}>
                         {plan.category}
                       </StatusPill>
                     </Td>
-                    <Td align="right" nowrap className="max-sm:hidden!">
+                    <Td align="right" nowrap>
                       <span className="text-[11.5px] text-[var(--fg-muted)]">
                         {plan.currency || "FJD"}{" "}
                       </span>
@@ -569,9 +621,6 @@ export default function PortalConfigPage() {
                       </span>
                     </Td>
                     <Td>
-                      {/* One wrapper, so a phone card keeps the group and its
-                          allowance together at the right instead of spreading
-                          the two lines across the card. */}
                       <span className="block">
                         <span className="truncate inline-block max-w-[200px] align-middle">
                           {plan.userGroupName || plan.userGroup || (
@@ -587,7 +636,7 @@ export default function PortalConfigPage() {
                           const drift = isAdmin ? planDrift(plan, groupsByVillage[villageKey(plan.groupId)]) : [];
                           if (!drift.length) return null;
                           return (
-                            <span className="mt-1 flex flex-wrap gap-1 max-sm:justify-end">
+                            <span className="mt-1 flex flex-wrap gap-1">
                               {drift.map((d) => (
                                 <button
                                   key={d.text}
@@ -609,7 +658,7 @@ export default function PortalConfigPage() {
                         {plan.availableVouchers ?? "—"}
                       </Badge>
                     </Td>
-                    <Td align="center" className={isAdmin ? "max-sm:hidden!" : undefined}>
+                    <Td align="center">
                       <div className="flex justify-center">
                         <Toggle
                           checked={!!plan.isActive}
@@ -619,18 +668,8 @@ export default function PortalConfigPage() {
                       </div>
                     </Td>
                     {isAdmin && (
-                      <Td align="right" className="max-sm:before:hidden! max-sm:pt-1!">
-                        <div className="flex items-center justify-end gap-0.5 max-sm:w-full! max-sm:gap-2">
-                          {/* The Active column's switch, brought into the
-                              card's footer on a phone with a label a thumb
-                              can hit as well as the track. */}
-                          <span className="sm:hidden mr-auto">
-                            <Toggle
-                              checked={!!plan.isActive}
-                              onChange={() => handleToggleActive(plan)}
-                              label={plan.isActive ? "Live on portal" : "Hidden"}
-                            />
-                          </span>
+                      <Td align="right">
+                        <div className="flex items-center justify-end gap-0.5">
                           <IconButton
                             size="sm"
                             onClick={() => handleEdit(plan)}
@@ -687,6 +726,141 @@ export default function PortalConfigPage() {
 }
 
 // ---------------------------------------------------------------------------
+// Phone list
+// ---------------------------------------------------------------------------
+
+/**
+ * The page's four figures as one strip. A phone gets the numbers without the
+ * captions: "33 plans, 33 live" is the whole of what the rail was saying, and
+ * it belongs above the list rather than instead of it.
+ */
+function PhoneSummary({ items }) {
+  return (
+    <div className="grid grid-cols-4 divide-x divide-[var(--border-subtle)] rounded-xl border border-[var(--border-default)] bg-[var(--bg-elevated)] shadow-[var(--shadow-card)]">
+      {items.map((it) => (
+        <div key={it.label} className="px-1.5 py-3 text-center">
+          <p className="text-[17px] font-semibold leading-none tracking-tight tabular-nums text-[var(--fg-primary)]">
+            {it.value}
+          </p>
+          <p className="text-label mt-1.5 truncate">{it.label}</p>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/**
+ * One plan on a phone. What it is and what it costs, then what it sells from
+ * in Ruijie, then the two things an admin does to it — rather than seven
+ * labelled lines, which made a catalogue of thirty-three plans thirteen
+ * thousand pixels long and hid the price among them.
+ */
+function PhonePlanRow({ plan, isAdmin, drift, onEdit, onDelete, onToggleActive }) {
+  // The stock count rides with the key and the category, not with the Ruijie
+  // line: an allowance can run to two lines, and "0 available" stranded on the
+  // end of one is the figure that decides whether the plan can be sold at all.
+  const ruijie = [plan.userGroupName || plan.userGroup || "No user group", plan.dataAllowance].filter(Boolean);
+
+  return (
+    <li className="border-b border-[var(--border-subtle)] last:border-b-0 px-4 py-3.5">
+      <div className="flex items-start gap-2.5 min-w-0">
+        <ObjectTile tone={CATEGORY_TILES[plan.category] || "violet"} size="sm" className="mt-0.5">
+          <Layers size={14} />
+        </ObjectTile>
+        <div className="min-w-0 flex-1">
+          <p className="flex items-center gap-1.5 text-[14px] font-semibold text-[var(--fg-primary)] [overflow-wrap:anywhere]">
+            {plan.name}
+            {Boolean(plan.popular) && (
+              <Star
+                size={12}
+                className="shrink-0 fill-current text-[var(--warning-fg)]"
+                strokeWidth={1.5}
+                aria-label="Popular"
+              />
+            )}
+          </p>
+          <p className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11.5px] text-[var(--fg-muted)]">
+            <span className="font-mono [overflow-wrap:anywhere]">{plan.planKey}</span>
+            <StatusPill tone={CATEGORY_TONES[plan.category] || "neutral"} dot={false}>
+              {plan.category}
+            </StatusPill>
+            {/* The desktop table has a "Vouchers available" heading over this
+                figure; a card has no heading, so a bare "3" between the plan
+                key and the category said nothing. The word travels with the
+                number instead. */}
+            <Badge tone="neutral" icon={<Tag size={10} strokeWidth={2} />}>
+              {plan.availableVouchers != null ? `${plan.availableVouchers} left` : "Stock unknown"}
+            </Badge>
+          </p>
+        </div>
+        <p className="shrink-0 whitespace-nowrap text-right">
+          <span className="text-[11px] text-[var(--fg-muted)]">{plan.currency || "FJD"} </span>
+          <span className="text-[15px] font-semibold tabular-nums text-[var(--fg-primary)]">
+            {Number(plan.price || 0).toFixed(2)}
+          </span>
+        </p>
+      </div>
+
+      <p className="mt-2 text-[12px] leading-snug text-[var(--fg-secondary)] [overflow-wrap:anywhere]">
+        {ruijie.map((part, i) => (
+          <span key={part + i}>
+            {i > 0 && <span className="px-1 text-[var(--fg-muted)] opacity-70">·</span>}
+            <span className={i === 0 ? undefined : "text-[var(--fg-muted)]"}>{part}</span>
+          </span>
+        ))}
+      </p>
+
+      {/* A plan out of step with Ruijie: the pill says how, and opens the form
+          at the field that fixes it. */}
+      {drift.length > 0 && (
+        <div className="mt-2 flex flex-wrap gap-1.5">
+          {drift.map((d) => (
+            <button
+              key={d.text}
+              type="button"
+              onClick={onEdit}
+              title={d.title}
+              className="rounded-full focus-ring min-h-9 inline-flex items-center"
+            >
+              <StatusPill tone={d.tone} dot={false}>
+                {d.text}
+              </StatusPill>
+            </button>
+          ))}
+        </div>
+      )}
+
+      <div className="mt-2.5 flex items-center gap-2">
+        <span className="flex min-h-9 items-center">
+          <Toggle
+            checked={!!plan.isActive}
+            onChange={() => isAdmin && onToggleActive()}
+            disabled={!isAdmin}
+            label={plan.isActive ? "Live on portal" : "Hidden"}
+          />
+        </span>
+        {isAdmin && (
+          <span className="ml-auto flex items-center gap-1.5">
+            <IconButton size="sm" onClick={onEdit} aria-label="Edit plan" title="Edit plan">
+              <Pencil size={15} />
+            </IconButton>
+            <IconButton
+              size="sm"
+              onClick={onDelete}
+              aria-label="Delete plan"
+              title="Delete plan"
+              className="hover:text-[var(--brand)]"
+            >
+              <Trash2 size={15} />
+            </IconButton>
+          </span>
+        )}
+      </div>
+    </li>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Plan Form Modal
 //
 // The most consequential form in the console: a wrong user group here sells a
@@ -694,6 +868,12 @@ export default function PortalConfigPage() {
 // group states, in words, who the fields beside it are for.
 // ---------------------------------------------------------------------------
 function PlanFormModal({ open, plan, activeGroupId, sites, groupsByVillage, onLoadGroups, scopeLabel, onSave, onClose }) {
+  // The sheet's header does not scroll away, so on a phone every line in it is
+  // charged against all fifteen fields below. The eyebrow and the two-line
+  // description held 119px of an 812px screen the whole way down a form that
+  // already says which section you are in — the title alone keeps the sheet
+  // identified. Desktop keeps both: there the header costs nothing it needs.
+  const phone = usePhone();
   const isEditing = !!plan;
   const [form, setForm] = useState(EMPTY_FORM);
   const [saving, setSaving] = useState(false);
@@ -938,12 +1118,18 @@ function PlanFormModal({ open, plan, activeGroupId, sites, groupsByVillage, onLo
     <Modal open={open} onClose={onClose} width="2xl">
       <Modal.Header
         icon={Globe}
-        eyebrow={isEditing ? "Editing plan" : "New plan"}
+        // The header top-aligns its text for the eyebrow-over-title stack; with
+        // the title alone on a phone that left it riding high beside the icon
+        // tile and the close button, so there the row centres instead.
+        className="max-sm:items-center max-sm:[&>div:first-child]:items-center"
+        eyebrow={phone ? null : isEditing ? "Editing plan" : "New plan"}
         title={isEditing ? form.name || "Edit plan" : "Create a portal plan"}
         subtitle={
-          isEditing
-            ? "Update pricing, capacity, and copy. Customers see changes within a minute of saving."
-            : "Map a price to a Ruijie user group. Customers will see this on the portal."
+          phone
+            ? null
+            : isEditing
+              ? "Update pricing, capacity, and copy. Customers see changes within a minute of saving."
+              : "Map a price to a Ruijie user group. Customers will see this on the portal."
         }
         onClose={onClose}
       />
@@ -1058,8 +1244,10 @@ function PlanFormModal({ open, plan, activeGroupId, sites, groupsByVillage, onLo
             title="Capacity"
             description="The Ruijie side. Vouchers are claimed from this group the moment a payment clears, so it must exist and have stock."
           >
-            {/* Where these figures came from, and when. */}
-            <div className="sm:col-span-2 flex flex-wrap items-center gap-x-3 gap-y-2 rounded-xl border border-[var(--border-default)] bg-[var(--bg-surface)] px-3.5 py-2.5">
+            {/* Where these figures came from, and when. On a phone the line and
+                the button stack: side by side the sentence was squeezed into
+                two ragged lines against a button as wide as itself. */}
+            <div className="sm:col-span-2 flex flex-wrap items-center gap-x-3 gap-y-2 rounded-xl border border-[var(--border-default)] bg-[var(--bg-surface)] px-3.5 py-2.5 max-sm:flex-col max-sm:items-stretch">
               <span className="min-w-0 flex-1 text-[12px] text-[var(--fg-secondary)]">
                 {!villageId ? (
                   "Choose the village first — its user groups are loaded from Ruijie."
@@ -1088,7 +1276,7 @@ function PlanFormModal({ open, plan, activeGroupId, sites, groupsByVillage, onLo
                   onClick={() => onLoadGroups(villageId)}
                   loading={!!groups?.loading}
                   iconLeft={!groups?.loading ? <RefreshCw size={12} /> : null}
-                  className="shrink-0"
+                  className="shrink-0 max-sm:self-end"
                 >
                   Refresh from Ruijie
                 </Button>
@@ -1190,7 +1378,7 @@ function PlanFormModal({ open, plan, activeGroupId, sites, groupsByVillage, onLo
             )}
 
             {cloudSync && selectedListed && allocationParts(selectedGroup).length > 0 && (
-              <dl className="sm:col-span-2 grid grid-cols-2 gap-x-4 gap-y-2 rounded-xl border border-[var(--border-subtle)] px-3.5 py-3 sm:grid-cols-5">
+              <dl className="sm:col-span-2 grid grid-cols-2 gap-x-4 gap-y-2 max-sm:gap-y-3 rounded-xl border border-[var(--border-subtle)] px-3.5 py-3 sm:grid-cols-5">
                 {allocationParts(selectedGroup).map((p) => (
                   <div key={p.label} className="min-w-0">
                     <dt className="text-label">{p.label}</dt>

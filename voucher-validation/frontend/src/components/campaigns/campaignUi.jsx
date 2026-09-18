@@ -44,6 +44,31 @@ export function useIsPhone() {
   return phone;
 }
 
+/* ───────────────────────── Phone cards ─────────────────────────
+ * Used with PHONE_CARD from components/ui/phone, which turns a stacked table
+ * row into a six-track grid. (It moved out of components/MonthlyBreakdown:
+ * importing it from there dragged recharts into pages with no charts.) */
+
+/**
+ * A full-width, label-less line inside a phone card — for a value that explains
+ * itself and needs the width: a delivery bar, an error message, the moment
+ * something was sent. The stacked-table rules in main.css are unlayered, so
+ * every property they set has to be taken back with the important form.
+ */
+export const PHONE_WIDE =
+  "max-sm:col-span-6 max-sm:text-left! max-sm:before:hidden! max-sm:[&>*]:ml-0! max-sm:[&>*]:w-full!";
+
+/* ───────────────────────── Phone header ─────────────────────────
+ * PageHeader's row of buttons is only as wide as the buttons, so on a phone a
+ * header with two of them left half its card empty. Given to PageHeader as its
+ * className, PHONE_HEADER_FILL stretches that row across the card, so a button
+ * marked max-sm:flex-1 fills what is left. PHONE_HEADER_BARE is for a header
+ * that shows no sentence on a phone: it also drops the gap the heading (read
+ * from the app bar there) leaves above the buttons. Phones only — PageHeader's
+ * own markup is untouched, and desktop never sees either. */
+export const PHONE_HEADER_FILL = "max-sm:[&>div>div:last-child>div:last-child]:flex-1";
+export const PHONE_HEADER_BARE = `${PHONE_HEADER_FILL} max-sm:[&>div]:gap-0`;
+
 /* ───────────────────────── Status ───────────────────────── */
 
 export const CAMPAIGN_STATUS = {

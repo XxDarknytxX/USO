@@ -33,6 +33,7 @@ import {
   TableMessage,
   RecordCell,
 } from "../components/ui";
+import { PHONE_CARD, phoneRowClass, PhoneMore, usePhone } from "../components/ui/phone";
 import { useSite } from "../hooks/useSite";
 import { useAuth } from "../hooks/useAuth";
 
@@ -50,9 +51,13 @@ export default function OverviewPage() {
   const [refreshing, setRefreshing] = useState(false);
   const [q, setQ] = useState("");
   const [status, setStatus] = useState("all");
+  // Phones show the first few villages and unfold the rest: the list is the
+  // page, and thirty of them is a long way to the footnote under it.
+  const [showAll, setShowAll] = useState(false);
   const navigate = useNavigate();
   const { isInScope, setActiveSiteId } = useSite();
   const { isAdmin } = useAuth();
+  const phone = usePhone();
 
   // Selecting the scope and routing to /dashboard are one action from the
   // user's point of view, so they are one function here. The scope has to be
@@ -339,7 +344,7 @@ export default function OverviewPage() {
                 </span>
               </TableMessage>
             ) : (
-              rows.map((v) => (
+              rows.map((v, i) => (
                 <tr
                   key={v.id}
                   // Opens THIS village's dashboard. /dashboard is one route in
@@ -350,60 +355,80 @@ export default function OverviewPage() {
                   // click asks.
                   onClick={() => openVillage(v)}
                   title={`Open ${v.name}`}
-                  className="cursor-pointer"
+                  // Phone card: the village and its verdict on the first line,
+                  // the rest as small labelled tiles. One line per column made
+                  // every village a fifth of a screen tall.
+                  className={`cursor-pointer ${phoneRowClass(i, showAll)}`}
                 >
-                  <Td>
-                    {/* On a phone the row is a card; the chevron says it opens. */}
-                    <div className="max-sm:flex max-sm:w-full max-sm:items-center max-sm:justify-between max-sm:gap-3">
-                      <RecordCell
-                        tone="navy"
-                        icon={<MapPin size={15} />}
-                        title={v.name}
-                        subtitle={v.hostname || `group ${v.groupId || "—"}`}
-                        mono
-                      />
-                      <ChevronRight size={16} aria-hidden="true" className="sm:hidden shrink-0 text-[var(--fg-subtle)]" />
-                    </div>
+                  <Td className={PHONE_CARD.title}>
+                    <RecordCell
+                      tone="navy"
+                      icon={<MapPin size={15} />}
+                      title={v.name}
+                      // A hostname is one unbroken word, and in two thirds of a
+                      // phone card it is cut mid-domain — "site2.vodafonefiji.clo…"
+                      // identifies nothing that the village's name above it has
+                      // not already identified. The desktop column keeps it.
+                      subtitle={phone ? null : v.hostname || `group ${v.groupId || "—"}`}
+                      mono
+                    />
                   </Td>
-                  <Td>
+                  <Td className={PHONE_CARD.aside}>
                     <StateWithUptime
+                      variant="aside"
                       pill={<OnlineState site={v} />}
                       pct={v.starlink?.uptimePct}
                       title="Share of the time the Starlink dish was reporting"
+                      // No hover on a phone, so the card says it opens.
+                      trailing={
+                        <ChevronRight size={16} aria-hidden="true" className="sm:hidden shrink-0 text-[var(--fg-subtle)]" />
+                      }
                     />
                   </Td>
-                  <Td>
-                    <StateWithUptime
-                      pill={<State state={v.gatewayOnline} up="Online" down="Offline" />}
-                      pct={v.uptimePct}
-                      title="Share of collector samples with the gateway's WAN up"
-                    />
+                  <Td className={`${PHONE_CARD.stat} max-sm:order-3`}>
+                    <GatewayCell state={v.gatewayOnline} pct={v.uptimePct} />
                   </Td>
                   {/* A village with no kit linked has nothing to say in either
                       Starlink line, so its phone card leaves them out. */}
-                  <Td align="right" nowrap className={`tabular-nums${v.starlink?.configured ? "" : " max-sm:hidden!"}`}>
+                  <Td
+                    align="right"
+                    nowrap
+                    className={`tabular-nums ${v.starlink?.configured ? `${PHONE_CARD.statWide} max-sm:order-6` : PHONE_CARD.hide}`}
+                  >
                     <SlData sl={v.starlink} />
                   </Td>
-                  <Td align="right" nowrap className={v.starlink?.configured ? undefined : "max-sm:hidden!"}>
+                  <Td
+                    align="right"
+                    nowrap
+                    className={v.starlink?.configured ? `${PHONE_CARD.statWide} max-sm:order-7` : PHONE_CARD.hide}
+                  >
                     <LinkQuality sl={v.starlink} />
                   </Td>
-                  <Td align="right" nowrap className="tabular-nums">
+                  <Td align="right" nowrap className={`tabular-nums ${PHONE_CARD.stat} max-sm:order-4`}>
                     {v.apsTotal ? `${v.apsOnline}/${v.apsTotal}` : "—"}
                   </Td>
-                  <Td align="right" nowrap className="tabular-nums">{v.clients ?? 0}</Td>
+                  <Td align="right" nowrap className={`tabular-nums ${PHONE_CARD.stat} max-sm:order-5`}>
+                    {v.clients ?? 0}
+                  </Td>
                 </tr>
               ))
             )}
           </tbody>
         </DataTable>
 
+        {!loading && <PhoneMore total={rows.length} expanded={showAll} onToggle={() => setShowAll((v) => !v)} noun="villages" />}
+
         {/* Footnote lives with the column it explains rather than under the page,
             where it read as an unrelated aside. */}
         {!loading && sites.some((v) => v.uptimePct == null) && (
           <p className="px-5 py-3 border-t border-[var(--border-subtle)] text-[12px] text-[var(--fg-muted)]">
             Each state carries its own uptime: Status is the share of time the Starlink dish was
-            reporting, Gateway the share of collector samples with the gateway's WAN up. Both read
-            "no history" until their collector has run for a while.
+            reporting, Gateway the share of collector samples with the gateway's WAN up.{" "}
+            {/* Desktop keeps the sentence it has always had. A phone hides the
+                missing figures rather than printing "no history" under every
+                pill, so there it says what a reader can actually see. */}
+            <span className="max-sm:hidden">Both read "no history" until their collector has run for a while.</span>
+            <span className="sm:hidden">Neither shows a figure until its collector has run for a while.</span>
           </p>
         )}
       </Panel>
@@ -426,23 +451,63 @@ function State({ state, up = "Up", down = "Down" }) {
  * uptime under the thing it measures also stops the page having one uptime
  * column that quietly belongs to only one of two layers.
  */
-function StateWithUptime({ pill, pct, title }) {
-  const color =
-    pct == null
-      ? "var(--fg-muted)"
-      : pct >= 99
-        ? "var(--success-fg)"
-        : pct >= 90
-          ? "var(--warning-fg)"
-          : "var(--danger-fg)";
+const uptimeColor = (pct) =>
+  pct == null
+    ? "var(--fg-muted)"
+    : pct >= 99
+      ? "var(--success-fg)"
+      : pct >= 90
+        ? "var(--warning-fg)"
+        : "var(--danger-fg)";
+
+/**
+ * The uptime figure. Hidden on a phone when there is none: "no history" under
+ * every pill of every village is a screenful of the same non-answer, and the
+ * footnote under the list already says why the figures are missing.
+ */
+function Uptime({ pct, title, className = "" }) {
   return (
-    // Side by side on a phone card (pill at the right edge, uptime before it):
-    // stacked, each state cost a second line on every village.
-    <span className="flex flex-col items-start gap-1 max-sm:flex-row-reverse max-sm:items-center max-sm:gap-2">
-      {pill}
-      <span className="text-[11px] tabular-nums" style={{ color }} title={title}>
-        {pct == null ? "no history" : `${pct}%`}
+    <span
+      className={"text-[11px] tabular-nums " + className + (pct == null ? " max-sm:hidden" : "")}
+      style={{ color: uptimeColor(pct) }}
+      title={title}
+    >
+      {pct == null ? "no history" : `${pct}%`}
+    </span>
+  );
+}
+
+function StateWithUptime({ pill, pct, title, trailing = null }) {
+  return (
+    // The village's verdict rides at the top right of the phone card, its
+    // uptime beneath it, so the name beside it keeps the width it needs.
+    <span className="flex flex-col items-start gap-1 max-sm:items-end">
+      <span className="flex items-center gap-1.5">
+        {pill}
+        {trailing}
       </span>
+      {/* Sits under the pill, not under the chevron beside it. */}
+      <Uptime pct={pct} title={title} className={trailing ? "max-sm:pr-[22px]" : ""} />
+    </span>
+  );
+}
+
+/**
+ * The gateway's state. On a phone this is a tile with "GATEWAY" written above
+ * it, so the pill's border and dot are chrome repeating what the label says;
+ * the coloured word alone fits beside the uptime in half the width.
+ */
+function GatewayCell({ state, pct }) {
+  const color = state == null ? "var(--fg-muted)" : state ? "var(--success-fg)" : "var(--danger-fg)";
+  return (
+    <span className="flex flex-col items-start gap-1 max-sm:flex-row max-sm:flex-wrap max-sm:items-baseline max-sm:gap-x-1.5 max-sm:gap-y-0">
+      <span className="max-sm:hidden">
+        <State state={state} up="Online" down="Offline" />
+      </span>
+      <span className="sm:hidden text-[12.5px] font-semibold" style={{ color }}>
+        {state == null ? "No data" : state ? "Online" : "Offline"}
+      </span>
+      <Uptime pct={pct} title="Share of collector samples with the gateway's WAN up" />
     </span>
   );
 }

@@ -16,7 +16,8 @@ import {
   Segmented, Toggle, SearchInput, DataTable, Th, Td, TableMessage, Badge, Button, ObjectTile,
 } from "../ui";
 import Pagination from "../shared/Pagination";
-import { plural } from "./campaignUi";
+import { PHONE_CARD } from "../ui/phone";
+import { plural, useIsPhone } from "./campaignUi";
 
 function cn(...p) {
   return p.filter(Boolean).join(" ");
@@ -134,6 +135,7 @@ function ContactPicker({ selected, onChange, contactsByEmail, onRemember }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const seq = useRef(0);
+  const isPhone = useIsPhone();
 
   useEffect(() => {
     const t = setTimeout(() => {
@@ -296,10 +298,28 @@ function ContactPicker({ selected, onChange, contactsByEmail, onRemember }) {
                       // A phone card tints as one block; per-cell tint there
                       // would stripe the card, since its cells are spaced lines.
                       on && "[&>td]:bg-[var(--brand-soft)] max-sm:bg-[var(--brand-soft)] max-sm:[&>td]:bg-transparent",
-                      loading && "opacity-70"
+                      loading && "opacity-70",
+                      // Two lines instead of four: who they are, then how often
+                      // they have bought and where. The tick keeps the corner
+                      // the stacked-table rules put it in.
+                      PHONE_CARD.row
                     )}
                   >
-                    <td className="w-10" onClick={(e) => e.stopPropagation()}>
+                    {/* The tick is 20px, under a thumb's 36. On a phone the cell
+                        grows 8px of padding round it (36 × 36) and the negative
+                        margin keeps the tick exactly where it was, in the corner
+                        the stacked-table rules give a cell holding only a
+                        checkbox — which is why the box stays the cell's only
+                        child rather than going inside a label. A tap on that
+                        padding is a tap on the card, so on a phone it is let
+                        through to the row, which toggles; on desktop the cell
+                        swallows every click, as it always has. */}
+                    <td
+                      className="w-10 max-sm:-mt-2 max-sm:-mr-2 max-sm:p-2!"
+                      onClick={(e) => {
+                        if (!isPhone || e.target !== e.currentTarget) e.stopPropagation();
+                      }}
+                    >
                       <input
                         type="checkbox"
                         checked={on}
@@ -309,7 +329,7 @@ function ContactPicker({ selected, onChange, contactsByEmail, onRemember }) {
                         className="cursor-pointer align-middle accent-[var(--brand)] disabled:cursor-not-allowed"
                       />
                     </td>
-                    <Td>
+                    <Td className="max-sm:col-span-6">
                       <div className="flex min-w-0 max-w-[230px] flex-col max-sm:ml-0! max-sm:max-w-none">
                         <span className="flex items-center gap-2 min-w-0 max-sm:flex-wrap max-sm:gap-x-2 max-sm:gap-y-1">
                           <span className="truncate font-semibold text-[var(--fg-primary)]">{c.email}</span>
@@ -324,10 +344,10 @@ function ContactPicker({ selected, onChange, contactsByEmail, onRemember }) {
                         </span>
                       </div>
                     </Td>
-                    <Td align="right" nowrap>
+                    <Td align="right" nowrap className={PHONE_CARD.stat}>
                       <span className="tabular-nums">{c.purchases || 0}</span>
                     </Td>
-                    <Td muted>
+                    <Td muted className={`max-sm:col-span-4 ${PHONE_CARD.cell}`}>
                       <span className="block max-w-[160px] truncate" title={(c.villages || []).join(", ")}>
                         {c.villages?.length ? c.villages.join(", ") : "—"}
                       </span>

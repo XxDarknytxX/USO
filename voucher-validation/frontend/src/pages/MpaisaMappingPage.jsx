@@ -23,8 +23,21 @@ import {
   Button, IconButton, Modal, Field, Input, Select, Badge,
 } from "../components/ui";
 import Pagination from "../components/shared/Pagination";
+import { PHONE_CARD, PhoneMore, phoneRowClass } from "../components/ui/phone";
+// The header's phone button row is the campaign screens' one (M-PAiSA Mapping is
+// where their audience comes from), so it is borrowed rather than copied.
+import { PHONE_HEADER_BARE } from "../components/campaigns/campaignUi";
 
 const PAGE_SIZE = 25;
+
+/**
+ * A full-width, label-less line inside a phone card — for a value that says what
+ * it is on its own (an email address beside an envelope). The stacked-table
+ * rules in main.css are unlayered, so each property they set has to be taken
+ * back with the important form.
+ */
+const PHONE_WIDE =
+  "max-sm:col-span-6 max-sm:text-left! max-sm:before:hidden! max-sm:[&>*]:ml-0!";
 
 /**
  * Read an uploaded report file → decoded UTF-8 text. The report is a UTF-16
@@ -237,6 +250,7 @@ export default function MpaisaMappingPage() {
   const [debounced, setDebounced] = useState("");
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
+  const [showAll, setShowAll] = useState(false); // phone: the page of 25 is capped until asked
   // null = closed; { row: null } = add; { row } = edit that row.
   const [editing, setEditing] = useState(null);
   const fileRef = useRef(null);
@@ -304,7 +318,9 @@ export default function MpaisaMappingPage() {
       <PageHeader
         eyebrow="Customers"
         title="M-PAiSA Mapping"
-        subtitle="Phone number → customer email, ingested from the M-PAiSA customer report."
+        // The app bar names the screen on a phone; the sentence is desktop
+        // context, and the panel below repeats the count anyway.
+        subtitle={<span className="max-sm:hidden">Phone number → customer email, ingested from the M-PAiSA customer report.</span>}
         icon={<Wallet size={22} />}
         tone="teal"
         actions={
@@ -316,12 +332,24 @@ export default function MpaisaMappingPage() {
               className="hidden"
               onChange={onFile}
             />
+            <IconButton
+              variant="secondary"
+              size="md"
+              className="sm:hidden"
+              onClick={load}
+              disabled={loading || uploading}
+              aria-label="Refresh"
+              title="Refresh"
+            >
+              <RefreshCw size={16} />
+            </IconButton>
             <Button
               variant="secondary"
               size="sm"
               onClick={load}
               iconLeft={<RefreshCw size={14} />}
               disabled={loading || uploading}
+              className="max-sm:hidden"
             >
               Refresh
             </Button>
@@ -331,19 +359,24 @@ export default function MpaisaMappingPage() {
               onClick={() => fileRef.current?.click()}
               iconLeft={<Upload size={14} />}
               loading={uploading}
+              className="max-sm:flex-1"
             >
-              Upload report
+              {/* Three buttons only fit on one phone row if this one is short. */}
+              <span className="max-sm:hidden">Upload report</span>
+              <span className="sm:hidden">Upload</span>
             </Button>
             <Button
               variant="primary"
               size="sm"
               onClick={() => setEditing({ row: null })}
               iconLeft={<Plus size={14} />}
+              className="max-sm:flex-1"
             >
               Add mapping
             </Button>
           </>
         }
+        className={PHONE_HEADER_BARE}
       />
 
       {/* One strip for both views: the switch, and the filter that belongs to
@@ -364,9 +397,9 @@ export default function MpaisaMappingPage() {
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               placeholder="Search number or email…"
-              width="w-72"
+              width="w-full sm:w-72"
             />
-            <span className="ml-auto text-[12px] text-[var(--fg-muted)] tabular-nums">
+            <span className="ml-auto text-[12px] text-[var(--fg-muted)] tabular-nums max-sm:hidden">
               {debounced ? `${total.toLocaleString()} matching` : `${total.toLocaleString()} mapped`}
             </span>
           </>
@@ -405,28 +438,39 @@ export default function MpaisaMappingPage() {
                     : "No mappings yet — upload the M-PAiSA report, or add one by hand."}
                 </TableMessage>
               ) : (
-                rows.map((r) => (
-                  <tr key={r.number}>
-                    <Td nowrap>
+                rows.map((r, i) => (
+                  // A phone card of three lines rather than six labelled ones:
+                  // the number and its Edit button, the address, then where the
+                  // row came from and when it last moved. The two report status
+                  // columns are usually empty and drop out of the card on their
+                  // own (DataTable marks a "—" cell blank).
+                  <tr key={r.number} className={phoneRowClass(i, showAll)}>
+                    <Td nowrap className={PHONE_CARD.title}>
                       <span className="font-mono text-[13px] font-semibold text-[var(--fg-primary)]">
                         {r.number}
                       </span>
                     </Td>
-                    <Td>
+                    <Td className={`max-sm:row-start-2 ${PHONE_WIDE}`}>
                       <span className="inline-flex items-center gap-1.5 min-w-0">
                         <Mail size={12} className="text-[var(--fg-muted)] shrink-0" />
-                        <span className="truncate">{r.email || "—"}</span>
+                        {/* A phone card has no "EMAIL" label beside it to explain
+                            a bare dash, so there it says what is missing.
+                            Desktop keeps the dash the column has always had. */}
+                        <span className="truncate max-sm:hidden">{r.email || "—"}</span>
+                        <span className={`truncate sm:hidden ${r.email?.trim() ? "" : "text-[var(--fg-subtle)]"}`}>
+                          {r.email?.trim() ? r.email : "No email"}
+                        </span>
                       </span>
                     </Td>
-                    <Td><ReportStatus value={r.email_status} /></Td>
-                    <Td><ReportStatus value={r.account_status} /></Td>
-                    <Td>
+                    <Td className={PHONE_CARD.stat}><ReportStatus value={r.email_status} /></Td>
+                    <Td className={PHONE_CARD.stat}><ReportStatus value={r.account_status} /></Td>
+                    <Td className="max-sm:col-span-3 max-sm:before:hidden! max-sm:justify-start! max-sm:[&>*]:ml-0!">
                       <Badge tone={r.source === "manual" ? "warning" : "neutral"}>
                         {r.source === "manual" ? "Manual" : "Import"}
                       </Badge>
                     </Td>
-                    <Td muted nowrap>{relTime(r.updated_at)}</Td>
-                    <Td align="right">
+                    <Td muted nowrap className="max-sm:col-span-3 max-sm:before:hidden!">{relTime(r.updated_at)}</Td>
+                    <Td align="right" className={PHONE_CARD.aside}>
                       <IconButton
                         size="sm"
                         onClick={() => setEditing({ row: r })}
@@ -441,6 +485,12 @@ export default function MpaisaMappingPage() {
               )}
             </tbody>
           </DataTable>
+          <PhoneMore
+            total={rows.length}
+            expanded={showAll}
+            onToggle={() => setShowAll((v) => !v)}
+            noun="mappings"
+          />
           <Pagination page={page} totalPages={totalPages} total={total} onPageChange={setPage} />
         </Panel>
       )}

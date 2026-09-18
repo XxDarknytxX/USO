@@ -228,9 +228,11 @@ export default function Login() {
       </aside>
 
       {/* ============================= Form panel ============================ */}
-      {/* A phone puts the form near the top rather than centred, so the Sign
-          in button stays above the on-screen keyboard. */}
-      <main className="relative flex flex-col justify-center px-6 py-12 max-sm:justify-start max-sm:px-5 max-sm:pt-10 max-sm:pb-8 sm:px-10 lg:px-14 xl:px-20">
+      {/* justify-start, not justify-center: the block below centres itself with
+          auto margins, which give way when the content is taller than the
+          screen (the keyboard is open) instead of clipping its top. The
+          uneven phone padding is the optical bias — a little above centre. */}
+      <main className="relative flex flex-col justify-center px-6 py-12 max-sm:justify-start max-sm:px-5 max-sm:pt-8 max-sm:pb-12 sm:px-10 lg:px-14 xl:px-20">
         {/* Faint engineering grid — the form sits on a surface rather than in a
             void, without competing with anything on it. */}
         <div
@@ -245,7 +247,13 @@ export default function Login() {
           }}
         />
 
-        <div className="relative w-full max-w-[404px] mx-auto">
+        {/* On a phone the whole block — lockup, heading, form, footer — is
+            centred as ONE thing, sitting a little above true centre. Stretching
+            it to fill the screen and pinning the footer to the bottom edge only
+            moved the empty space: it opened a blank third of a screen between
+            the Sign in button and the footer. The auto margins collapse as the
+            keyboard shrinks the viewport, so the form still rides up with it. */}
+        <div className="relative w-full max-w-[404px] mx-auto max-sm:my-auto">
           {/* Compact brand lockup for narrow screens, where the panel is hidden */}
           <div className="lg:hidden flex items-center gap-3 mb-10 max-sm:mb-8">
             <span className="h-11 w-11 rounded-[14px] bg-[var(--brand-soft)] flex items-center justify-center">
@@ -362,7 +370,7 @@ export default function Login() {
             </Button>
           </form>
 
-          <div className="mt-8 pt-6 border-t border-[var(--border-subtle)] flex items-center justify-center gap-2 text-[11.5px] text-[var(--fg-muted)]">
+          <div className="mt-8 pt-6 border-t border-[var(--border-subtle)] flex items-center justify-center gap-2 text-[11.5px] text-[var(--fg-muted)] max-sm:mt-7 max-sm:pt-5">
             <ShieldCheck size={13} />
             <span>Secured · JWT · TLS 1.3</span>
           </div>

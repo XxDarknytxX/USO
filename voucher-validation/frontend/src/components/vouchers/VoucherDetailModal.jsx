@@ -10,11 +10,12 @@
 // question has a place to look. Every field and every action is still here;
 // they have addresses now.
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import toast from "react-hot-toast";
 import {
   Ticket,
   Edit3,
+  ExternalLink,
   Save,
   Trash2,
   ToggleLeft,
@@ -33,6 +34,7 @@ import {
 } from "lucide-react";
 
 import { voucherApi } from "../../services/api";
+import { useSite } from "../../hooks/useSite";
 import StatusBadge from "../shared/StatusBadge";
 import {
   Modal,
@@ -60,6 +62,19 @@ export default function VoucherDetailModal({ uuid, onClose, onRefresh, readOnly 
   // instead of a scroll box nested inside the scrolling sheet.
   const [showAllEvents, setShowAllEvents] = useState(false);
   const customerRef = useRef(null);
+  const { sites } = useSite();
+
+  // The customer-facing usage page for this voucher, on its own village's host.
+  // The list row carries this link on a desktop; a phone row has no room for
+  // it, so the record does — it is the one thing here you open for a customer
+  // standing in front of you.
+  const usageUrl = useMemo(() => {
+    if (!voucher?.voucher_code) return null;
+    const site = (sites || []).find(
+      (s) => String(s.ruijieGroupId) === String(voucher.group_id) && s.hostname
+    );
+    return `https://${site?.hostname || window.location.host}/status/${voucher.voucher_code}`;
+  }, [sites, voucher]);
 
   useEffect(() => {
     loadDetail();
@@ -180,6 +195,9 @@ export default function VoucherDetailModal({ uuid, onClose, onRefresh, readOnly 
 
   if (!voucher) return null;
   const isDisabled = Number(voucher.disable_status) === 1;
+  const hasCustomerDetails = Boolean(
+    voucher.first_name || voucher.last_name || voucher.email || voucher.phone || voucher.comment
+  );
 
   return (
     <>
@@ -249,7 +267,26 @@ export default function VoucherDetailModal({ uuid, onClose, onRefresh, readOnly 
         <Modal.Body className="bg-[var(--bg-base)]">
           <div className="flex flex-col gap-4">
             {/* ---- Usage: what is left, which is why most people open this ---- */}
-            <Panel title="Usage" subtitle="Consumption against the plan" icon={<Gauge size={15} />} tone="indigo">
+            <Panel
+              title="Usage"
+              subtitle="Consumption against the plan"
+              icon={<Gauge size={15} />}
+              tone="indigo"
+              actions={
+                usageUrl ? (
+                  <a
+                    href={usageUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    // Phone only: on a desktop this link is already on the row
+                    // this record was opened from.
+                    className="sm:hidden inline-flex h-9 items-center gap-1.5 rounded-full border border-[var(--input-border)] bg-[var(--surface)] px-3.5 text-[12.5px] font-semibold text-[var(--fg-secondary)] shadow-[var(--shadow-xs)] active:bg-[var(--surface-pressed)] font-display"
+                  >
+                    <ExternalLink size={13} /> Usage page
+                  </a>
+                ) : null
+              }
+            >
               <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
                 <UsageTile
                   icon={<Clock size={13} />}
@@ -292,6 +329,15 @@ export default function VoucherDetailModal({ uuid, onClose, onRefresh, readOnly 
                 ) : null
               }
             >
+              {/* A phone showed five labels and five dashes — a screen and a
+                  half of nothing — for the many vouchers nobody has filled in.
+                  Say it once instead. Desktop keeps the empty fields: there the
+                  grid is the shape of the record, and it costs two rows. */}
+              {!editing && !hasCustomerDetails && (
+                <p className="sm:hidden text-[13px] text-[var(--fg-muted)]">
+                  Nothing captured against this voucher yet.
+                </p>
+              )}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <EditableField
                   label="First name"
@@ -322,7 +368,7 @@ export default function VoucherDetailModal({ uuid, onClose, onRefresh, readOnly 
                   editValue={editData.phone || ""}
                   onChange={(v) => setEditData({ ...editData, phone: v })}
                 />
-                <div className="md:col-span-2">
+                <div className={"md:col-span-2 " + (!editing && !voucher.comment ? "max-sm:hidden" : "")}>
                   <EditableField
                     label="Comment"
                     value={voucher.comment}
@@ -384,7 +430,7 @@ export default function VoucherDetailModal({ uuid, onClose, onRefresh, readOnly 
                           <span className="text-[12px] text-[var(--fg-muted)] ml-1.5">· {evt.notes}</span>
                         )}
                         <p className="text-[11px] text-[var(--fg-subtle)] mt-0.5 font-mono tabular-nums">
-                          {new Date(evt.event_timestamp).toLocaleString()}
+                          <Stamp ms={new Date(evt.event_timestamp).getTime()} />
                         </p>
                       </div>
                     </div>
@@ -525,7 +571,9 @@ function EditableField({ label, value, editing, editValue, onChange, multiline, 
     );
   }
   return (
-    <div className="flex flex-col gap-1">
+    // An empty field is left off the phone's card; the panel says once that
+    // there is nothing to show.
+    <div className={"flex flex-col gap-1 " + (value ? "" : "max-sm:hidden")}>
       <span className="text-[12px] font-medium text-[var(--fg-muted)]">{label}</span>
       <span className="text-[13px] text-[var(--fg-primary)] break-words">
         {value || <span className="text-[var(--fg-subtle)]">—</span>}
@@ -543,9 +591,29 @@ function TimeRow({ icon, label, value }) {
         {label}
       </span>
       <span className="text-[12px] text-[var(--fg-primary)] font-mono tabular-nums text-right">
-        {value ? new Date(Number(value)).toLocaleString() : "—"}
+        {value ? <Stamp ms={Number(value)} /> : "—"}
       </span>
     </div>
+  );
+}
+
+/**
+ * A timestamp, said at the width you are reading it on. The full locale string
+ * is 22 characters of American date beside a 10-character label; a phone gets
+ * "17 Sep, 2:16 pm", which is the same fact and the console's date shape.
+ */
+function Stamp({ ms }) {
+  const d = new Date(ms);
+  if (isNaN(d.getTime())) return "—";
+  return (
+    <>
+      <span className="max-sm:hidden">{d.toLocaleString()}</span>
+      <span className="sm:hidden">
+        {d.toLocaleDateString(undefined, { day: "numeric", month: "short" })}
+        {", "}
+        {d.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" })}
+      </span>
+    </>
   );
 }
 
