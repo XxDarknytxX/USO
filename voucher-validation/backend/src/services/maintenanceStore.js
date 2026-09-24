@@ -152,6 +152,18 @@ export async function saveThumbStream(projectId, source, maxBytes = MAX_THUMB_BY
   return saveStreamTo(MEDIA_ROOT, projectId, "thumb.jpg", source, maxBytes);
 }
 
+/**
+ * Somewhere to write a tile the SERVER makes (services/mediaThumbs.js), as
+ * opposed to one arriving in a request body. Same folder, same naming, so a
+ * village's media and its tiles are deleted together.
+ */
+export async function newThumbPath(projectId) {
+  const dir = join(MEDIA_ROOT, String(Number(projectId)));
+  await mkdir(dir, { recursive: true });
+  const rel = join(String(Number(projectId)), `${randomUUID()}.thumb.jpg`);
+  return { rel, abs: join(MEDIA_ROOT, rel) };
+}
+
 async function saveStreamTo(root, projectId, ext, source, maxBytes) {
   const dir = join(root, String(Number(projectId)));
   await mkdir(dir, { recursive: true });

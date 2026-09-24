@@ -18,8 +18,15 @@ import {
   ALLOWED_MEDIA_MIME, MAX_MEDIA_BYTES, mediaKind,
   saveMediaStream, saveThumbStream, resolveMedia, streamMedia, mediaSize, deleteMedia,
 } from "../services/maintenanceStore.js";
+import { ensureThumb, tileMakers } from "../services/mediaThumbs.js";
 import jwt from "jsonwebtoken";
 import { isAdminRole } from "../middleware/auth.js";
+
+// How big a photo may be before it is no longer allowed to stand in for its own
+// gallery tile. Half a megabyte is already generous for a 180-pixel square; the
+// point of the limit is that a grid of twenty must never become a hundred
+// megabytes of originals on their way into twenty thumbnails.
+const SELF_TILE_MAX_BYTES = 512 * 1024;
 
 const send = {
   ok: (res, data = {}) => res.json(data),
@@ -503,7 +510,19 @@ export function makeMaintenanceController(pool) {
           [projectId, mediaKind(mimeType), title, String(q.notes || '').slice(0, 500) || null,
            saved.rel, fileName || null, mimeType, saved.bytes, req.user?.id ?? null]
         );
-        return send.created(res, { mediaId: r.insertId, bytes: saved.bytes, kind: mediaKind(mimeType) });
+        // A tile is made here if this box can (services/mediaThumbs.js), started
+        // now rather than when someone first opens the gallery. The answer goes
+        // back to the browser so it only does the work itself when the server
+        // cannot — decoding a 12 MP photo in a canvas is not free either.
+        const kind = mediaKind(mimeType);
+        const makers = await tileMakers();
+        const serverTile = kind === 'video' ? makers.ffmpeg : (makers.sharp || makers.ffmpeg);
+        if (serverTile) {
+          ensureThumb(pool, {
+            id: r.insertId, project_id: projectId, kind, file_path: saved.rel, thumb_path: null,
+          }, { waitMs: 0 });
+        }
+        return send.created(res, { mediaId: r.insertId, bytes: saved.bytes, kind, serverTile });
       } catch (e) { console.error('[maintenance] addMedia:', e); return send.serverErr(res); }
     },
 
@@ -576,13 +595,25 @@ export function makeMaintenanceController(pool) {
         // requests are scoped here, the same as a document.
         if (!req.mediaTicketOk && !inScope(req, m.project_id)) return send.notFound(res, 'No such media');
 
-        // ?thumb=1 asks for the gallery tile. A photo with no tile yet falls
-        // back to itself; a video without one has nothing to show, and the
-        // gallery draws its own placeholder rather than fetching the video.
+        // ?thumb=1 asks for the gallery tile.
+        //
+        // A file with no tile gets one made now, but the request does not wait
+        // behind a queue of other people's resizes: past a second and a bit it
+        // answers "not yet" and the console asks again in a moment, while the
+        // job carries on. Holding twenty connections open for a grid of twenty
+        // is how a gallery takes the rest of the console down with it.
         const wantThumb = req.query?.thumb === '1' || req.query?.thumb === 'true';
-        const useThumb = wantThumb && m.thumb_path && resolveMedia(m.thumb_path);
-        if (wantThumb && !m.thumb_path && m.kind === 'video') return send.notFound(res, 'No thumbnail');
-        const path = useThumb ? m.thumb_path : m.file_path;
+        let tile = m.thumb_path;
+        if (wantThumb && !tile) tile = await ensureThumb(pool, m, { waitMs: 1200 });
+        const useThumb = wantThumb && tile && resolveMedia(tile);
+        if (wantThumb && !useThumb) {
+          // Nothing to shrink it with. A small photo can stand in for its own
+          // tile; anything bigger stays where it is, because pulling a 20 MB
+          // original into a 180-pixel square is the problem, not the fix.
+          const own = m.kind === 'image' ? await mediaSize(m.file_path) : null;
+          if (own == null || own > SELF_TILE_MAX_BYTES) return send.notFound(res, 'No thumbnail yet');
+        }
+        const path = useThumb ? tile : m.file_path;
 
         const size = await mediaSize(path);
         if (size == null) return send.notFound(res, 'No such media');
@@ -592,6 +623,7 @@ export function makeMaintenanceController(pool) {
         res.setHeader('Content-Disposition', `inline; filename="${safeName}"`);
         // A stored file never changes: once the browser has it, it should not
         // ask again. Private, because it is behind a village's scope.
+        res.setHeader('X-Tile', wantThumb ? (useThumb ? 'tile' : 'original') : 'file');
         const etag = `"m${m.id}${useThumb ? 't' : ''}-${size}"`;
         res.setHeader('ETag', etag);
         res.setHeader('Cache-Control', 'private, max-age=604800, immutable');

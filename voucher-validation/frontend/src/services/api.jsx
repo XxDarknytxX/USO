@@ -361,9 +361,13 @@ export const maintenanceApi = {
   // A five-minute pass so <img> and <video> can load without a header.
   mediaTicket: (projectId) => api(`/maintenance/villages/${projectId}/media/ticket`),
   mediaUrl: (id, ticket) => `${API_BASE_URL}/maintenance/media/${id}${ticket ? `?t=${encodeURIComponent(ticket)}` : ""}`,
-  // The gallery tile: a few hundred kilobytes rather than the whole file.
-  mediaThumbUrl: (id, ticket) =>
-    `${API_BASE_URL}/maintenance/media/${id}?thumb=1${ticket ? `&t=${encodeURIComponent(ticket)}` : ""}`,
+  // The gallery tile: tens of kilobytes rather than the whole file. A file with
+  // no tile yet answers 404 while the server makes one, so the console asks
+  // again — `attempt` keeps each try its own URL, past any negative caching.
+  mediaThumbUrl: (id, ticket, attempt = 0) =>
+    `${API_BASE_URL}/maintenance/media/${id}?thumb=1${ticket ? `&t=${encodeURIComponent(ticket)}` : ""}${
+      attempt ? `&r=${attempt}` : ""
+    }`,
   deleteMedia: (id) => api(`/maintenance/media/${id}`, { method: "DELETE" }),
   documentUrl: (id) => `${API_BASE_URL}/maintenance/documents/${id}`,
   schedule: () => api("/maintenance/schedule"),
@@ -455,11 +459,11 @@ export async function uploadMedia(projectId, file, { title, notes } = {}) {
 /**
  * The gallery tile for a media file, drawn here and sent up beside it.
  *
- * Making it in the browser keeps image and video decoding off a server that
- * runs thirty node processes and has no ffmpeg, and it costs nothing extra:
- * the file is already in memory on this machine. Never fatal — a file whose
- * tile cannot be drawn (an HEIC photo no browser decodes, a codec Chrome will
- * not open) simply shows its kind in the gallery.
+ * The SERVER makes tiles now (backend/src/services/mediaThumbs.js), and says so
+ * in its answer to the upload; this runs only when it cannot — no sharp, or a
+ * video and no ffmpeg. Decoding a 12 MP photo into a canvas is not free on this
+ * end either, which is why it is no longer the default. Never fatal: a file
+ * whose tile cannot be drawn either way shows its kind in the gallery.
  */
 export async function uploadMediaThumb(mediaId, file) {
   const blob = await thumbnailFor(file);

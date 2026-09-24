@@ -17,7 +17,7 @@ import {
   Send, Lock, Save, ShieldCheck, CalendarCheck, CalendarClock, ListChecks, X,
   Images, Play, ExternalLink,
 } from "lucide-react";
-import { maintenanceApi, openDocument, downscaleImage, thumbFromElement } from "../services/api";
+import { maintenanceApi, openDocument, downscaleImage } from "../services/api";
 import { useAuth } from "../hooks/useAuth";
 import {
   PageShell, PageHeader, KpiGrid, StatCard, Panel, Tabs, Segmented,
@@ -1163,8 +1163,12 @@ function DocumentsTab({ projectId, documents, categories, isAdmin, canUpload, on
  */
 async function uploadMediaWithThumb(projectId, file, meta) {
   const result = await maintenanceApi.addMedia(projectId, file, meta);
+  // The server makes the tile where it can, and has already started by the time
+  // this returns. Drawing one here as well would decode the same file twice —
+  // once on each machine — and a batch of twenty photos is exactly when this
+  // tab must not be busy.
   try {
-    if (result?.mediaId) await maintenanceApi.addMediaThumb(result.mediaId, file);
+    if (result?.mediaId && !result.serverTile) await maintenanceApi.addMediaThumb(result.mediaId, file);
   } catch {
     /* the file is up; the tile can be missing */
   }
@@ -1182,28 +1186,99 @@ async function uploadMediaWithThumb(projectId, file, meta) {
  * ticket before it runs out, and once more if a tile fails to load after a long
  * time on the screen.
  */
-function MediaTab({ projectId, media, isAdmin, canUpload, onChanged, uploadOpen, setUploadOpen }) {
-  const [ticket, setTicket] = useState(null);
-  const [viewing, setViewing] = useState(null);
-  // Files whose tile the browser could not draw or fetch: shown as their kind
-  // rather than as a broken image, and never retried in a loop.
-  const [tileless, setTileless] = useState(() => new Set());
-  // Media uploaded before tiles existed has none. Rather than fetch those files
-  // again for ever, the gallery makes the tile out of what it has just drawn —
-  // the full-size photo it had to fall back to, or the frame the player is
-  // showing — and sends it up once.
-  const backfilled = useRef(new Set());
+/**
+ * One square of the gallery.
+ *
+ * The rule that makes a gallery feel like a gallery: the grid never loads the
+ * FILE. It asks for the 480px tile the server keeps beside it, which is tens of
+ * kilobytes, and shows an empty square in the meantime — so the layout is there
+ * from the first frame and the page stays answerable while the pictures arrive.
+ * The old fallback ("no tile? then load the original and shrink it here") is
+ * what made a village of phone photos freeze the console.
+ *
+ * A file whose tile has not been made yet is answered 404 while the server
+ * makes one, so a miss is tried again a few times — spaced out, and jittered so
+ * twenty squares do not ask again in lockstep — before the square settles for
+ * the file's kind.
+ */
+function MediaTile({ media: m, ticket, onOpen }) {
+  const [attempt, setAttempt] = useState(0);
+  const [state, setState] = useState("loading"); // loading · ready · none
+  const timer = useRef(null);
+  useEffect(() => () => clearTimeout(timer.current), []);
 
-  const backfillThumb = useCallback(async (m, el) => {
-    if (!canUpload || m.hasThumb || backfilled.current.has(m.id)) return;
-    backfilled.current.add(m.id);
-    try {
-      const blob = await thumbFromElement(el);
-      if (blob) await maintenanceApi.postMediaThumb(m.id, blob);
-    } catch {
-      /* a tile is a nicety; the file is what matters */
-    }
-  }, [canUpload]);
+  const missed = () => {
+    const waits = [900, 2500, 6000];
+    if (attempt >= waits.length) return setState("none");
+    timer.current = setTimeout(() => setAttempt((n) => n + 1), waits[attempt] + Math.random() * 700);
+  };
+
+  return (
+    <figure className="min-w-0">
+      <button
+        type="button"
+        onClick={onOpen}
+        title={m.title}
+        className="group relative block aspect-square w-full overflow-hidden rounded-xl border border-[var(--border-default)] bg-[var(--bg-surface)] focus-ring"
+      >
+        {state === "loading" && <span aria-hidden className="absolute inset-0 animate-pulse bg-[var(--bg-surface-hover)]" />}
+        {state === "none" && (
+          <span className="absolute inset-0 flex flex-col items-center justify-center gap-1 text-[var(--fg-subtle)]">
+            {m.kind === "video" ? <Play size={20} /> : <Images size={20} />}
+            <span className="px-2 text-center text-[10.5px] leading-tight text-[var(--fg-muted)]">
+              {m.kind === "video" ? "Video" : "Photo"}
+            </span>
+          </span>
+        )}
+        {ticket && state !== "none" && (
+          <img
+            src={maintenanceApi.mediaThumbUrl(m.id, ticket, attempt)}
+            alt={m.title}
+            loading="lazy"
+            decoding="async"
+            onLoad={() => setState("ready")}
+            onError={missed}
+            className={`h-full w-full object-cover transition-[opacity,transform] duration-300 group-hover:scale-[1.03] ${
+              state === "ready" ? "opacity-100" : "opacity-0"
+            }`}
+          />
+        )}
+        {m.kind === "video" && (
+          <span className="absolute inset-0 flex items-center justify-center bg-black/25">
+            <span className="flex h-10 w-10 items-center justify-center rounded-full bg-black/60 text-white">
+              <Play size={18} className="ml-0.5 fill-current" />
+            </span>
+          </span>
+        )}
+      </button>
+      <figcaption className="mt-1.5 min-w-0">
+        <span className="block truncate text-[12.5px] font-medium text-[var(--fg-primary)]">{m.title}</span>
+        <span className="block truncate text-[11px] text-[var(--fg-muted)]">
+          {fmtBytes(m.bytes)} · {fmtDate(m.uploadedAt)}
+        </span>
+      </figcaption>
+    </figure>
+  );
+}
+
+const ticketKey = (projectId) => `vv:mediaTicket:${projectId}`;
+
+/** A ticket already in hand for this village, if it has long enough left to run. */
+function heldTicket(projectId) {
+  try {
+    const held = JSON.parse(sessionStorage.getItem(ticketKey(projectId)) || "null");
+    if (held?.ticket && held.until - Date.now() > 3 * 60 * 1000) return held.ticket;
+  } catch { /* private window, or nothing stored */ }
+  return null;
+}
+
+function MediaTab({ projectId, media, isAdmin, canUpload, onChanged, uploadOpen, setUploadOpen }) {
+  // Taken straight out of sessionStorage rather than fetched, so a gallery
+  // opened again has its tile URLs on the FIRST render: no empty grid while a
+  // round trip settles, and the browser's week-long cache of those exact URLs
+  // still counts.
+  const [ticket, setTicket] = useState(() => heldTicket(projectId));
+  const [viewing, setViewing] = useState(null);
 
   /**
    * The pass that lets the browser load this village's tiles.
@@ -1213,22 +1288,18 @@ function MediaTab({ projectId, media, isAdmin, canUpload, onChanged, uploadOpen,
    * every URL and throw away the browser's cache of a gallery it already has.
    */
   const drawTicket = useCallback(async ({ fresh = false } = {}) => {
-    const key = `vv:mediaTicket:${projectId}`;
     if (!fresh) {
-      try {
-        const held = JSON.parse(sessionStorage.getItem(key) || "null");
-        // Reused while it has a few minutes left to run on.
-        if (held?.ticket && held.until - Date.now() > 3 * 60 * 1000) {
-          setTicket(held.ticket);
-          return held.ticket;
-        }
-      } catch { /* nothing usable stored */ }
+      const held = heldTicket(projectId);
+      if (held) {
+        setTicket(held);
+        return held;
+      }
     }
     try {
       const { ticket: t, expiresInSeconds } = await maintenanceApi.mediaTicket(projectId);
       setTicket(t);
       try {
-        sessionStorage.setItem(key, JSON.stringify({ ticket: t, until: Date.now() + (expiresInSeconds || 300) * 1000 }));
+        sessionStorage.setItem(ticketKey(projectId), JSON.stringify({ ticket: t, until: Date.now() + (expiresInSeconds || 300) * 1000 }));
       } catch { /* private window, or storage full */ }
       return t;
     } catch {
@@ -1294,55 +1365,7 @@ function MediaTab({ projectId, media, isAdmin, canUpload, onChanged, uploadOpen,
             </p>
             <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
               {media.map((m) => (
-                <figure key={m.id} className="min-w-0">
-                  <button
-                    type="button"
-                    onClick={() => setViewing(m)}
-                    title={m.title}
-                    className="group relative block aspect-square w-full overflow-hidden rounded-xl border border-[var(--border-default)] bg-[var(--bg-surface)] focus-ring"
-                  >
-                    {/* The tile, never the file: a gallery of twenty phone
-                        videos would otherwise be a gigabyte of downloads to
-                        show twenty thumbnails. A video with no tile shows its
-                        kind instead of pulling the video down to find a
-                        frame. */}
-                    {/* A video with no tile yet has nothing to fetch: ask for
-                        one and the server can only answer 404, once per visit
-                        per video. A photo without one falls back to itself, and
-                        gains a tile from that (see backfillThumb). */}
-                    {ticket && !tileless.has(m.id) && (m.hasThumb || m.kind === "image") ? (
-                      <img
-                        src={m.hasThumb ? maintenanceApi.mediaThumbUrl(m.id, ticket) : maintenanceApi.mediaUrl(m.id, ticket)}
-                        alt={m.title}
-                        loading="lazy"
-                        decoding="async"
-                        onLoad={(e) => backfillThumb(m, e.currentTarget)}
-                        onError={() => setTileless((prev) => new Set(prev).add(m.id))}
-                        className="h-full w-full object-cover transition-transform duration-200 group-hover:scale-[1.03]"
-                      />
-                    ) : (
-                      <span className="flex h-full w-full flex-col items-center justify-center gap-1 text-[var(--fg-subtle)]">
-                        {m.kind === "video" ? <Play size={20} /> : <Images size={20} />}
-                        <span className="px-2 text-center text-[10.5px] leading-tight text-[var(--fg-muted)]">
-                          {ticket ? (m.kind === "video" ? "Video" : "No preview") : "Loading…"}
-                        </span>
-                      </span>
-                    )}
-                    {m.kind === "video" && (
-                      <span className="absolute inset-0 flex items-center justify-center bg-black/25">
-                        <span className="flex h-10 w-10 items-center justify-center rounded-full bg-black/60 text-white">
-                          <Play size={18} className="ml-0.5 fill-current" />
-                        </span>
-                      </span>
-                    )}
-                  </button>
-                  <figcaption className="mt-1.5 min-w-0">
-                    <span className="block truncate text-[12.5px] font-medium text-[var(--fg-primary)]">{m.title}</span>
-                    <span className="block truncate text-[11px] text-[var(--fg-muted)]">
-                      {fmtBytes(m.bytes)} · {fmtDate(m.uploadedAt)}
-                    </span>
-                  </figcaption>
-                </figure>
+                <MediaTile key={m.id} media={m} ticket={ticket} onOpen={() => setViewing(m)} />
               ))}
             </div>
           </>
@@ -1363,12 +1386,11 @@ function MediaTab({ projectId, media, isAdmin, canUpload, onChanged, uploadOpen,
               {viewing.kind === "video" ? (
                 <video
                   src={maintenanceApi.mediaUrl(viewing.id, ticket)}
-                  poster={viewing.hasThumb ? maintenanceApi.mediaThumbUrl(viewing.id, ticket) : undefined}
+                  poster={maintenanceApi.mediaThumbUrl(viewing.id, ticket)}
                   controls
                   autoPlay
                   playsInline
                   preload="metadata"
-                  onLoadedData={(e) => backfillThumb(viewing, e.currentTarget)}
                   className="max-h-[65dvh] w-full rounded-lg"
                 />
               ) : (
