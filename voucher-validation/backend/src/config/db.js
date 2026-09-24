@@ -180,6 +180,26 @@ export async function getPool() {
       INDEX idx_category (project_id, category)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
 
+    // A village's media: photos and video of the site itself, as opposed to the
+    // paperwork in maintenance_documents or the evidence photos attached to one
+    // visit. Kept apart from both because it is neither filed against a visit
+    // nor a document anyone will open in a PDF viewer.
+    `CREATE TABLE IF NOT EXISTS maintenance_media (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      project_id INT NOT NULL,
+      kind ENUM('image','video') NOT NULL DEFAULT 'image',
+      title VARCHAR(255) NOT NULL,
+      notes VARCHAR(500) NULL,
+      file_path VARCHAR(500) NOT NULL,
+      file_name VARCHAR(255) NULL,
+      mime_type VARCHAR(100) NOT NULL,
+      bytes INT NULL,
+      uploaded_by INT NULL,
+      uploaded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      INDEX idx_project (project_id),
+      INDEX idx_project_kind (project_id, kind)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
+
     // Photos live on disk (see services/maintenanceStore.js); the row is the
     // index. component_key NULL = a general photo of the visit.
     `CREATE TABLE IF NOT EXISTS maintenance_photos (

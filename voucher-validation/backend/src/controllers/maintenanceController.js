@@ -15,7 +15,10 @@ import {
   ALLOWED_MIME, MAX_BYTES,
   DOC_CATEGORIES, DOC_CATEGORY_KEYS, ALLOWED_DOC_MIME, MAX_DOC_BYTES,
   saveDocument, saveDocumentStream, streamDocument, deleteDocument, resolveDocument,
+  ALLOWED_MEDIA_MIME, MAX_MEDIA_BYTES, mediaKind,
+  saveMediaStream, resolveMedia, streamMedia, mediaSize, deleteMedia,
 } from "../services/maintenanceStore.js";
+import jwt from "jsonwebtoken";
 import { isAdminRole } from "../middleware/auth.js";
 
 const send = {
@@ -110,7 +113,9 @@ function mapVisit(r) {
 }
 
 export function makeMaintenanceController(pool) {
-  return {
+  // Named rather than returned straight: the media ticket gate hands a request
+  // it has already authorised to getMedia below.
+  const controller = {
     // GET /api/maintenance/components — the checklist, so the UI and the export
     // never drift from what the server validates against.
     getComponents: (_req, res) =>
@@ -313,6 +318,12 @@ export function makeMaintenanceController(pool) {
             ORDER BY uploaded_at DESC, id DESC`,
           [projectId]
         );
+        const [media] = await pool.query(
+          `SELECT id, kind, title, notes, file_name, mime_type, bytes, uploaded_at
+             FROM maintenance_media WHERE project_id = ?
+            ORDER BY uploaded_at DESC, id DESC`,
+          [projectId]
+        );
 
         const [[lastVisit]] = await pool.query(
           `SELECT id, visit_date, engineer_name, overall_condition, submitted_at
@@ -360,6 +371,10 @@ export function makeMaintenanceController(pool) {
             fileName: d.file_name, mimeType: d.mime_type, bytes: d.bytes, uploadedAt: d.uploaded_at,
           })),
           documentCategories: DOC_CATEGORIES,
+          media: media.map((m) => ({
+            id: m.id, kind: m.kind, title: m.title, notes: m.notes,
+            fileName: m.file_name, mimeType: m.mime_type, bytes: m.bytes, uploadedAt: m.uploaded_at,
+          })),
         });
       } catch (e) { console.error('[maintenance] profile:', e); return send.serverErr(res); }
     },
@@ -445,6 +460,156 @@ export function makeMaintenanceController(pool) {
         return send.ok(res, { success: true });
       } catch (e) { console.error('[maintenance] removeDocument:', e); return send.serverErr(res); }
     },
+
+    // POST /api/maintenance/villages/:projectId/media
+    //   ?title=&notes=&fileName=            metadata in the query string
+    //   Content-Type: <the file's own type>  the body IS the file
+    //
+    // Streamed to disk like a document, and for a stronger reason: a walk-round
+    // video is the one upload in this console that can be a hundred megabytes.
+    addMedia: async (req, res) => {
+      try {
+        const projectId = Number(req.params.projectId);
+        if (!Number.isFinite(projectId)) return send.bad(res, 'A numeric village id is required');
+        if (!inScope(req, projectId)) return outOfScope(res);
+        const [[project]] = await pool.query('SELECT id FROM network_projects WHERE id = ? LIMIT 1', [projectId]);
+        if (!project) return send.notFound(res, 'No such village');
+
+        const q = req.query || {};
+        const fileName = String(q.fileName || '').slice(0, 255);
+        const title = (String(q.title || '').trim() || fileName.replace(/\.[^.]+$/, '')).slice(0, 255);
+        if (!title) return send.bad(res, 'A title is required');
+
+        const mimeType = String(req.headers['content-type'] || '').split(';')[0].trim();
+        if (!ALLOWED_MEDIA_MIME.includes(mimeType)) {
+          return send.bad(res, `Unsupported file type: ${mimeType || 'unknown'}`);
+        }
+
+        let saved;
+        try {
+          saved = await saveMediaStream(projectId, req, mimeType);
+        } catch (e) {
+          if (e.code === 'DOC_TOO_LARGE' || e.code === 'DOC_EMPTY') return send.bad(res, e.message);
+          throw e;
+        }
+
+        const [r] = await pool.query(
+          `INSERT INTO maintenance_media
+             (project_id, kind, title, notes, file_path, file_name, mime_type, bytes, uploaded_by)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          [projectId, mediaKind(mimeType), title, String(q.notes || '').slice(0, 500) || null,
+           saved.rel, fileName || null, mimeType, saved.bytes, req.user?.id ?? null]
+        );
+        return send.created(res, { mediaId: r.insertId, bytes: saved.bytes, kind: mediaKind(mimeType) });
+      } catch (e) { console.error('[maintenance] addMedia:', e); return send.serverErr(res); }
+    },
+
+    // GET /api/maintenance/villages/:projectId/media/ticket
+    //
+    // A five-minute pass for one village's media. An <img> or <video> cannot
+    // send an Authorization header, and putting the session token in a URL
+    // would spread it through logs and history. So the console asks for a
+    // ticket instead: signed, short-lived, and good only for media belonging to
+    // a village this account can already see — which is checked here, while the
+    // real session is still in hand. One ticket serves a whole gallery.
+    getMediaTicket: async (req, res) => {
+      try {
+        const projectId = Number(req.params.projectId);
+        if (!Number.isFinite(projectId)) return send.bad(res, 'A numeric village id is required');
+        if (!inScope(req, projectId)) return outOfScope(res);
+        const ticket = jwt.sign({ projectId, kind: 'media' }, process.env.JWT_SECRET, { expiresIn: '5m' });
+        return send.ok(res, { ticket, expiresInSeconds: 300 });
+      } catch (e) { console.error('[maintenance] getMediaTicket:', e); return send.serverErr(res); }
+    },
+
+    /**
+     * Streams a media file, by ticket or by session.
+     *
+     * Mounted before the router's own auth so a ticketed request can reach it;
+     * a request without a valid ticket falls through to the normal chain, which
+     * then arrives here with req.user set. Range requests are answered properly
+     * — without them a viewer scrubbing a video downloads it from the start.
+     */
+    getMedia: async (req, res) => {
+      try {
+        const id = Number(req.params.id);
+        const [[m]] = await pool.query(
+          'SELECT id, project_id, file_path, file_name, mime_type FROM maintenance_media WHERE id = ? LIMIT 1', [id]
+        );
+        if (!m || !resolveMedia(m.file_path)) return send.notFound(res, 'No such media');
+        // Ticketed requests were scoped when the ticket was issued; session
+        // requests are scoped here, the same as a document.
+        if (!req.mediaTicketOk && !inScope(req, m.project_id)) return send.notFound(res, 'No such media');
+
+        const size = await mediaSize(m.file_path);
+        if (size == null) return send.notFound(res, 'No such media');
+        res.setHeader('Content-Type', m.mime_type || 'application/octet-stream');
+        res.setHeader('Accept-Ranges', 'bytes');
+        const safeName = String(m.file_name || 'media').replace(/[^\w.\- ]/g, '_');
+        res.setHeader('Content-Disposition', `inline; filename="${safeName}"`);
+
+        const rangeHeader = req.headers.range;
+        if (rangeHeader) {
+          const match = /^bytes=(\d*)-(\d*)$/.exec(String(rangeHeader).trim());
+          if (match) {
+            let start = match[1] === '' ? null : Number(match[1]);
+            let end = match[2] === '' ? null : Number(match[2]);
+            if (start == null && end != null) { start = Math.max(0, size - end); end = size - 1; }
+            if (start == null) start = 0;
+            if (end == null || end >= size) end = size - 1;
+            if (start > end || start >= size) {
+              res.setHeader('Content-Range', `bytes */${size}`);
+              return res.status(416).end();
+            }
+            const stream = streamMedia(m.file_path, { start, end });
+            if (!stream) return send.notFound(res, 'No such media');
+            res.status(206);
+            res.setHeader('Content-Range', `bytes ${start}-${end}/${size}`);
+            res.setHeader('Content-Length', end - start + 1);
+            stream.on('error', () => res.end());
+            return stream.pipe(res);
+          }
+        }
+
+        res.setHeader('Content-Length', size);
+        const stream = streamMedia(m.file_path);
+        if (!stream) return send.notFound(res, 'No such media');
+        stream.on('error', () => { if (!res.headersSent) res.status(404).end(); else res.end(); });
+        return stream.pipe(res);
+      } catch (e) { console.error('[maintenance] getMedia:', e); return send.serverErr(res); }
+    },
+
+    /** Lets a ticketed request through; anything else falls to the auth chain. */
+    mediaTicketGate: async (req, res, next) => {
+      const ticket = req.query?.t;
+      if (!ticket) return next();
+      try {
+        const claims = jwt.verify(String(ticket), process.env.JWT_SECRET);
+        if (claims?.kind !== 'media' || !Number.isFinite(Number(claims.projectId))) return next();
+        // The ticket names a village; this file has to be one of its own.
+        const [[m]] = await pool.query('SELECT project_id FROM maintenance_media WHERE id = ? LIMIT 1', [Number(req.params.id)]);
+        if (!m || Number(m.project_id) !== Number(claims.projectId)) return next();
+        req.mediaTicketOk = true;
+        return controller.getMedia(req, res);
+      } catch {
+        // Expired or forged: the session chain still gets its say.
+        return next();
+      }
+    },
+
+    // DELETE /api/maintenance/media/:id — admin only, like site paperwork.
+    removeMedia: async (req, res) => {
+      try {
+        const id = Number(req.params.id);
+        const [[m]] = await pool.query('SELECT file_path, project_id FROM maintenance_media WHERE id = ? LIMIT 1', [id]);
+        if (!m) return send.notFound(res, 'No such media');
+        if (!inScope(req, m.project_id)) return outOfScope(res);
+        await deleteMedia(m.file_path);
+        await pool.query('DELETE FROM maintenance_media WHERE id = ?', [id]);
+        return send.ok(res, { deleted: true });
+      } catch (e) { console.error('[maintenance] removeMedia:', e); return send.serverErr(res); }
+    },
+
 
     // GET /api/maintenance/visits?projectId=&status=&limit=
     listVisits: async (req, res) => {
@@ -926,4 +1091,6 @@ export function makeMaintenanceController(pool) {
       } catch (e) { console.error('[maintenance] reopenVisit:', e); return send.serverErr(res); }
     },
   };
+
+  return controller;
 }

@@ -23,6 +23,19 @@ export function makeMaintenanceRouter(controller, attachScope) {
   // Viewers read; admins and engineers read and write. Decided by HTTP method
   // in requireMaintenanceAccess, so a write route added here later is closed to
   // viewers without anyone having to remember.
+  // Media streams before the auth chain, because an <img> or <video> cannot
+  // send an Authorization header. A request carrying a valid ticket (issued
+  // below, after a real session was checked) is served here; anything else
+  // falls through to the same chain as every other route.
+  router.get(
+    "/media/:id",
+    controller.mediaTicketGate,
+    requireAuth,
+    requireMaintenanceAccess,
+    ...(attachScope ? [attachScope] : []),
+    controller.getMedia
+  );
+
   router.use(requireAuth, requireMaintenanceAccess);
   if (attachScope) router.use(attachScope);
 
@@ -42,6 +55,12 @@ export function makeMaintenanceRouter(controller, attachScope) {
   router.get("/documents/:id", controller.getDocument);
   // Removing site paperwork is an admin action.
   router.delete("/documents/:id", requireAdmin, controller.removeDocument);
+
+  // Site media: photos and video of the village itself.
+  router.post("/villages/:projectId/media", controller.addMedia);
+  router.get("/villages/:projectId/media/ticket", controller.getMediaTicket);
+  // Removing site media is an admin action, like removing paperwork.
+  router.delete("/media/:id", requireAdmin, controller.removeMedia);
 
   router.get("/visits", controller.listVisits);
   router.post("/visits", controller.createVisit);

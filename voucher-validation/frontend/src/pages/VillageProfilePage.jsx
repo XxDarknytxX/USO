@@ -15,6 +15,7 @@ import {
   ArrowLeft, RefreshCw, FileText, Upload, Download, Trash2, Camera,
   AlertTriangle, CheckCircle2, ChevronRight, CircleDashed, MapPin, Clock, History,
   Send, Lock, Save, ShieldCheck, CalendarCheck, CalendarClock, ListChecks, X,
+  Images, Play, ExternalLink,
 } from "lucide-react";
 import { maintenanceApi, openDocument, downscaleImage } from "../services/api";
 import { useAuth } from "../hooks/useAuth";
@@ -191,6 +192,7 @@ export default function VillageProfilePage() {
   const [tab, setTab] = useState(() => params.get("tab") || "overview");
   const [lightbox, setLightbox] = useState(null);
   const [uploadOpen, setUploadOpen] = useState(false);
+  const [mediaUploadOpen, setMediaUploadOpen] = useState(false);
   const tabsRef = useRef(null);
 
   // On a phone the tabs sit a screen and a half down, under the header and the
@@ -260,6 +262,7 @@ export default function VillageProfilePage() {
       icon: <ConditionDot condition={c.condition} never={c.neverInspected} />,
     })),
     { value: "documents", label: "Documents", count: data?.documents?.length || 0 },
+    { value: "media", label: "Media files", count: data?.media?.length || 0 },
   ];
 
   return (
@@ -503,6 +506,16 @@ export default function VillageProfilePage() {
             );
           })}
         </div>
+      ) : tab === "media" ? (
+        <MediaTab
+          projectId={projectId}
+          media={data?.media || []}
+          isAdmin={isAdmin}
+          canUpload={canService}
+          onChanged={load}
+          uploadOpen={mediaUploadOpen}
+          setUploadOpen={setMediaUploadOpen}
+        />
       ) : tab === "documents" ? (
         <DocumentsTab
           projectId={projectId}
@@ -1128,9 +1141,11 @@ function DocumentsTab({ projectId, documents, categories, isAdmin, canUpload, on
       </Panel>
 
       {uploadOpen && (
-        <UploadDocumentModal
+        <UploadFilesModal
           projectId={projectId}
+          kind="document"
           categories={categories}
+          onUpload={maintenanceApi.addDocument}
           onClose={() => setUploadOpen(false)}
           onDone={() => { setUploadOpen(false); onChanged(); }}
         />
@@ -1139,16 +1154,247 @@ function DocumentsTab({ projectId, documents, categories, isAdmin, canUpload, on
   );
 }
 
-// Supported types, by extension, as the server's DOC_EXT allows them. Checked
-// here only to fail a file before a 100 MB upload, not as the authority.
+/**
+ * A village's media: what the site LOOKS like, as opposed to the paperwork on
+ * the Documents tab or the evidence photos filed against one visit.
+ *
+ * Every file is served from the API behind the same village scope as the rest
+ * of the page, so a tile cannot simply point at a public URL. An <img> or a
+ * <video> cannot send an Authorization header either, so the tab draws a
+ * five-minute ticket for the village and hangs it on the URLs; it renews the
+ * ticket before it runs out, and once more if a tile fails to load after a long
+ * time on the screen.
+ */
+function MediaTab({ projectId, media, isAdmin, canUpload, onChanged, uploadOpen, setUploadOpen }) {
+  const [ticket, setTicket] = useState(null);
+  const [viewing, setViewing] = useState(null);
+
+  const drawTicket = useCallback(async () => {
+    try {
+      const { ticket: t } = await maintenanceApi.mediaTicket(projectId);
+      setTicket(t);
+      return t;
+    } catch {
+      setTicket(null);
+      return null;
+    }
+  }, [projectId]);
+
+  useEffect(() => {
+    if (!media.length) return undefined;
+    drawTicket();
+    // Renewed a minute before it lapses, so a gallery left open keeps working.
+    const id = setInterval(drawTicket, 4 * 60 * 1000);
+    return () => clearInterval(id);
+  }, [drawTicket, media.length]);
+
+  async function remove(m) {
+    if (!window.confirm(`Delete "${m.title}"? This cannot be undone.`)) return;
+    try {
+      await maintenanceApi.deleteMedia(m.id);
+      toast.success("Deleted");
+      setViewing(null);
+      onChanged();
+    } catch (e) {
+      toast.error(e.message);
+    }
+  }
+
+  const images = media.filter((m) => m.kind === "image").length;
+  const videos = media.length - images;
+
+  return (
+    <div className="flex flex-col gap-4">
+      <Panel
+        title="Media files"
+        subtitle="Photos and video of the village itself — the mast, the enclosure, a walk-round. Kept with the site rather than with any one visit."
+        icon={<Images size={15} />}
+        tone="violet"
+        actions={
+          canUpload ? (
+            <Button variant="primary" size="sm" onClick={() => setUploadOpen(true)} iconLeft={<Upload size={14} />}>
+              Upload media
+            </Button>
+          ) : null
+        }
+      >
+        {media.length === 0 ? (
+          <EmptyState
+            icon={Images}
+            title="No media yet"
+            description={
+              canUpload
+                ? "Upload photos or video of this village — how it was built, how it looks now, or what is wrong with it."
+                : "Nothing has been uploaded for this village yet."
+            }
+          />
+        ) : (
+          <>
+            <p className="mb-3 text-[12px] text-[var(--fg-muted)]">
+              {images} photo{images === 1 ? "" : "s"}
+              {videos ? ` · ${videos} video${videos === 1 ? "" : "s"}` : ""}
+            </p>
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
+              {media.map((m) => (
+                <figure key={m.id} className="min-w-0">
+                  <button
+                    type="button"
+                    onClick={() => setViewing(m)}
+                    title={m.title}
+                    className="group relative block aspect-square w-full overflow-hidden rounded-xl border border-[var(--border-default)] bg-[var(--bg-surface)] focus-ring"
+                  >
+                    {ticket ? (
+                      m.kind === "video" ? (
+                        <video
+                          src={maintenanceApi.mediaUrl(m.id, ticket)}
+                          preload="metadata"
+                          muted
+                          playsInline
+                          className="h-full w-full object-cover"
+                        />
+                      ) : (
+                        <img
+                          src={maintenanceApi.mediaUrl(m.id, ticket)}
+                          alt={m.title}
+                          loading="lazy"
+                          onError={drawTicket}
+                          className="h-full w-full object-cover transition-transform duration-200 group-hover:scale-[1.03]"
+                        />
+                      )
+                    ) : (
+                      <span className="flex h-full w-full items-center justify-center text-[var(--fg-subtle)]">
+                        <Images size={20} />
+                      </span>
+                    )}
+                    {m.kind === "video" && (
+                      <span className="absolute inset-0 flex items-center justify-center bg-black/25">
+                        <span className="flex h-10 w-10 items-center justify-center rounded-full bg-black/60 text-white">
+                          <Play size={18} className="ml-0.5 fill-current" />
+                        </span>
+                      </span>
+                    )}
+                  </button>
+                  <figcaption className="mt-1.5 min-w-0">
+                    <span className="block truncate text-[12.5px] font-medium text-[var(--fg-primary)]">{m.title}</span>
+                    <span className="block truncate text-[11px] text-[var(--fg-muted)]">
+                      {fmtBytes(m.bytes)} · {fmtDate(m.uploadedAt)}
+                    </span>
+                  </figcaption>
+                </figure>
+              ))}
+            </div>
+          </>
+        )}
+      </Panel>
+
+      {viewing && (
+        <Modal open onClose={() => setViewing(null)} width="2xl">
+          <Modal.Header
+            eyebrow={viewing.kind === "video" ? "Video" : "Photo"}
+            title={viewing.title}
+            subtitle={`${fmtBytes(viewing.bytes)} · ${fmtDate(viewing.uploadedAt)}${viewing.notes ? ` · ${viewing.notes}` : ""}`}
+            icon={viewing.kind === "video" ? Play : Images}
+            onClose={() => setViewing(null)}
+          />
+          <Modal.Body>
+            <div className="flex items-center justify-center rounded-xl bg-black/90 p-1">
+              {viewing.kind === "video" ? (
+                <video
+                  src={maintenanceApi.mediaUrl(viewing.id, ticket)}
+                  controls
+                  autoPlay
+                  playsInline
+                  className="max-h-[65dvh] w-full rounded-lg"
+                />
+              ) : (
+                <img
+                  src={maintenanceApi.mediaUrl(viewing.id, ticket)}
+                  alt={viewing.title}
+                  className="max-h-[65dvh] w-auto rounded-lg object-contain"
+                />
+              )}
+            </div>
+          </Modal.Body>
+          <Modal.Footer>
+            {isAdmin && (
+              <Button
+                variant="ghost"
+                size="sm"
+                className="mr-auto text-[var(--danger-fg)]"
+                onClick={() => remove(viewing)}
+                iconLeft={<Trash2 size={14} />}
+              >
+                Delete
+              </Button>
+            )}
+            <Button
+              variant="secondary"
+              size="sm"
+              className="max-sm:flex-1"
+              onClick={async () => {
+                // A fresh ticket, because this tab may have been open a while
+                // and the new tab has no session of its own to fall back on.
+                const t = (await drawTicket()) || ticket;
+                window.open(maintenanceApi.mediaUrl(viewing.id, t), "_blank", "noopener");
+              }}
+              iconLeft={<ExternalLink size={14} />}
+            >
+              Open
+            </Button>
+            <Button variant="primary" size="sm" className="max-sm:flex-1" onClick={() => setViewing(null)}>
+              Close
+            </Button>
+          </Modal.Footer>
+        </Modal>
+      )}
+
+      {uploadOpen && (
+        <UploadFilesModal
+          projectId={projectId}
+          kind="media"
+          onUpload={maintenanceApi.addMedia}
+          onClose={() => setUploadOpen(false)}
+          onDone={() => { setUploadOpen(false); onChanged(); }}
+        />
+      )}
+    </div>
+  );
+}
+
+// Supported types, by extension, as the server's own allow-lists have them.
+// Checked here only to fail a file before a 100 MB upload, not as the authority.
 const DOC_EXTS = ["pdf", "jpg", "jpeg", "png", "webp", "doc", "docx", "xls", "xlsx"];
-const MAX_DOC_BYTES = 100 * 1024 * 1024;
+const MEDIA_EXTS = ["jpg", "jpeg", "png", "webp", "heic", "mp4", "mov", "webm"];
+const MAX_UPLOAD_BYTES = 100 * 1024 * 1024;
+
+const UPLOAD_KINDS = {
+  document: {
+    eyebrow: "Site documents",
+    one: "Upload a document",
+    many: "Upload documents",
+    exts: DOC_EXTS,
+    accept: ".pdf,.jpg,.jpeg,.png,.webp,.doc,.docx,.xls,.xlsx,application/pdf,image/*",
+    wrongType: "not a PDF, image, Word or Excel file",
+    blurb: "PDF, image, Word or Excel · up to 100 MB each",
+    hint: "PDF, image, Word or Excel. Up to 100 MB each. Pick several, or drop them here.",
+  },
+  media: {
+    eyebrow: "Site media",
+    one: "Upload media",
+    many: "Upload media",
+    exts: MEDIA_EXTS,
+    accept: ".jpg,.jpeg,.png,.webp,.heic,.mp4,.mov,.webm,image/*,video/*",
+    wrongType: "not a photo or video this console can show",
+    blurb: "Photos and video · up to 100 MB each",
+    hint: "Photos and video (JPG, PNG, WebP, HEIC, MP4, MOV, WebM). Up to 100 MB each. Pick several, or drop them here.",
+  },
+};
 
 /** Why this file cannot go, or null. */
-function rejectReason(file) {
+function rejectReason(file, kind) {
   const ext = (file.name.split(".").pop() || "").toLowerCase();
-  if (!DOC_EXTS.includes(ext)) return "not a PDF, image, Word or Excel file";
-  if (file.size > MAX_DOC_BYTES) return `${fmtBytes(file.size)} — over the 100 MB limit`;
+  if (!kind.exts.includes(ext)) return kind.wrongType;
+  if (file.size > MAX_UPLOAD_BYTES) return `${fmtBytes(file.size)} — over the 100 MB limit`;
   if (file.size === 0) return "the file is empty";
   return null;
 }
@@ -1165,7 +1411,8 @@ function rejectReason(file) {
  * One file that fails does not stop the rest: it stays in the list with its
  * reason, and Retry sends only the ones that did not land.
  */
-function UploadDocumentModal({ projectId, categories, onClose, onDone }) {
+function UploadFilesModal({ projectId, kind = "document", categories = null, onUpload, onClose, onDone }) {
+  const K = UPLOAD_KINDS[kind];
   // The sheet a phone gets is the same form, but its first control is a file
   // picker: see the File field below for why that one is built by hand.
   const phone = usePhone();
@@ -1201,7 +1448,7 @@ function UploadDocumentModal({ projectId, categories, onClose, onDone }) {
         const key = `${file.name}:${file.size}`;
         if (seen.has(key)) continue;
         seen.add(key);
-        const reason = rejectReason(file);
+        const reason = rejectReason(file, K);
         added.push({
           id: nextId.current++,
           file,
@@ -1227,8 +1474,8 @@ function UploadDocumentModal({ projectId, categories, onClose, onDone }) {
     for (const item of todo) {
       setQueue((prev) => prev.map((q) => (q.id === item.id ? { ...q, status: "uploading", error: null } : q)));
       try {
-        await maintenanceApi.addDocument(projectId, item.file, {
-          category,
+        await onUpload(projectId, item.file, {
+          ...(categories ? { category } : {}),
           // Default the title to the filename: forcing a title on someone
           // uploading "Handover_Vunisei.pdf" is friction for nothing.
           title: (single && title.trim()) || item.file.name.replace(/\.[^.]+$/, ""),
@@ -1244,7 +1491,8 @@ function UploadDocumentModal({ projectId, categories, onClose, onDone }) {
     setBusy(false);
     const sent = todo.length - failed;
     if (!failed) {
-      toast.success(sent === 1 ? "Document uploaded" : `${sent} documents uploaded`);
+      const noun = kind === "media" ? "file" : "document";
+      toast.success(sent === 1 ? `${noun === "file" ? "File" : "Document"} uploaded` : `${sent} ${noun}s uploaded`);
       onDone();
       return;
     }
@@ -1266,8 +1514,8 @@ function UploadDocumentModal({ projectId, categories, onClose, onDone }) {
   return (
     <Modal open onClose={busy ? () => {} : onClose} width="md">
       <Modal.Header
-        eyebrow="Site documents"
-        title={queue.length > 1 ? "Upload documents" : "Upload a document"}
+        eyebrow={K.eyebrow}
+        title={queue.length > 1 ? K.many : K.one}
         icon={Upload}
         onClose={busy ? undefined : onClose}
       />
@@ -1275,7 +1523,7 @@ function UploadDocumentModal({ projectId, categories, onClose, onDone }) {
         <div className="flex flex-col gap-5">
           <Field
             label="Files"
-            hint={phone ? null : "PDF, image, Word or Excel. Up to 100 MB each. Pick several, or drop them here."}
+            hint={phone ? null : K.hint}
           >
             {/* Hidden on every device: the browser's own control is a small grey
                 button with the filename crushed beside it, and on a phone it is
@@ -1285,7 +1533,7 @@ function UploadDocumentModal({ projectId, categories, onClose, onDone }) {
               ref={fileRef}
               type="file"
               multiple
-              accept=".pdf,.jpg,.jpeg,.png,.webp,.doc,.docx,.xls,.xlsx,application/pdf,image/*"
+              accept={K.accept}
               onChange={(e) => {
                 addFiles(e.target.files);
                 // Same file again after removing it from the queue: without this
@@ -1324,7 +1572,7 @@ function UploadDocumentModal({ projectId, categories, onClose, onDone }) {
                       : "Choose files, or drop them here"}
                 </span>
                 <span className="mt-0.5 block text-[11.5px] leading-snug text-[var(--fg-muted)]">
-                  PDF, image, Word or Excel · up to 100 MB each
+                  {K.blurb}
                 </span>
               </span>
             </button>
@@ -1367,13 +1615,15 @@ function UploadDocumentModal({ projectId, categories, onClose, onDone }) {
               </ul>
             )}
           </Field>
-          <Field label="Category" hint={pending.length > 1 ? "Applies to every file in this batch." : null}>
-            <Select value={category} onChange={(e) => setCategory(e.target.value)}>
-              {categories.map((c) => (
-                <option key={c.key} value={c.key}>{c.label}</option>
-              ))}
-            </Select>
-          </Field>
+          {categories && (
+            <Field label="Category" hint={pending.length > 1 ? "Applies to every file in this batch." : null}>
+              <Select value={category} onChange={(e) => setCategory(e.target.value)}>
+                {categories.map((c) => (
+                  <option key={c.key} value={c.key}>{c.label}</option>
+                ))}
+              </Select>
+            </Field>
+          )}
           {/* A batch is titled by its file names — one title across five
               documents would name none of them. */}
           {queue.length <= 1 && (

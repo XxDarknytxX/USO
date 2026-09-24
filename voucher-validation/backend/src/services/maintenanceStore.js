@@ -71,6 +71,25 @@ export const MAX_DOC_BYTES = 100 * 1024 * 1024; // 100 MB — a scanned handover
 // smallest wins. See deploy/nginx.uso-stack.conf — a cap raised here alone
 // changes nothing except which error the operator sees.
 
+// Media is the site as it LOOKS: photos of the mast, a walk-round video, a
+// clip of a fault. Same allow-list discipline as documents — a stored file can
+// only ever be one of these — but it carries video, which paperwork does not.
+const MEDIA_EXT = {
+  "image/jpeg": "jpg",
+  "image/png": "png",
+  "image/webp": "webp",
+  "image/heic": "heic",
+  "video/mp4": "mp4",
+  "video/quicktime": "mov",
+  "video/webm": "webm",
+};
+export const ALLOWED_MEDIA_MIME = Object.keys(MEDIA_EXT);
+// The same ceiling as a document, and for the same reason: nginx allows 105 MB
+// on this location (deploy/nginx.uso-stack.conf), so a larger limit here would
+// only change which error the operator sees.
+export const MAX_MEDIA_BYTES = 100 * 1024 * 1024;
+export const mediaKind = (mimeType) => (String(mimeType || "").startsWith("video/") ? "video" : "image");
+
 export const DOC_CATEGORIES = [
   { key: "handover", label: "Handover pack" },
   { key: "asbuilt", label: "As-built / site drawing" },
@@ -82,6 +101,7 @@ export const DOC_CATEGORIES = [
 export const DOC_CATEGORY_KEYS = new Set(DOC_CATEGORIES.map((c) => c.key));
 
 const DOC_ROOT = resolve(ROOT, "..", "maintenance-docs");
+const MEDIA_ROOT = resolve(ROOT, "..", "maintenance-media");
 
 /** Write one village document from a buffer. Returns the relative path. */
 export async function saveDocument(projectId, buffer, mimeType) {
@@ -110,10 +130,21 @@ export async function saveDocument(projectId, buffer, mimeType) {
 export async function saveDocumentStream(projectId, source, mimeType, maxBytes = MAX_DOC_BYTES) {
   const ext = DOC_EXT[mimeType];
   if (!ext) throw new Error(`Unsupported file type: ${mimeType}`);
-  const dir = join(DOC_ROOT, String(Number(projectId)));
+  return saveStreamTo(DOC_ROOT, projectId, ext, source, maxBytes);
+}
+
+/** The same, for a village's media. Videos are why this streams rather than buffers. */
+export async function saveMediaStream(projectId, source, mimeType, maxBytes = MAX_MEDIA_BYTES) {
+  const ext = MEDIA_EXT[mimeType];
+  if (!ext) throw new Error(`Unsupported file type: ${mimeType}`);
+  return saveStreamTo(MEDIA_ROOT, projectId, ext, source, maxBytes);
+}
+
+async function saveStreamTo(root, projectId, ext, source, maxBytes) {
+  const dir = join(root, String(Number(projectId)));
   await mkdir(dir, { recursive: true });
   const rel = join(String(Number(projectId)), `${randomUUID()}.${ext}`);
-  const abs = join(DOC_ROOT, rel);
+  const abs = join(root, rel);
 
   let bytes = 0;
   const meter = new Transform({
@@ -161,6 +192,37 @@ export async function deleteDocument(relPath) {
 }
 
 export function docRoot() { return DOC_ROOT; }
+
+/** Same traversal guard as documents, against the media root. */
+export function resolveMedia(relPath) {
+  const abs = resolve(MEDIA_ROOT, String(relPath || ""));
+  if (abs !== MEDIA_ROOT && !abs.startsWith(MEDIA_ROOT + sep)) return null;
+  return abs;
+}
+
+/**
+ * A readable stream over part or all of a media file. A video element asks for
+ * ranges as the viewer scrubs, so a whole-file stream would make seeking mean
+ * downloading everything up to that point.
+ */
+export function streamMedia(relPath, range) {
+  const abs = resolveMedia(relPath);
+  if (!abs) return null;
+  return range ? createReadStream(abs, { start: range.start, end: range.end }) : createReadStream(abs);
+}
+
+/** Byte length on disk, or null when the file has gone missing. */
+export async function mediaSize(relPath) {
+  const abs = resolveMedia(relPath);
+  if (!abs) return null;
+  try { return (await stat(abs)).size; } catch { return null; }
+}
+
+export async function deleteMedia(relPath) {
+  const abs = resolveMedia(relPath);
+  if (!abs) return;
+  try { await unlink(abs); } catch { /* already gone */ }
+}
 
 /**
  * Write one photo for a visit. Returns the DB-storable relative path.

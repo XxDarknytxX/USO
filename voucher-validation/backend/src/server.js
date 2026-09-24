@@ -73,8 +73,8 @@ app.use("/api/mpaisa/upload", express.json({ limit: "25mb" }));
 // leaving it resting on that default, because the body of a document upload
 // IS the file and must reach the route handler as an unread stream.
 app.use("/api/maintenance", (req, res, next) => {
-  const isDocUpload = req.method === "POST" && /\/documents\/?$/.test(req.path);
-  return isDocUpload ? next() : express.json({ limit: "15mb" })(req, res, next);
+  const isStreamedUpload = req.method === "POST" && /\/(documents|media)\/?$/.test(req.path);
+  return isStreamedUpload ? next() : express.json({ limit: "15mb" })(req, res, next);
 });
 // Campaign drafts carry a whole HTML email.
 app.use("/api/campaigns", express.json({ limit: "5mb" }));

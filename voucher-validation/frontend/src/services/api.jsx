@@ -353,6 +353,13 @@ export const maintenanceApi = {
   // Uploads the File itself as the request body — see uploadDocument.
   addDocument: (projectId, file, meta = {}) => uploadDocument(projectId, file, meta),
   deleteDocument: (id) => api(`/maintenance/documents/${id}`, { method: "DELETE" }),
+
+  // Site media — photos and video of the village itself.
+  addMedia: (projectId, file, meta = {}) => uploadMedia(projectId, file, meta),
+  // A five-minute pass so <img> and <video> can load without a header.
+  mediaTicket: (projectId) => api(`/maintenance/villages/${projectId}/media/ticket`),
+  mediaUrl: (id, ticket) => `${API_BASE_URL}/maintenance/media/${id}${ticket ? `?t=${encodeURIComponent(ticket)}` : ""}`,
+  deleteMedia: (id) => api(`/maintenance/media/${id}`, { method: "DELETE" }),
   documentUrl: (id) => `${API_BASE_URL}/maintenance/documents/${id}`,
   schedule: () => api("/maintenance/schedule"),
   visits: (params = {}) => {
@@ -415,6 +422,31 @@ export async function openDocument(documentId) {
  * server holds in memory before decoding. Sending the File directly streams it
  * on both ends.
  */
+/** Site media, uploaded the same way a document is: the body IS the file. */
+export async function uploadMedia(projectId, file, { title, notes } = {}) {
+  const qs = new URLSearchParams({
+    fileName: file.name,
+    title: title || "",
+    notes: notes || "",
+  });
+  const res = await fetch(`${API_BASE_URL}/maintenance/villages/${projectId}/media?${qs}`, {
+    method: "POST",
+    headers: {
+      ...authHeader(),
+      "Content-Type": file.type || "application/octet-stream",
+    },
+    body: file,
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    if (res.status === 413) {
+      throw new Error("The server rejected the upload as too large (nginx client_max_body_size).");
+    }
+    throw new Error(data.error || `HTTP ${res.status}`);
+  }
+  return data;
+}
+
 export async function uploadDocument(projectId, file, { title, category, notes } = {}) {
   const qs = new URLSearchParams({
     fileName: file.name,
