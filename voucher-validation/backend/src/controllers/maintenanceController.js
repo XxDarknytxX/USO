@@ -16,7 +16,7 @@ import {
   DOC_CATEGORIES, DOC_CATEGORY_KEYS, ALLOWED_DOC_MIME, MAX_DOC_BYTES,
   saveDocument, saveDocumentStream, streamDocument, deleteDocument, resolveDocument,
   ALLOWED_MEDIA_MIME, MAX_MEDIA_BYTES, mediaKind,
-  saveMediaStream, resolveMedia, streamMedia, mediaSize, deleteMedia,
+  saveMediaStream, saveThumbStream, resolveMedia, streamMedia, mediaSize, deleteMedia,
 } from "../services/maintenanceStore.js";
 import jwt from "jsonwebtoken";
 import { isAdminRole } from "../middleware/auth.js";
@@ -319,7 +319,7 @@ export function makeMaintenanceController(pool) {
           [projectId]
         );
         const [media] = await pool.query(
-          `SELECT id, kind, title, notes, file_name, mime_type, bytes, uploaded_at
+          `SELECT id, kind, title, notes, file_name, mime_type, bytes, uploaded_at, thumb_path
              FROM maintenance_media WHERE project_id = ?
             ORDER BY uploaded_at DESC, id DESC`,
           [projectId]
@@ -374,6 +374,9 @@ export function makeMaintenanceController(pool) {
           media: media.map((m) => ({
             id: m.id, kind: m.kind, title: m.title, notes: m.notes,
             fileName: m.file_name, mimeType: m.mime_type, bytes: m.bytes, uploadedAt: m.uploaded_at,
+            // Whether there is a tile to draw, so the gallery asks for the
+            // original only when there is nothing lighter to show.
+            hasThumb: !!m.thumb_path,
           })),
         });
       } catch (e) { console.error('[maintenance] profile:', e); return send.serverErr(res); }
@@ -504,6 +507,35 @@ export function makeMaintenanceController(pool) {
       } catch (e) { console.error('[maintenance] addMedia:', e); return send.serverErr(res); }
     },
 
+    // POST /api/maintenance/media/:id/thumb — the tile for one media file.
+    //
+    // Drawn by the browser that uploaded the file (a 480px frame is far cheaper
+    // to make there than to decode a 69 MB video on a box running thirty node
+    // processes), and always optional: a file whose tile could not be made just
+    // shows its kind in the gallery.
+    addMediaThumb: async (req, res) => {
+      try {
+        const id = Number(req.params.id);
+        const [[m]] = await pool.query('SELECT id, project_id, thumb_path FROM maintenance_media WHERE id = ? LIMIT 1', [id]);
+        if (!m) return send.notFound(res, 'No such media');
+        if (!inScope(req, m.project_id)) return outOfScope(res);
+        const mimeType = String(req.headers['content-type'] || '').split(';')[0].trim();
+        if (mimeType !== 'image/jpeg') return send.bad(res, 'A thumbnail must be a JPEG');
+
+        let saved;
+        try {
+          saved = await saveThumbStream(m.project_id, req);
+        } catch (e) {
+          if (e.code === 'DOC_TOO_LARGE' || e.code === 'DOC_EMPTY') return send.bad(res, e.message);
+          throw e;
+        }
+        const previous = m.thumb_path;
+        await pool.query('UPDATE maintenance_media SET thumb_path = ? WHERE id = ?', [saved.rel, id]);
+        if (previous) await deleteMedia(previous);
+        return send.ok(res, { thumb: true, bytes: saved.bytes });
+      } catch (e) { console.error('[maintenance] addMediaThumb:', e); return send.serverErr(res); }
+    },
+
     // GET /api/maintenance/villages/:projectId/media/ticket
     //
     // A five-minute pass for one village's media. An <img> or <video> cannot
@@ -517,8 +549,11 @@ export function makeMaintenanceController(pool) {
         const projectId = Number(req.params.projectId);
         if (!Number.isFinite(projectId)) return send.bad(res, 'A numeric village id is required');
         if (!inScope(req, projectId)) return outOfScope(res);
-        const ticket = jwt.sign({ projectId, kind: 'media' }, process.env.JWT_SECRET, { expiresIn: '5m' });
-        return send.ok(res, { ticket, expiresInSeconds: 300 });
+        // Half an hour, not five minutes: the ticket is part of every tile's
+        // URL, so renewing it changes those URLs and throws away the browser's
+        // cache of a gallery someone is still looking at.
+        const ticket = jwt.sign({ projectId, kind: 'media' }, process.env.JWT_SECRET, { expiresIn: '30m' });
+        return send.ok(res, { ticket, expiresInSeconds: 1800 });
       } catch (e) { console.error('[maintenance] getMediaTicket:', e); return send.serverErr(res); }
     },
 
@@ -534,19 +569,33 @@ export function makeMaintenanceController(pool) {
       try {
         const id = Number(req.params.id);
         const [[m]] = await pool.query(
-          'SELECT id, project_id, file_path, file_name, mime_type FROM maintenance_media WHERE id = ? LIMIT 1', [id]
+          'SELECT id, project_id, kind, file_path, thumb_path, file_name, mime_type FROM maintenance_media WHERE id = ? LIMIT 1', [id]
         );
         if (!m || !resolveMedia(m.file_path)) return send.notFound(res, 'No such media');
         // Ticketed requests were scoped when the ticket was issued; session
         // requests are scoped here, the same as a document.
         if (!req.mediaTicketOk && !inScope(req, m.project_id)) return send.notFound(res, 'No such media');
 
-        const size = await mediaSize(m.file_path);
+        // ?thumb=1 asks for the gallery tile. A photo with no tile yet falls
+        // back to itself; a video without one has nothing to show, and the
+        // gallery draws its own placeholder rather than fetching the video.
+        const wantThumb = req.query?.thumb === '1' || req.query?.thumb === 'true';
+        const useThumb = wantThumb && m.thumb_path && resolveMedia(m.thumb_path);
+        if (wantThumb && !m.thumb_path && m.kind === 'video') return send.notFound(res, 'No thumbnail');
+        const path = useThumb ? m.thumb_path : m.file_path;
+
+        const size = await mediaSize(path);
         if (size == null) return send.notFound(res, 'No such media');
-        res.setHeader('Content-Type', m.mime_type || 'application/octet-stream');
+        res.setHeader('Content-Type', useThumb ? 'image/jpeg' : m.mime_type || 'application/octet-stream');
         res.setHeader('Accept-Ranges', 'bytes');
         const safeName = String(m.file_name || 'media').replace(/[^\w.\- ]/g, '_');
         res.setHeader('Content-Disposition', `inline; filename="${safeName}"`);
+        // A stored file never changes: once the browser has it, it should not
+        // ask again. Private, because it is behind a village's scope.
+        const etag = `"m${m.id}${useThumb ? 't' : ''}-${size}"`;
+        res.setHeader('ETag', etag);
+        res.setHeader('Cache-Control', 'private, max-age=604800, immutable');
+        if (req.headers['if-none-match'] === etag) return res.status(304).end();
 
         const rangeHeader = req.headers.range;
         if (rangeHeader) {
@@ -561,7 +610,7 @@ export function makeMaintenanceController(pool) {
               res.setHeader('Content-Range', `bytes */${size}`);
               return res.status(416).end();
             }
-            const stream = streamMedia(m.file_path, { start, end });
+            const stream = streamMedia(path, { start, end });
             if (!stream) return send.notFound(res, 'No such media');
             res.status(206);
             res.setHeader('Content-Range', `bytes ${start}-${end}/${size}`);
@@ -572,7 +621,7 @@ export function makeMaintenanceController(pool) {
         }
 
         res.setHeader('Content-Length', size);
-        const stream = streamMedia(m.file_path);
+        const stream = streamMedia(path);
         if (!stream) return send.notFound(res, 'No such media');
         stream.on('error', () => { if (!res.headersSent) res.status(404).end(); else res.end(); });
         return stream.pipe(res);
@@ -601,10 +650,11 @@ export function makeMaintenanceController(pool) {
     removeMedia: async (req, res) => {
       try {
         const id = Number(req.params.id);
-        const [[m]] = await pool.query('SELECT file_path, project_id FROM maintenance_media WHERE id = ? LIMIT 1', [id]);
+        const [[m]] = await pool.query('SELECT file_path, thumb_path, project_id FROM maintenance_media WHERE id = ? LIMIT 1', [id]);
         if (!m) return send.notFound(res, 'No such media');
         if (!inScope(req, m.project_id)) return outOfScope(res);
         await deleteMedia(m.file_path);
+        if (m.thumb_path) await deleteMedia(m.thumb_path);
         await pool.query('DELETE FROM maintenance_media WHERE id = ?', [id]);
         return send.ok(res, { deleted: true });
       } catch (e) { console.error('[maintenance] removeMedia:', e); return send.serverErr(res); }

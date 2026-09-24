@@ -140,6 +140,18 @@ export async function saveMediaStream(projectId, source, mimeType, maxBytes = MA
   return saveStreamTo(MEDIA_ROOT, projectId, ext, source, maxBytes);
 }
 
+/**
+ * A gallery tile, stored beside the file it stands for.
+ *
+ * The console draws these in the browser at upload time — a 480px JPEG for a
+ * photo, a frame for a video — so a grid of twenty costs a few hundred
+ * kilobytes instead of the several hundred megabytes the originals weigh.
+ */
+export const MAX_THUMB_BYTES = 2 * 1024 * 1024;
+export async function saveThumbStream(projectId, source, maxBytes = MAX_THUMB_BYTES) {
+  return saveStreamTo(MEDIA_ROOT, projectId, "thumb.jpg", source, maxBytes);
+}
+
 async function saveStreamTo(root, projectId, ext, source, maxBytes) {
   const dir = join(root, String(Number(projectId)));
   await mkdir(dir, { recursive: true });

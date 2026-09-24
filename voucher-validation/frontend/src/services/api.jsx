@@ -356,9 +356,14 @@ export const maintenanceApi = {
 
   // Site media — photos and video of the village itself.
   addMedia: (projectId, file, meta = {}) => uploadMedia(projectId, file, meta),
+  addMediaThumb: (mediaId, file) => uploadMediaThumb(mediaId, file),
+  postMediaThumb: (mediaId, blob) => postMediaThumb(mediaId, blob),
   // A five-minute pass so <img> and <video> can load without a header.
   mediaTicket: (projectId) => api(`/maintenance/villages/${projectId}/media/ticket`),
   mediaUrl: (id, ticket) => `${API_BASE_URL}/maintenance/media/${id}${ticket ? `?t=${encodeURIComponent(ticket)}` : ""}`,
+  // The gallery tile: a few hundred kilobytes rather than the whole file.
+  mediaThumbUrl: (id, ticket) =>
+    `${API_BASE_URL}/maintenance/media/${id}?thumb=1${ticket ? `&t=${encodeURIComponent(ticket)}` : ""}`,
   deleteMedia: (id) => api(`/maintenance/media/${id}`, { method: "DELETE" }),
   documentUrl: (id) => `${API_BASE_URL}/maintenance/documents/${id}`,
   schedule: () => api("/maintenance/schedule"),
@@ -445,6 +450,104 @@ export async function uploadMedia(projectId, file, { title, notes } = {}) {
     throw new Error(data.error || `HTTP ${res.status}`);
   }
   return data;
+}
+
+/**
+ * The gallery tile for a media file, drawn here and sent up beside it.
+ *
+ * Making it in the browser keeps image and video decoding off a server that
+ * runs thirty node processes and has no ffmpeg, and it costs nothing extra:
+ * the file is already in memory on this machine. Never fatal — a file whose
+ * tile cannot be drawn (an HEIC photo no browser decodes, a codec Chrome will
+ * not open) simply shows its kind in the gallery.
+ */
+export async function uploadMediaThumb(mediaId, file) {
+  const blob = await thumbnailFor(file);
+  return postMediaThumb(mediaId, blob);
+}
+
+/**
+ * Send a tile that has already been drawn — from an <img> or a <video> the
+ * gallery is showing anyway. This is how media uploaded before tiles existed
+ * gets one: without it, every visit would go on fetching the full-size file.
+ */
+export async function postMediaThumb(mediaId, blob) {
+  if (!blob) return false;
+  const res = await fetch(`${API_BASE_URL}/maintenance/media/${mediaId}/thumb`, {
+    method: "POST",
+    headers: { ...authHeader(), "Content-Type": "image/jpeg" },
+    body: blob,
+  });
+  return res.ok;
+}
+
+const THUMB_EDGE = 480;
+
+/**
+ * A tile drawn from something already on screen: a loaded <img> or a <video>
+ * showing a frame. Same origin, so the canvas is not tainted.
+ */
+export async function thumbFromElement(el) {
+  try {
+    const w = el.naturalWidth || el.videoWidth;
+    const h = el.naturalHeight || el.videoHeight;
+    if (!w || !h) return null;
+    const scale = Math.min(1, THUMB_EDGE / Math.max(w, h));
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.max(1, Math.round(w * scale));
+    canvas.height = Math.max(1, Math.round(h * scale));
+    canvas.getContext("2d").drawImage(el, 0, 0, canvas.width, canvas.height);
+    return await new Promise((resolve) => canvas.toBlob(resolve, "image/jpeg", 0.72));
+  } catch {
+    return null;
+  }
+}
+
+async function thumbnailFor(file) {
+  try {
+    const frame = file.type.startsWith("video/") ? await videoFrame(file) : await createImageBitmap(file);
+    if (!frame) return null;
+    const scale = Math.min(1, THUMB_EDGE / Math.max(frame.width, frame.height));
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.max(1, Math.round(frame.width * scale));
+    canvas.height = Math.max(1, Math.round(frame.height * scale));
+    canvas.getContext("2d").drawImage(frame, 0, 0, canvas.width, canvas.height);
+    frame.close?.();
+    return await new Promise((resolve) => canvas.toBlob(resolve, "image/jpeg", 0.72));
+  } catch {
+    return null;
+  }
+}
+
+/** One frame from a video file, a second in — far enough to miss a black opening. */
+function videoFrame(file) {
+  return new Promise((resolve) => {
+    const url = URL.createObjectURL(file);
+    const video = document.createElement("video");
+    let settled = false;
+    const done = (value) => {
+      if (settled) return;
+      settled = true;
+      URL.revokeObjectURL(url);
+      resolve(value);
+    };
+    video.preload = "metadata";
+    video.muted = true;
+    video.playsInline = true;
+    video.src = url;
+    video.onloadedmetadata = () => {
+      video.currentTime = Math.min(1, (video.duration || 2) / 2);
+    };
+    video.onseeked = () => {
+      const frame = { width: video.videoWidth, height: video.videoHeight };
+      if (!frame.width) return done(null);
+      // The element itself is a valid drawImage source.
+      done(Object.assign(video, frame));
+    };
+    video.onerror = () => done(null);
+    // A codec the browser will not open must not hang the upload queue.
+    setTimeout(() => done(null), 8000);
+  });
 }
 
 export async function uploadDocument(projectId, file, { title, category, notes } = {}) {

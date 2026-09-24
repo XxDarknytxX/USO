@@ -59,6 +59,7 @@ export function makeMaintenanceRouter(controller, attachScope) {
   // Site media: photos and video of the village itself.
   router.post("/villages/:projectId/media", controller.addMedia);
   router.get("/villages/:projectId/media/ticket", controller.getMediaTicket);
+  router.post("/media/:id/thumb", controller.addMediaThumb);
   // Removing site media is an admin action, like removing paperwork.
   router.delete("/media/:id", requireAdmin, controller.removeMedia);
 

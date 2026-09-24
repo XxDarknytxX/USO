@@ -42,6 +42,7 @@ export async function getPool() {
     // every start, in order: an older, narrower MODIFY left above a newer one
     // would try to drop a role that accounts already hold, which fails the
     // start under strict SQL mode and silently blanks those roles without it.
+    `ALTER TABLE maintenance_media ADD COLUMN thumb_path VARCHAR(500) NULL AFTER file_path`,
     `ALTER TABLE users MODIFY COLUMN role ENUM('admin','viewer','engineer','billing','superadmin') NOT NULL DEFAULT 'viewer'`,
 
     // TWO-FACTOR AUTHENTICATION.
