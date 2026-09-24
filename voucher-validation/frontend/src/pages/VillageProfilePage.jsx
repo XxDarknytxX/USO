@@ -1139,6 +1139,32 @@ function DocumentsTab({ projectId, documents, categories, isAdmin, canUpload, on
   );
 }
 
+// Supported types, by extension, as the server's DOC_EXT allows them. Checked
+// here only to fail a file before a 100 MB upload, not as the authority.
+const DOC_EXTS = ["pdf", "jpg", "jpeg", "png", "webp", "doc", "docx", "xls", "xlsx"];
+const MAX_DOC_BYTES = 100 * 1024 * 1024;
+
+/** Why this file cannot go, or null. */
+function rejectReason(file) {
+  const ext = (file.name.split(".").pop() || "").toLowerCase();
+  if (!DOC_EXTS.includes(ext)) return "not a PDF, image, Word or Excel file";
+  if (file.size > MAX_DOC_BYTES) return `${fmtBytes(file.size)} — over the 100 MB limit`;
+  if (file.size === 0) return "the file is empty";
+  return null;
+}
+
+/**
+ * Upload site documents — several at once.
+ *
+ * A handover comes as a folder: the pack, the drawings, the warranty, a permit.
+ * One file per trip through a dialog is the wrong shape for that, so the picker
+ * takes a multiple selection or a drop, queues what it is given and uploads the
+ * queue one file at a time (each upload is its own streamed request, and the
+ * server takes one body per request).
+ *
+ * One file that fails does not stop the rest: it stays in the list with its
+ * reason, and Retry sends only the ones that did not land.
+ */
 function UploadDocumentModal({ projectId, categories, onClose, onDone }) {
   // The sheet a phone gets is the same form, but its first control is a file
   // picker: see the File field below for why that one is built by hand.
@@ -1147,89 +1173,261 @@ function UploadDocumentModal({ projectId, categories, onClose, onDone }) {
   const [title, setTitle] = useState("");
   const [category, setCategory] = useState("handover");
   const [notes, setNotes] = useState("");
-  const [file, setFile] = useState(null);
+  // [{ id, file, status: "queued"|"uploading"|"done"|"failed"|"rejected", error }]
+  const [queue, setQueue] = useState([]);
   const [busy, setBusy] = useState(false);
+  const [dragging, setDragging] = useState(false);
+  const nextId = useRef(0);
+  // Whether anything landed, so closing after a partial failure still refreshes
+  // the list behind the sheet.
+  const uploadedAny = useRef(false);
+
+  const pending = queue.filter((q) => q.status === "queued" || q.status === "failed");
+  const done = queue.filter((q) => q.status === "done").length;
+  const bad = queue.filter((q) => q.status === "rejected" || q.status === "failed");
+
+  function addFiles(list) {
+    const files = [...(list || [])];
+    if (!files.length) return;
+    setQueue((prev) => {
+      // The same file picked twice (a second drop of the same folder) is one
+      // entry, not two uploads of the same document. Name and size, not the
+      // modified time: a file dragged twice can arrive with a different
+      // timestamp, and two different documents of exactly the same name AND
+      // size in one batch is not a real case.
+      const seen = new Set(prev.map((q) => `${q.file.name}:${q.file.size}`));
+      const added = [];
+      for (const file of files) {
+        const key = `${file.name}:${file.size}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        const reason = rejectReason(file);
+        added.push({
+          id: nextId.current++,
+          file,
+          status: reason ? "rejected" : "queued",
+          error: reason,
+        });
+      }
+      return [...prev, ...added];
+    });
+  }
+
+  function removeAt(id) {
+    setQueue((prev) => prev.filter((q) => q.id !== id));
+  }
 
   async function submit() {
-    if (!file) return toast.error("Choose a file first");
+    const todo = queue.filter((q) => q.status === "queued" || q.status === "failed");
+    if (!todo.length) return toast.error("Choose a file first");
     setBusy(true);
-    try {
-      await maintenanceApi.addDocument(projectId, file, {
-        category,
-        // Default the title to the filename: forcing a title on someone
-        // uploading "Handover_Vunisei.pdf" is friction for nothing.
-        title: title.trim() || file.name.replace(/\.[^.]+$/, ""),
-        notes: notes.trim(),
-      });
-      toast.success("Document uploaded");
-      onDone();
-    } catch (e) {
-      toast.error(e.message, { duration: 7000 });
-    } finally {
-      setBusy(false);
+    // The title box names one document; a batch is titled by its file names.
+    const single = todo.length === 1 && queue.length === 1;
+    let failed = 0;
+    for (const item of todo) {
+      setQueue((prev) => prev.map((q) => (q.id === item.id ? { ...q, status: "uploading", error: null } : q)));
+      try {
+        await maintenanceApi.addDocument(projectId, item.file, {
+          category,
+          // Default the title to the filename: forcing a title on someone
+          // uploading "Handover_Vunisei.pdf" is friction for nothing.
+          title: (single && title.trim()) || item.file.name.replace(/\.[^.]+$/, ""),
+          notes: notes.trim(),
+        });
+        uploadedAny.current = true;
+        setQueue((prev) => prev.map((q) => (q.id === item.id ? { ...q, status: "done", error: null } : q)));
+      } catch (e) {
+        failed++;
+        setQueue((prev) => prev.map((q) => (q.id === item.id ? { ...q, status: "failed", error: e.message } : q)));
+      }
     }
+    setBusy(false);
+    const sent = todo.length - failed;
+    if (!failed) {
+      toast.success(sent === 1 ? "Document uploaded" : `${sent} documents uploaded`);
+      onDone();
+      return;
+    }
+    // Something is left to deal with, so the sheet stays open on it.
+    toast.error(
+      sent ? `${sent} uploaded, ${failed} failed — the ones that failed are still listed.` : "Nothing was uploaded.",
+      { duration: 7000 }
+    );
   }
+
+  const STATUS = {
+    queued: { tone: "text-[var(--fg-muted)]", label: (q) => fmtBytes(q.file.size) },
+    uploading: { tone: "text-[var(--info-fg)]", label: () => "Uploading…" },
+    done: { tone: "text-[var(--success-fg)]", label: () => "Uploaded" },
+    failed: { tone: "text-[var(--danger-fg)]", label: (q) => q.error || "Failed" },
+    rejected: { tone: "text-[var(--danger-fg)]", label: (q) => q.error },
+  };
 
   return (
     <Modal open onClose={busy ? () => {} : onClose} width="md">
-      <Modal.Header eyebrow="Site documents" title="Upload a document" icon={Upload} onClose={busy ? undefined : onClose} />
+      <Modal.Header
+        eyebrow="Site documents"
+        title={queue.length > 1 ? "Upload documents" : "Upload a document"}
+        icon={Upload}
+        onClose={busy ? undefined : onClose}
+      />
       <Modal.Body>
         <div className="flex flex-col gap-5">
-          <Field label="File" hint={phone ? null : "PDF, image, Word or Excel. Up to 100 MB."}>
-            {/* A phone never sees the browser's own file control: it is a small
-                grey button with the chosen filename crushed beside it, and it is
-                the FIRST thing in this sheet. Hidden input, and the control is a
-                full-width target that names what has been picked — the same
-                shape as the "Take photo" tile in the inspection sheet. */}
+          <Field
+            label="Files"
+            hint={phone ? null : "PDF, image, Word or Excel. Up to 100 MB each. Pick several, or drop them here."}
+          >
+            {/* Hidden on every device: the browser's own control is a small grey
+                button with the filename crushed beside it, and on a phone it is
+                the first thing in the sheet. The target below says what has been
+                picked and takes a drop. */}
             <input
               ref={fileRef}
               type="file"
+              multiple
               accept=".pdf,.jpg,.jpeg,.png,.webp,.doc,.docx,.xls,.xlsx,application/pdf,image/*"
-              onChange={(e) => setFile(e.target.files?.[0] || null)}
-              className={
-                phone
-                  ? "hidden"
-                  : "block w-full text-[12.5px] text-[var(--fg-secondary)] file:mr-3 file:py-1.5 file:px-3 file:rounded-full file:border file:border-[var(--border-default)] file:bg-[var(--surface)] file:text-[var(--fg-primary)] file:text-[12px] file:font-semibold"
-              }
+              onChange={(e) => {
+                addFiles(e.target.files);
+                // Same file again after removing it from the queue: without this
+                // the input holds the old value and fires no change event.
+                e.target.value = "";
+              }}
+              className="hidden"
             />
-            {phone && (
-              <button
-                type="button"
-                onClick={() => fileRef.current?.click()}
-                className="flex w-full items-center gap-3 rounded-xl border border-dashed border-[var(--border-strong)] bg-[var(--bg-surface)] px-4 py-3 text-left focus-ring active:bg-[var(--surface-pressed)]"
-              >
-                <ObjectTile tone={file ? "navy" : "slate"} size="md">
-                  {file ? <FileText size={16} /> : <Upload size={16} />}
-                </ObjectTile>
-                <span className="min-w-0 flex-1">
-                  <span className="block font-display text-[13px] font-semibold leading-snug text-[var(--fg-primary)] [overflow-wrap:anywhere]">
-                    {file ? file.name : "Choose a file"}
-                  </span>
-                  <span className="mt-0.5 block text-[11.5px] leading-snug text-[var(--fg-muted)]">
-                    {file ? `${fmtBytes(file.size)} · tap to change` : "PDF, image, Word or Excel · up to 100 MB"}
-                  </span>
+            <button
+              type="button"
+              onClick={() => fileRef.current?.click()}
+              onDragOver={(e) => { e.preventDefault(); setDragging(true); }}
+              onDragEnter={(e) => { e.preventDefault(); setDragging(true); }}
+              onDragLeave={() => setDragging(false)}
+              onDrop={(e) => {
+                e.preventDefault();
+                setDragging(false);
+                addFiles(e.dataTransfer?.files);
+              }}
+              className={
+                "flex w-full items-center gap-3 rounded-xl border border-dashed px-4 py-3.5 text-left transition-colors focus-ring active:bg-[var(--surface-pressed)] " +
+                (dragging
+                  ? "border-[var(--brand)] bg-[var(--brand-soft)]"
+                  : "border-[var(--border-strong)] bg-[var(--bg-surface)] hover:border-[var(--border-hover)]")
+              }
+            >
+              <ObjectTile tone={queue.length ? "navy" : "slate"} size="md">
+                {queue.length ? <FileText size={16} /> : <Upload size={16} />}
+              </ObjectTile>
+              <span className="min-w-0 flex-1">
+                <span className="block font-display text-[13px] font-semibold leading-snug text-[var(--fg-primary)]">
+                  {queue.length
+                    ? `${queue.length} file${queue.length === 1 ? "" : "s"} chosen — add more`
+                    : phone
+                      ? "Choose files"
+                      : "Choose files, or drop them here"}
                 </span>
-              </button>
+                <span className="mt-0.5 block text-[11.5px] leading-snug text-[var(--fg-muted)]">
+                  PDF, image, Word or Excel · up to 100 MB each
+                </span>
+              </span>
+            </button>
+
+            {queue.length > 0 && (
+              <ul className="mt-3 flex flex-col divide-y divide-[var(--border-subtle)] rounded-xl border border-[var(--border-default)]">
+                {queue.map((q) => {
+                  const st = STATUS[q.status];
+                  return (
+                    <li key={q.id} className="flex items-center gap-3 px-3 py-2.5">
+                      <span className="shrink-0 text-[var(--fg-muted)]">
+                        {q.status === "done" ? (
+                          <CheckCircle2 size={15} className="text-[var(--success-fg)]" />
+                        ) : q.status === "failed" || q.status === "rejected" ? (
+                          <AlertTriangle size={15} className="text-[var(--danger-fg)]" />
+                        ) : (
+                          <FileText size={15} />
+                        )}
+                      </span>
+                      <span className="min-w-0 flex-1">
+                        <span className="block truncate text-[12.5px] font-medium text-[var(--fg-primary)]">
+                          {q.file.name}
+                        </span>
+                        <span className={`block text-[11.5px] [overflow-wrap:anywhere] ${st.tone}`}>{st.label(q)}</span>
+                      </span>
+                      {q.status !== "uploading" && q.status !== "done" && (
+                        <button
+                          type="button"
+                          onClick={() => removeAt(q.id)}
+                          aria-label={`Remove ${q.file.name}`}
+                          title="Remove"
+                          className="shrink-0 rounded-full p-1.5 text-[var(--fg-muted)] hover:bg-[var(--bg-surface)] hover:text-[var(--fg-primary)] focus-ring pointer-coarse:p-2.5"
+                        >
+                          <X size={14} />
+                        </button>
+                      )}
+                    </li>
+                  );
+                })}
+              </ul>
             )}
           </Field>
-          <Field label="Category">
+          <Field label="Category" hint={pending.length > 1 ? "Applies to every file in this batch." : null}>
             <Select value={category} onChange={(e) => setCategory(e.target.value)}>
               {categories.map((c) => (
                 <option key={c.key} value={c.key}>{c.label}</option>
               ))}
             </Select>
           </Field>
-          <Field label="Title" hint="Defaults to the file name.">
-            <Input value={title} onChange={(e) => setTitle(e.target.value)} placeholder={file ? file.name.replace(/\.[^.]+$/, "") : "Handover pack"} />
-          </Field>
-          <Field label="Notes" hint="Optional — version, who supplied it, what it covers.">
+          {/* A batch is titled by its file names — one title across five
+              documents would name none of them. */}
+          {queue.length <= 1 && (
+            <Field label="Title" hint="Defaults to the file name.">
+              <Input
+                value={title}
+                onChange={(e) => setTitle(e.target.value)}
+                placeholder={queue[0] ? queue[0].file.name.replace(/\.[^.]+$/, "") : "Handover pack"}
+              />
+            </Field>
+          )}
+          <Field
+            label="Notes"
+            hint={
+              pending.length > 1
+                ? "Optional — added to every file in this batch."
+                : "Optional — version, who supplied it, what it covers."
+            }
+          >
             <Textarea rows={2} value={notes} onChange={(e) => setNotes(e.target.value)} />
           </Field>
         </div>
       </Modal.Body>
       <Modal.Footer>
-        <Button variant="secondary" className="max-sm:flex-1" onClick={onClose} disabled={busy}>Cancel</Button>
-        <Button variant="primary" className="max-sm:flex-1" onClick={submit} loading={busy} disabled={!file || busy}>Upload</Button>
+        {(done > 0 || bad.length > 0) && (
+          <span className="mr-auto text-[11.5px] text-[var(--fg-muted)] max-sm:hidden">
+            {done > 0
+              ? `${done} uploaded${bad.length ? ` · ${bad.length} to deal with` : ""}`
+              : `${bad.length} cannot be uploaded`}
+          </span>
+        )}
+        <Button
+          variant="secondary"
+          className="max-sm:flex-1"
+          onClick={() => (uploadedAny.current ? onDone() : onClose())}
+          disabled={busy}
+        >
+          {done > 0 ? "Done" : "Cancel"}
+        </Button>
+        <Button
+          variant="primary"
+          className="max-sm:flex-1"
+          onClick={submit}
+          loading={busy}
+          disabled={!pending.length || busy}
+        >
+          {busy
+            ? `Uploading ${done + 1} of ${done + pending.length}`
+            : queue.some((q) => q.status === "failed")
+              ? `Retry ${pending.length}`
+              : pending.length > 1
+                ? `Upload ${pending.length} files`
+                : "Upload"}
+        </Button>
       </Modal.Footer>
     </Modal>
   );
